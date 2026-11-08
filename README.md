@@ -19,6 +19,7 @@ This project aims to bring **Alien vs Predator (1994) for Atari Jaguar** to mode
 - [Enhancements](#optional-enhancements)
 - [Map Maker](#map-maker)
 - [What is and is not finished](#known-limitations-and-unverified-behavior)
+- [Acknowledgements](#acknowledgements)
 - [Licensing, rights, credits](#copyright-licensing-and-provenance)
 - [Source layout](#repository-layout)
 
@@ -202,6 +203,10 @@ CMakeLists.txt Cross-platform CMake entry point
 ```
 
 The repository excludes historical generated binaries, retail ROMs, runtime caches, personal saves, giant duplicate development logs and hundreds of cumulative documentation snapshots. The 51 documented prototype-derived texture replacements are an explicit exception to the previous no-derived-assets policy. Full historical release bundles are kept separately from the clean source tree. See [upload guide](UPLOAD_TO_GITHUB.md).
+
+## Acknowledgements
+
+**TheGreenThunder** — For helping with several aspects of the project, providing feedback, and playtesting.
 
 ## Copyright, licensing and provenance
 
