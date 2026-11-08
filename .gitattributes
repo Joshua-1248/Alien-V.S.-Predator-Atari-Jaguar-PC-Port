@@ -10,3 +10,6 @@ CMakeLists.txt text eol=lf
 *.sh text eol=lf
 *.py text eol=lf
 *.yml text eol=lf
+
+# AVPTEX1 replacement texture panels are binary data, never text-normalized.
+*.prgb -text

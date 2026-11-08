@@ -5,7 +5,8 @@ This report separates what is **implemented** from what has been **verified**. I
 | Area | Present in code | Validation/limitations |
 |---|---|---|
 | Retail Jaguar single-player: Marine/Alien/Predator | Yes | Original gameplay C path reconstructed; exact visual/audio/CPU hardware parity still under study. |
-| Retail game media | Loaded externally | **Not bundled**; expected retail-world 4 MiB ROM hash required. |
+| Retail game media | Loaded externally | **Retail ROM not bundled**; expected retail-world 4 MiB ROM hash required. |
+| Prototype Texture Restoration pack | 51 .prgb panels included | Pack verified against source mappings and CRC/SHA-256; game runtime needs the ROM and the F12 enhancement enabled; public redistribution rights are not established. |
 | Native Linux/X11 builds | Yes | Strict GCC and Clang regression releases previously built; fresh clone still needs local build and device testing. |
 | Windows host backend | Yes | Earlier cross-build and Wine work documented; current R71 native Windows physical hardware unverified. |
 | Offline local co-op, 1–4 people | Yes | Code and regression tests; not guaranteed glitch-free at every scripted transition. |
@@ -21,7 +22,7 @@ This report separates what is **implemented** from what has been **verified**. I
 | Extended fog/draw/shooting, smooth presentation | Yes | Optional PC features; performance and cross-device behavior depend on host. |
 | Normalize Diagonal Contact Range | Yes (R59) | Opt-in radial harmful-contact check; original behavior remains Off by default. |
 | Extend Enemy Activation Distance | Yes (R71) | Original/2×/3×/4×/Unlimited pursuit cutoff tested; no cross-level AI or range-of-attack change. |
-| Linux/Windows releases in Git history | No | Clean repository is source-only. Build artifacts are intentionally excluded. |
+| Linux/Windows releases in Git history | No | Repository includes source plus the prototype texture pack, but excludes precompiled binaries. |
 | Network/online multiplayer | No | Outside project scope; offline local multiplayer only. |
 
 ## Latest notable changes

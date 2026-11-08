@@ -165,7 +165,7 @@ int main(int argc,char **argv)
         /* Typical source layout: SOURCE/build/avp_pc and
          * SOURCE/prototype_texture_restoration/NN.prgb. */
         {
-            char parent_pack[1024],child_panel[1024];
+            char parent_pack[1024],child_panel[1024],parent_pack_spelling[1024];
             CHECK(snprintf(parent_pack,sizeof(parent_pack),"%s/prototype_texture_restoration",dir)<(int)sizeof(parent_pack),"parent pack");
             CHECK(MAKE_TEST_DIRECTORY(parent_pack)==0,"parent pack directory");
             write_frame(parent_pack,0u,66u,0);
@@ -174,7 +174,12 @@ int main(int argc,char **argv)
             CHECK(avp_pc_prototype_textures_apply_search(&swap,state,NULL,exe_path,
                   "/missing/current_working_directory",1,selected,sizeof(selected))==1u,
                   "source build parent pack fallback");
-            CHECK(strcmp(selected,parent_pack)==0&&one->rgb[0]==66,
+            /* Search returns the literal executable-relative candidate with /..,
+             * not a canonicalized path. Both names resolve to the same pack. */
+            CHECK(snprintf(parent_pack_spelling,sizeof(parent_pack_spelling),
+                  "%s/../prototype_texture_restoration",exe_dir)<
+                  (int)sizeof(parent_pack_spelling),"parent pack spelling");
+            CHECK(strcmp(selected,parent_pack_spelling)==0&&one->rgb[0]==66,
                   "source build parent pack selected incorrectly");
             CHECK(avp_pc_prototype_textures_apply_search(&swap,state,NULL,exe_path,
                   parent_pack,0,selected,sizeof(selected))==0u&&one->rgb[0]==17,

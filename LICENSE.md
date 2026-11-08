@@ -19,7 +19,7 @@ Any additional third-party files retain the notices found in their headers or ac
 
 ## Excluded materials
 
-Retail or prototype ROM images, original commercial graphics/audio, ROM-derived cache data, proprietary historical SDKs, restricted third-party original source/tool binaries and personal local saves/settings are **not included** and are not authorized for redistribution by this notice.
+Retail or prototype ROM images, commercial audio, ROM-derived runtime caches, proprietary historical SDKs, restricted third-party original source/tool binaries and personal local saves/settings are **not included**. **Documented exception:** the 51 files in `prototype_texture_restoration/*.prgb` contain converted original prototype-era game texture artwork. Their metadata are documented in `prototype_texture_restoration/PROVENANCE.json`. They are **not** covered by an open-source license merely because they are stored in `.prgb` format or appear in this repository. This notice neither grants permission to redistribute them nor establishes that distribution is legally permitted.
 
 ## No warranty; no endorsement
 

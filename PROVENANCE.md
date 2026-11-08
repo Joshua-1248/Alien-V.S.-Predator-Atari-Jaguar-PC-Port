@@ -13,7 +13,9 @@ A C function should express the established runtime semantics, not mimic registe
 
 ## Distribution rule
 
-No retail assets, ROMs, exact retail binary function slices, or proprietary third-party historical source files are included.
+No retail/prototype ROM images, exact retail binary function slices, or proprietary third-party historical source files are included. **Exception for optional PC presentation:** `prototype_texture_restoration/` contains 51 converted RGB panels taken from prototype-era *Alien vs Predator* artwork, recorded by source tier, member filename and checksum in `prototype_texture_restoration/PROVENANCE.json`. These are not independent original artwork and remain subject to the underlying rights. The format conversion, checksums, and this documentation do not establish permission for public redistribution.
+
+The runtime still requires an external, user-supplied compatible 4 MiB retail ROM for retail game assets.
 
 ## M2.0 presentation backport
 

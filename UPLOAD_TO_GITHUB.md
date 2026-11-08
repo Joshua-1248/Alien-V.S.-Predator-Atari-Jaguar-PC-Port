@@ -46,11 +46,11 @@ git commit -m "Describe the verified fix"
 git push
 ```
 
-Do not commit private ROMs, ROM-derived caches, proprietary SDK/source files, packaged game binaries, local saves, or credentials. For externally distributable binaries, evaluate the licensing and distribution policy separately from the source push. GitHub Actions may run on push; a passing automated workflow does not mean 100% game completeness.
+Do not commit retail ROMs, runtime caches, proprietary SDK/source files, packaged game binaries, local saves, or credentials. The optional 51-panel prototype restoration pack in this update is a documented exception; review its artwork rights before public distribution. For externally distributable binaries, evaluate the licensing and distribution policy separately from the source push. GitHub Actions may run on push; a passing automated workflow does not mean 100% game completeness.
 
 ## Rights review before making a public push
 
 - Read `README.md`, `LICENSE.md`, `PROVENANCE.md`, `CREDITS.md`, `THIRD_PARTY_NOTICES.md`.
 - Confirm you are comfortable publishing the reconstructed source and understand that an empty or restrictive project license does **not** automatically grant rights in original copyrighted game code.
-- Musashi MIT and SoftFloat's own notices are retained. No game ROM/asset files are intentionally included.
+- Musashi MIT and SoftFloat's own notices are retained. No retail ROM is included. The 51 prototype-derived `.prgb` texture panels are included for the optional enhancement; file conversion does not grant distribution rights.
 - If you need a legal determination of whether a particular decompiled game-code portion can be redistributed, get qualified advice or permission from the relevant rights holders.

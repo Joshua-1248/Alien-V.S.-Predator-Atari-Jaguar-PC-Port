@@ -6,7 +6,7 @@ This project aims to bring **Alien vs Predator (1994) for Atari Jaguar** to mode
 
 **Important status warning:** This is an active development project, **not a declared 100%-complete or bug-free port**. Many features have passed automated regression tests; others require hands-on verification against original Jaguar hardware or a retail ROM. “Implemented” below means present in the current source—not necessarily exhaustively tested in every scenario. See [Feature and verification status](docs/FEATURE_STATUS.md) and [Known limitations](#known-limitations-and-unverified-behavior).
 
-**The game ROM and commercial game assets are not provided.** To play the retail game, supply your own compatible copy of the original Atari Jaguar cartridge ROM. This project is not affiliated with or endorsed by Atari, Rebellion, the game's other rights holders, or any platform manufacturer.
+**The original retail game ROM is not included.** To play the retail game, supply your own compatible copy of the original Atari Jaguar cartridge ROM. This repository additionally includes an optional pack of 51 converted prototype texture panels under `prototype_texture_restoration/`; see [Prototype texture restoration](#prototype-texture-restoration). These converted images are derived from game artwork, and their inclusion does not constitute permission to redistribute the original artwork. This project is not affiliated with or endorsed by Atari, Rebellion, the game's other rights holders, or any platform manufacturer.
 
 ## Quick links
 
@@ -30,7 +30,7 @@ This project aims to bring **Alien vs Predator (1994) for Atari Jaguar** to mode
 
   `b31ca5c2415881ce50d0c076d327297547214a6240f0058b0f225a74f7ce440b`
 
-The retail port validates the ROM hash at launch. Alpha and beta ROMs are **not** interchangeable with the expected retail data. No Jaguar BIOS, boot ROM or `jagwave.rom` is needed for the normal native PC path. Resource data is decoded from the supplied retail ROM, and the port may generate **local** caches, settings and save files. **Do not commit or redistribute ROMs, extracted ROM content, or generated caches.**
+The retail port validates the ROM hash at launch. Alpha and beta ROMs are **not** interchangeable with the expected retail data. No Jaguar BIOS, boot ROM or `jagwave.rom` is needed for the normal native PC path. Resource data is decoded from the supplied retail ROM, and the port may generate **local** caches, settings and save files. **Do not commit retail ROMs or generated caches.** The optional prototype-derived texture pack is identified separately below; no retail ROM is supplied.
 
 You can verify your ROM on Linux:
 
@@ -153,6 +153,17 @@ Available settings vary by build and context. Examples in R71 include:
 
 Some options are subject to multiplayer-specific conditions; each setting's original-versus-enhanced distinction matters when comparing with Jaguar hardware.
 
+## Prototype texture restoration
+
+The optional **Prototype Texture Restoration** enhancement is implemented and this repository update includes its **51 validated replacement texture panels** (`.prgb`) in `prototype_texture_restoration/`.
+
+1. Compile and run the PC port normally with your own compatible retail Jaguar ROM.
+2. In **F12 → Enhancements**, enable **Prototype Texture Restoration**.
+3. The existing loader automatically searches for the `prototype_texture_restoration/` folder beside the executable, one directory above it, or in the current working directory. A CMake build in `build-gcc/` or `build-clang/` finds the pack at the repository root; the usual `LINUX/` executable layout finds it one directory above as well.
+4. The enhancement should report that replacements have been applied. If it reports **0 panels**, check the folder placement and use `python3 tools/verify_prototype_texture_pack.py prototype_texture_restoration` from the repository root.
+
+These are **128×128 RGB panels in the AVPTEX1 `.prgb` container**, not PNG files. The texture data remains derived from prototype-era game artwork; conversion does not create a new license for the artwork. See `prototype_texture_restoration/PROVENANCE.json` for the per-panel source IDs and checksums, plus [Licensing](LICENSE.md) and [Provenance](PROVENANCE.md). **No retail ROM is included**, and the texture enhancement does not replace the retail-ROM requirement.
+
 ## Map Maker
 
 F12 → **Map Maker** opens the PC 2D/3D map editor. Implemented features include original-Jaguar texture browsing, floor/ceiling/wall painting, placement and selection of mapped objects, wall editing, camera navigation, multi-selection, undo/redo, save/load of custom map drafts, and Play Test. Object sprite previews are available for verified ROM asset mappings; unknown definitions remain markers. See [`new/map_maker/README.md`](new/map_maker/README.md) and the release-specific notes in [`docs/re33/`](docs/re33/).
@@ -170,7 +181,7 @@ The most important distinction is **source implementation versus retail-ROM game
 5. **Map Maker:** Scripted door relocation, all object previews, arbitrary scripted behaviors and every editor interaction are not fully supported.
 6. **Windows:** The current R71 state is primarily built and tested on Linux. Historical Windows builds do not replace current native Windows hardware verification.
 7. **Audio/display hardware:** Monitor refresh, driver, controller, speaker configuration and fullscreen behavior can vary; some observations from one system may not generalize.
-8. **Asset policy:** The application needs the exact compatible retail ROM for retail gameplay. This repository is source-only and ships no proprietary game media.
+8. **Asset policy:** A compatible retail ROM is still required and is not included. The repository now also carries 51 converted prototype-art texture panels solely for the optional restoration enhancement; their copyright status and redistribution rights remain separate from the software source.
 
 For a focused list of validated versus unverified functionality, see [`docs/FEATURE_STATUS.md`](docs/FEATURE_STATUS.md). Report issues with game mode, selected character, level, reproduction steps, enhancements enabled, and—when relevant—Global Positioning coordinates. Do **not** attach a copyrighted game ROM to a public issue.
 
@@ -185,11 +196,12 @@ tests/         Source-level and regression tests
 cmake/         Build/toolchain and linker scripts
 tools/         Validation, build and Jaguar reference/research tools
 docs/          Technical notes, feature status, current release history
-.github/       CI build workflow (a CI build is not a quality guarantee)
+prototype_texture_restoration/  51 optional AVPTEX1 .prgb texture panels + provenance
+.github/       CI workflow source (not necessarily present in the GitHub default branch)
 CMakeLists.txt Cross-platform CMake entry point
 ```
 
-The source repository deliberately excludes historical generated binaries, ROMs, derived assets, caches, personal saves, giant duplicate development logs and hundreds of cumulative documentation snapshots. Full historical release bundles are kept separately from the clean source tree. See [upload guide](UPLOAD_TO_GITHUB.md).
+The repository excludes historical generated binaries, retail ROMs, runtime caches, personal saves, giant duplicate development logs and hundreds of cumulative documentation snapshots. The 51 documented prototype-derived texture replacements are an explicit exception to the previous no-derived-assets policy. Full historical release bundles are kept separately from the clean source tree. See [upload guide](UPLOAD_TO_GITHUB.md).
 
 ## Copyright, licensing and provenance
 
@@ -198,12 +210,12 @@ The source repository deliberately excludes historical generated binaries, ROMs,
 - *Alien vs Predator*, Atari Jaguar branding, original game code/design, names, artwork, sounds and related property belong to their respective rights holders. The reverse-engineered/reconstructed portions do **not** automatically become public domain or permissively licensed by being published on GitHub.
 - **No project-wide MIT/GPL/Apache license is granted here.** The notice is intentionally conservative; independently authored components may require separate rights analysis or explicit licensing before reuse. Public availability of source code is not itself a license to copy or redistribute it.
 - **Musashi** (in `third_party/musashi/`) retains its MIT terms and copyright notice. **SoftFloat** retains John R. Hauser's own terms and required attribution. Do not delete those notices.
-- Historical proprietary source/tool binaries and game ROM-derived media must not be uploaded. The README's descriptions are *not* legal opinions about the status of the game's reverse-engineered code. The maintainer is responsible for reviewing publication rights and responding to rights-holder concerns.
+- Historical proprietary source/tool binaries and retail ROMs must not be uploaded. The included 51 prototype-derived texture panels are a documented exception for this enhancement; **permission to redistribute them is not established by this repository**, and rights holders may object to their publication. The README's descriptions are *not* legal opinions about the status of the game's reverse-engineered code. The maintainer is responsible for reviewing publication rights and responding to rights-holder concerns.
 
 The aim is preservation, study and faithful local play; **not** a claim to own the original intellectual property or to replace a legitimately obtained game cartridge.
 
 ## Contributions and maintenance
 
-Bug reports and reproducible test cases are welcome. If submitting a change, keep verified working paths intact, identify the original Jaguar behavior being matched, avoid altering `src/game/` unless necessary and explicitly justified, and run the appropriate tests with GCC and Clang when possible. Keep proprietary assets and credentials out of commits and pull requests. This project does not promise rapid issue resolution or feature completion.
+Bug reports and reproducible test cases are welcome. If submitting a change, keep verified working paths intact, identify the original Jaguar behavior being matched, avoid altering `src/game/` unless necessary and explicitly justified, and run the appropriate tests with GCC and Clang when possible. Do not add additional proprietary assets or credentials to commits and pull requests. Any new asset requires a separate rights and provenance review. This project does not promise rapid issue resolution or feature completion.
 
 **Latest prepared source baseline: R71.** See [`docs/RE33_R71_RELEASE_NOTES.md`](docs/RE33_R71_RELEASE_NOTES.md) for the latest addition and [`docs/re33/`](docs/re33/) for recent component-level notes.
