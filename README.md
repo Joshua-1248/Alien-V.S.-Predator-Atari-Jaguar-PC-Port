@@ -219,8 +219,4 @@ The repository excludes historical generated binaries, retail ROMs, runtime cach
 
 The aim is preservation, study and faithful local play; **not** a claim to own the original intellectual property or to replace a legitimately obtained game cartridge.
 
-## Contributions and maintenance
-
-Bug reports and reproducible test cases are welcome. If submitting a change, keep verified working paths intact, identify the original Jaguar behavior being matched, avoid altering `src/game/` unless necessary and explicitly justified, and run the appropriate tests with GCC and Clang when possible. Do not add additional proprietary assets or credentials to commits and pull requests. Any new asset requires a separate rights and provenance review. This project does not promise rapid issue resolution or feature completion.
-
 **Latest prepared source baseline: R71.** See [`docs/RE33_R71_RELEASE_NOTES.md`](docs/RE33_R71_RELEASE_NOTES.md) for the latest addition and [`docs/re33/`](docs/re33/) for recent component-level notes.
