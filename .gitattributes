@@ -1,0 +1,12 @@
+# Source and docs use LF consistently on both Linux and Windows.
+* text=auto
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf

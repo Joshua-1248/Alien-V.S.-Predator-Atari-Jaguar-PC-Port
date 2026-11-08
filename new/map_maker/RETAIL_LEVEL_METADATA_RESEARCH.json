@@ -1,0 +1,848 @@
+{
+  "_provenance": "Transcribed from unmodified src/game/door_retail_meta.c, reconstructed MAZE/LEVDOOR.S. Record byte offsets are offsets into source maze array and are not free-form x/y locations.",
+  "_warning": "Research reference only; loading this JSON into the running game is NOT implemented in R16. Other metadata such as AMP placements, panels, start positions, triggers remain separate.",
+  "levels": [
+    {
+      "level": 1,
+      "name": "Sublevel 1",
+      "retail_FILES_DAT_index": 87,
+      "access": [
+        {
+          "maze_byte_offset": 1175,
+          "access": "AVP_ACC_EXIT"
+        },
+        {
+          "maze_byte_offset": 1231,
+          "access": "AVP_ACC_UNUSED"
+        },
+        {
+          "maze_byte_offset": 26287,
+          "access": "AVP_ACC_UNUSED"
+        },
+        {
+          "maze_byte_offset": 5807,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 5815,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 15639,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 22191,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 22199,
+          "access": 6
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 2064,
+          "destination_x": 3,
+          "destination_y": 4,
+          "destination_level": 6
+        },
+        {
+          "maze_byte_offset": 6465,
+          "destination_x": 17,
+          "destination_y": 4,
+          "destination_level": 6
+        },
+        {
+          "maze_byte_offset": 19266,
+          "destination_x": 17,
+          "destination_y": 20,
+          "destination_level": 6
+        },
+        {
+          "maze_byte_offset": 23056,
+          "destination_x": 3,
+          "destination_y": 18,
+          "destination_level": 7
+        },
+        {
+          "maze_byte_offset": 1169,
+          "destination_x": 22,
+          "destination_y": 27,
+          "destination_level": 15
+        }
+      ],
+      "interlocks": [
+        {
+          "maze_byte_offset": 1175,
+          "required_offsets": [
+            3223
+          ]
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "name": "Sublevel 2",
+      "retail_FILES_DAT_index": 88,
+      "access": [
+        {
+          "maze_byte_offset": 10415,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 6262,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 6398,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 4271,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 2735,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 6238,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 15454,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 11927,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 11983,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 19663,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 19607,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 21167,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 23806,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 15646,
+          "access": 4
+        },
+        {
+          "maze_byte_offset": 6430,
+          "access": 4
+        },
+        {
+          "maze_byte_offset": 9510,
+          "access": 5
+        },
+        {
+          "maze_byte_offset": 11086,
+          "access": 5
+        },
+        {
+          "maze_byte_offset": 12622,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 12582,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 18198,
+          "access": "AVP_ACC_JAMMED"
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 2640,
+          "destination_x": 3,
+          "destination_y": 4,
+          "destination_level": 7
+        },
+        {
+          "maze_byte_offset": 2834,
+          "destination_x": 18,
+          "destination_y": 4,
+          "destination_level": 8
+        },
+        {
+          "maze_byte_offset": 20257,
+          "destination_x": 16,
+          "destination_y": 17,
+          "destination_level": 8
+        },
+        {
+          "maze_byte_offset": 23147,
+          "destination_x": 6,
+          "destination_y": 16,
+          "destination_level": 8
+        },
+        {
+          "maze_byte_offset": 21266,
+          "destination_x": 15,
+          "destination_y": 18,
+          "destination_level": 7
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 3,
+      "name": "Sublevel 3",
+      "retail_FILES_DAT_index": 89,
+      "access": [
+        {
+          "maze_byte_offset": 26295,
+          "access": "AVP_ACC_UNUSED"
+        },
+        {
+          "maze_byte_offset": 13999,
+          "access": 1
+        },
+        {
+          "maze_byte_offset": 14023,
+          "access": 1
+        },
+        {
+          "maze_byte_offset": 4246,
+          "access": 2
+        },
+        {
+          "maze_byte_offset": 4294,
+          "access": 2
+        },
+        {
+          "maze_byte_offset": 21687,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 20094,
+          "access": "AVP_ACC_JAMMED"
+        },
+        {
+          "maze_byte_offset": 21127,
+          "access": "AVP_ACC_JAMMED"
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 1746,
+          "destination_x": 8,
+          "destination_y": 4,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 3609,
+          "destination_x": 4,
+          "destination_y": 3,
+          "destination_level": 8
+        },
+        {
+          "maze_byte_offset": 15506,
+          "destination_x": 9,
+          "destination_y": 5,
+          "destination_level": 9
+        },
+        {
+          "maze_byte_offset": 17947,
+          "destination_x": 4,
+          "destination_y": 21,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 21034,
+          "destination_x": 4,
+          "destination_y": 20,
+          "destination_level": 8
+        },
+        {
+          "maze_byte_offset": 22640,
+          "destination_x": 9,
+          "destination_y": 21,
+          "destination_level": 9
+        },
+        {
+          "maze_byte_offset": 23306,
+          "destination_x": 16,
+          "destination_y": 20,
+          "destination_level": 8
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 4,
+      "name": "Sublevel 4",
+      "retail_FILES_DAT_index": 90,
+      "access": [
+        {
+          "maze_byte_offset": 11070,
+          "access": 4
+        },
+        {
+          "maze_byte_offset": 10055,
+          "access": 5
+        },
+        {
+          "maze_byte_offset": 10079,
+          "access": 5
+        },
+        {
+          "maze_byte_offset": 12639,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 12615,
+          "access": 9
+        },
+        {
+          "maze_byte_offset": 9503,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 13087,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 10998,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 2239,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 2295,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 2359,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 2407,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 3998,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 7582,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 11166,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 18846,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 22375,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 22303,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 3750,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 10894,
+          "access": 3
+        },
+        {
+          "maze_byte_offset": 3726,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 14382,
+          "access": 7
+        },
+        {
+          "maze_byte_offset": 17950,
+          "access": "AVP_ACC_JAMMED"
+        },
+        {
+          "maze_byte_offset": 20510,
+          "access": "AVP_ACC_JAMMED"
+        },
+        {
+          "maze_byte_offset": 22087,
+          "access": "AVP_ACC_JAMMED"
+        },
+        {
+          "maze_byte_offset": 14982,
+          "access": "AVP_ACC_JAMMED"
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 2576,
+          "destination_x": 5,
+          "destination_y": 7,
+          "destination_level": 11
+        },
+        {
+          "maze_byte_offset": 4355,
+          "destination_x": 11,
+          "destination_y": 5,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 4450,
+          "destination_x": 14,
+          "destination_y": 7,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 11040,
+          "destination_x": 14,
+          "destination_y": 14,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 13011,
+          "destination_x": 7,
+          "destination_y": 4,
+          "destination_level": 12
+        },
+        {
+          "maze_byte_offset": 16691,
+          "destination_x": 16,
+          "destination_y": 16,
+          "destination_level": 11
+        },
+        {
+          "maze_byte_offset": 16977,
+          "destination_x": 5,
+          "destination_y": 18,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 17801,
+          "destination_x": 10,
+          "destination_y": 19,
+          "destination_level": 12
+        },
+        {
+          "maze_byte_offset": 20259,
+          "destination_x": 15,
+          "destination_y": 23,
+          "destination_level": 10
+        },
+        {
+          "maze_byte_offset": 20619,
+          "destination_x": 6,
+          "destination_y": 17,
+          "destination_level": 12
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 5,
+      "name": "Sublevel 5",
+      "retail_FILES_DAT_index": 91,
+      "access": [
+        {
+          "maze_byte_offset": 1175,
+          "access": "AVP_ACC_UNUSED"
+        },
+        {
+          "maze_byte_offset": 1231,
+          "access": "AVP_ACC_EXIT"
+        },
+        {
+          "maze_byte_offset": 24255,
+          "access": "AVP_ACC_JAMMED"
+        },
+        {
+          "maze_byte_offset": 26287,
+          "access": "AVP_ACC_ESCAPE"
+        },
+        {
+          "maze_byte_offset": 5807,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 5815,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 22191,
+          "access": 6
+        },
+        {
+          "maze_byte_offset": 22199,
+          "access": 6
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 2064,
+          "destination_x": 4,
+          "destination_y": 4,
+          "destination_level": 13
+        },
+        {
+          "maze_byte_offset": 6465,
+          "destination_x": 15,
+          "destination_y": 7,
+          "destination_level": 13
+        },
+        {
+          "maze_byte_offset": 19266,
+          "destination_x": 18,
+          "destination_y": 14,
+          "destination_level": 12
+        },
+        {
+          "maze_byte_offset": 23056,
+          "destination_x": 8,
+          "destination_y": 19,
+          "destination_level": 13
+        },
+        {
+          "maze_byte_offset": 1225,
+          "destination_x": 24,
+          "destination_y": 21,
+          "destination_level": 14
+        }
+      ],
+      "interlocks": [
+        {
+          "maze_byte_offset": 1231,
+          "required_offsets": [
+            3279
+          ]
+        }
+      ]
+    },
+    {
+      "level": 6,
+      "name": "Airduct 1B",
+      "retail_FILES_DAT_index": 92,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2074,
+          "destination_x": 2,
+          "destination_y": 4,
+          "destination_level": 1
+        },
+        {
+          "maze_byte_offset": 2184,
+          "destination_x": 40,
+          "destination_y": 12,
+          "destination_level": 1
+        },
+        {
+          "maze_byte_offset": 10376,
+          "destination_x": 40,
+          "destination_y": 37,
+          "destination_level": 1
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 7,
+      "name": "Airduct 2B",
+      "retail_FILES_DAT_index": 93,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2074,
+          "destination_x": 10,
+          "destination_y": 5,
+          "destination_level": 2
+        },
+        {
+          "maze_byte_offset": 9242,
+          "destination_x": 2,
+          "destination_y": 45,
+          "destination_level": 1
+        },
+        {
+          "maze_byte_offset": 9336,
+          "destination_x": 34,
+          "destination_y": 41,
+          "destination_level": 2
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 8,
+      "name": "Airduct 3B",
+      "retail_FILES_DAT_index": 94,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 1571,
+          "destination_x": 3,
+          "destination_y": 7,
+          "destination_level": 3
+        },
+        {
+          "maze_byte_offset": 2192,
+          "destination_x": 34,
+          "destination_y": 5,
+          "destination_level": 2
+        },
+        {
+          "maze_byte_offset": 8241,
+          "destination_x": 13,
+          "destination_y": 45,
+          "destination_level": 2
+        },
+        {
+          "maze_byte_offset": 8835,
+          "destination_x": 36,
+          "destination_y": 39,
+          "destination_level": 2
+        },
+        {
+          "maze_byte_offset": 10272,
+          "destination_x": 5,
+          "destination_y": 41,
+          "destination_level": 3
+        },
+        {
+          "maze_byte_offset": 10368,
+          "destination_x": 33,
+          "destination_y": 45,
+          "destination_level": 3
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 9,
+      "name": "Airduct 3C",
+      "retail_FILES_DAT_index": 95,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2632,
+          "destination_x": 18,
+          "destination_y": 30,
+          "destination_level": 3
+        },
+        {
+          "maze_byte_offset": 10826,
+          "destination_x": 14,
+          "destination_y": 44,
+          "destination_level": 3
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 10,
+      "name": "Airduct 4B",
+      "retail_FILES_DAT_index": 96,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2112,
+          "destination_x": 26,
+          "destination_y": 3,
+          "destination_level": 3
+        },
+        {
+          "maze_byte_offset": 2649,
+          "destination_x": 32,
+          "destination_y": 8,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 3696,
+          "destination_x": 44,
+          "destination_y": 8,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 7282,
+          "destination_x": 36,
+          "destination_y": 21,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 9259,
+          "destination_x": 10,
+          "destination_y": 33,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 10785,
+          "destination_x": 3,
+          "destination_y": 35,
+          "destination_level": 3
+        },
+        {
+          "maze_byte_offset": 11897,
+          "destination_x": 36,
+          "destination_y": 39,
+          "destination_level": 4
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 11,
+      "name": "Airduct 4C",
+      "retail_FILES_DAT_index": 97,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 3626,
+          "destination_x": 2,
+          "destination_y": 5,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 8321,
+          "destination_x": 38,
+          "destination_y": 32,
+          "destination_level": 4
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 12,
+      "name": "Airduct 5B",
+      "retail_FILES_DAT_index": 98,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2105,
+          "destination_x": 26,
+          "destination_y": 25,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 7312,
+          "destination_x": 40,
+          "destination_y": 37,
+          "destination_level": 5
+        },
+        {
+          "maze_byte_offset": 8753,
+          "destination_x": 17,
+          "destination_y": 40,
+          "destination_level": 4
+        },
+        {
+          "maze_byte_offset": 9811,
+          "destination_x": 49,
+          "destination_y": 34,
+          "destination_level": 4
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 13,
+      "name": "Airduct 5C",
+      "retail_FILES_DAT_index": 99,
+      "access": [],
+      "exits": [
+        {
+          "maze_byte_offset": 2082,
+          "destination_x": 2,
+          "destination_y": 4,
+          "destination_level": 5
+        },
+        {
+          "maze_byte_offset": 3707,
+          "destination_x": 40,
+          "destination_y": 12,
+          "destination_level": 5
+        },
+        {
+          "maze_byte_offset": 9794,
+          "destination_x": 2,
+          "destination_y": 45,
+          "destination_level": 5
+        }
+      ],
+      "interlocks": []
+    },
+    {
+      "level": 14,
+      "name": "Alien Ship",
+      "retail_FILES_DAT_index": 100,
+      "access": [
+        {
+          "maze_byte_offset": 12999,
+          "access": "AVP_ACC_EXIT"
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 12483,
+          "destination_x": 25,
+          "destination_y": 5,
+          "destination_level": 5
+        }
+      ],
+      "interlocks": [
+        {
+          "maze_byte_offset": 12999,
+          "required_offsets": [
+            10951
+          ]
+        }
+      ]
+    },
+    {
+      "level": 15,
+      "name": "Predator Ship",
+      "retail_FILES_DAT_index": 101,
+      "access": [
+        {
+          "maze_byte_offset": 16055,
+          "access": "AVP_ACC_EXIT"
+        }
+      ],
+      "exits": [
+        {
+          "maze_byte_offset": 15539,
+          "destination_x": 18,
+          "destination_y": 5,
+          "destination_level": 1
+        }
+      ],
+      "interlocks": [
+        {
+          "maze_byte_offset": 16055,
+          "required_offsets": [
+            14007
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1979 @@
+{
+  "schema_version": 1,
+  "feature": "Prototype Texture Restoration",
+  "source_priority": [
+    "Oct 1993.7z",
+    "1993-08-18.7z",
+    "1994-04-08.7z",
+    "Final Retail.7z"
+  ],
+  "matcher": "normalized whole-panel grayscale cross-correlation (alignment 128x128); candidate accepted >=0.95 with no ambiguous runner-up; manually reviewed October floor2 accepted at >=0.90; does not prove source is uncompressed or higher quality",
+  "file_count": {
+    "oct": 7,
+    "aug": 47,
+    "apr": 63,
+    "retail": 56
+  },
+  "archive_sha256": {
+    "Oct 1993.7z": "470deff5a9adef71e59da2146cb4a977bb02bfa9e2136ac0e8313155f66d816b",
+    "1993-08-18.7z": "6d3a35f55a9a4be91f4a2dfda4b96b1e16a44e7c230f5a1357a8b7029701615d",
+    "1994-04-08.7z": "f0fd69dd63fd937fd863cfaf6e583d3fce355d23fbea8c9ba87ba01bd114760c",
+    "Final Retail.7z": "616e1cea06c7a9f084fe5607c936c52b2f11fc4f42c4e87d0b286f2f1ea5cbaf"
+  },
+  "texture_slots": [
+    {
+      "retail_file_id": 0,
+      "retail_name": "00_bulk1.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_04_ROM_0469D0_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.973526,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_07_038000.png",
+          "score": 0.5718,
+          "runner_up_margin": 0.185651,
+          "best_match_unique": true,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_04_ROM_0469D0_R19_INTERLEAVED_RGB.png",
+          "score": 0.973526,
+          "runner_up_margin": 0.624327,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_00_ROM_11B630_R19_INTERLEAVED_RGB.png",
+          "score": 0.973526,
+          "runner_up_margin": 0.624327,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "32703181cfcd6c62e78e7f77664995aa04d4c865e69bb20f875f2dc41a7b101f",
+      "source_rgb_sha256": "e944ee503dada165ce007201583a4910920ed84cde6cf8cbf76860f004f44ba0",
+      "source_rgb_crc32": "2baad8fb"
+    },
+    {
+      "retail_file_id": 1,
+      "retail_name": "01_bulk2.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_07_ROM_049F74_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.988948,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.211079,
+          "runner_up_margin": 0.091894,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_07_ROM_049F74_R19_INTERLEAVED_RGB.png",
+          "score": 0.988948,
+          "runner_up_margin": 0.688994,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_01_ROM_11D564_R19_INTERLEAVED_RGB.png",
+          "score": 0.988948,
+          "runner_up_margin": 0.688994,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "31c60a755202b83d73bf7d407412117477292cf72b596152fab1f1409905f8a6",
+      "source_rgb_sha256": "62fbbe62f32d7a0a81751ecba34a5796ef864f6b15030235097e01859964f960",
+      "source_rgb_crc32": "0c2ce08b"
+    },
+    {
+      "retail_file_id": 2,
+      "retail_name": "02_ceil2.png",
+      "priority": "oct",
+      "selected_archive": "Oct 1993.7z",
+      "selected_member": "environment_page_04_020000.png",
+      "match_correlation": 0.994169,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.994169,
+          "runner_up_margin": 0.940772,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "aug": {
+          "member": "JP90_09_ROM_04D918_R19_INTERLEAVED_RGB.png",
+          "score": 0.996402,
+          "runner_up_margin": 0.247549,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_02_ROM_11F03C_R19_INTERLEAVED_RGB.png",
+          "score": 0.996402,
+          "runner_up_margin": 0.247549,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "a2ffc053918315573fcd04eac281a29517bb3652235e96745420670499d54663",
+      "source_rgb_sha256": "f0d37a8a596ae37175229bb0374dfc1946b4b95fd7cb8568ce4c502d47392982",
+      "source_rgb_crc32": "7fac007d"
+    },
+    {
+      "retail_file_id": 3,
+      "retail_name": "03_comp2.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_03_ROM_120524_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.995812,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.362113,
+          "runner_up_margin": 0.022641,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_05_ROM_048904_R19_INTERLEAVED_RGB.png",
+          "score": 0.315383,
+          "runner_up_margin": 0.003641,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_03_ROM_120524_R19_INTERLEAVED_RGB.png",
+          "score": 0.995812,
+          "runner_up_margin": 0.663506,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7cd79db6acd53c51ce64bcd98a772680c8efaf4e0821ac046141d3f4c944790f",
+      "source_rgb_sha256": "8a4a0d337ba897067935d7a080b701cce1a9a66bb883586983fdfc976aaec8fc",
+      "source_rgb_crc32": "1944678a"
+    },
+    {
+      "retail_file_id": 4,
+      "retail_name": "04_floor2.png",
+      "priority": "oct",
+      "selected_archive": "Oct 1993.7z",
+      "selected_member": "environment_page_03_018000.png",
+      "match_correlation": 0.907951,
+      "confidence": "reviewed visual floor panel",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_03_018000.png",
+          "score": 0.907951,
+          "runner_up_margin": 0.894941,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "aug": {
+          "member": "JP90_21_ROM_059964_R19_INTERLEAVED_RGB.png",
+          "score": 0.931434,
+          "runner_up_margin": 0.516821,
+          "best_match_unique": true,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_04_ROM_122248_R19_INTERLEAVED_RGB.png",
+          "score": 0.931434,
+          "runner_up_margin": 0.516821,
+          "best_match_unique": true,
+          "status": "unverified"
+        }
+      },
+      "source_png_sha256": "aab53dbc900498605d78de5479e8e29c19148742aaf7b65f04b2fa8f5d8f8092",
+      "source_rgb_sha256": "992698d7d187c2410efc8560ac5c51e55808ad4dd2ca86af6c5a130baa41a273",
+      "source_rgb_crc32": "78ca7a30"
+    },
+    {
+      "retail_file_id": 5,
+      "retail_name": "05_liftbak.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_22_ROM_05A9AC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997553,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.42474,
+          "runner_up_margin": 0.037232,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_22_ROM_05A9AC_R19_INTERLEAVED_RGB.png",
+          "score": 0.997553,
+          "runner_up_margin": 0.607012,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_05_ROM_123290_R19_INTERLEAVED_RGB.png",
+          "score": 0.997553,
+          "runner_up_margin": 0.593983,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "e27cc50cfd0f8c391c42fe43e3c53ca7485936d353235828823769ad1b806286",
+      "source_rgb_sha256": "02a6ab491dcde2148e3b036a52ff74fa79ef868551503a9fba0eb962837b90b8",
+      "source_rgb_crc32": "61607fa4"
+    },
+    {
+      "retail_file_id": 6,
+      "retail_name": "06_liftdor.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_23_ROM_05C4D4_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.993367,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.364018,
+          "runner_up_margin": 0.047627,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_23_ROM_05C4D4_R19_INTERLEAVED_RGB.png",
+          "score": 0.993367,
+          "runner_up_margin": 0.622031,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_06_ROM_124DB8_R19_INTERLEAVED_RGB.png",
+          "score": 0.993367,
+          "runner_up_margin": 0.622031,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "f86e5fb45309c30e3d0f56d8c1632647571cbbc1a4be3c3e923c573a45141521",
+      "source_rgb_sha256": "c1ab77e25573ae820ec9d651ebf04a0f8537d4813b32c90b28179be1917e0b7d",
+      "source_rgb_crc32": "07935075"
+    },
+    {
+      "retail_file_id": 7,
+      "retail_name": "07_liftflor.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_45_ROM_07D4DC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997286,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.491807,
+          "runner_up_margin": 0.199888,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_45_ROM_07D4DC_R19_INTERLEAVED_RGB.png",
+          "score": 0.997286,
+          "runner_up_margin": 0.257712,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_07_ROM_126AF4_R19_INTERLEAVED_RGB.png",
+          "score": 0.997286,
+          "runner_up_margin": 0.155296,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "a50960e5baea8f0a952cc1de05bd32d50b7d42c05254862126fbd27806d82cc8",
+      "source_rgb_sha256": "a59a7a6bfc06bc47219149d7823c2b17f976c054f1a00410900031dfad0f7430",
+      "source_rgb_crc32": "a5823519"
+    },
+    {
+      "retail_file_id": 8,
+      "retail_name": "08_liftop.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_44_ROM_07B974_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.995759,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.104799,
+          "runner_up_margin": 0.043269,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_44_ROM_07B974_R19_INTERLEAVED_RGB.png",
+          "score": 0.995759,
+          "runner_up_margin": 0.188551,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_08_ROM_128324_R19_INTERLEAVED_RGB.png",
+          "score": 0.995759,
+          "runner_up_margin": 0.188551,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "b9ce7445594fa0c786a20ffbe4e33c3f22101d9d367190b82ad625e46fda9d44",
+      "source_rgb_sha256": "54a734f18f17714910a839e9ff11c7cd7978ed019da53df760e6844596d08d64",
+      "source_rgb_crc32": "704f8499"
+    },
+    {
+      "retail_file_id": 9,
+      "retail_name": "09_liftside.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_24_ROM_05E210_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.994454,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_07_038000.png",
+          "score": 0.311613,
+          "runner_up_margin": 0.035628,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_24_ROM_05E210_R19_INTERLEAVED_RGB.png",
+          "score": 0.994454,
+          "runner_up_margin": 0.52663,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_09_ROM_129E8C_R19_INTERLEAVED_RGB.png",
+          "score": 0.994454,
+          "runner_up_margin": 0.52663,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "bfdf48af9b976d2b3c7768f8f6d6b0f8c894cf3e0e0a4a126826de52bcf17399",
+      "source_rgb_sha256": "ad52803555b938567a76dce9e15aa250054f6dc6813a118479fa2dedca2f0b49",
+      "source_rgb_crc32": "adc25203"
+    },
+    {
+      "retail_file_id": 10,
+      "retail_name": "10_pipepil.png",
+      "priority": "oct",
+      "selected_archive": "Oct 1993.7z",
+      "selected_member": "environment_page_05_028000.png",
+      "match_correlation": 0.998784,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_05_028000.png",
+          "score": 0.998784,
+          "runner_up_margin": 0.43315,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "aug": {
+          "member": "JP90_05_ROM_048904_R19_INTERLEAVED_RGB.png",
+          "score": 0.998843,
+          "runner_up_margin": 0.574704,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_10_ROM_12BA70_R19_INTERLEAVED_RGB.png",
+          "score": 0.998843,
+          "runner_up_margin": 0.235263,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "71036ceaf9e8b6622b01515da20cb7a070582ad96668eda13de7856801f236b7",
+      "source_rgb_sha256": "90204e8ea55c910f3cc044bfc6fe298b5c016960ac0bda0df2c01016ca524e1e",
+      "source_rgb_crc32": "c4f3fed3"
+    },
+    {
+      "retail_file_id": 11,
+      "retail_name": "11_bulkpil.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_11_ROM_12C284_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997483,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_05_028000.png",
+          "score": 0.762401,
+          "runner_up_margin": 0.194903,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_05_ROM_048904_R19_INTERLEAVED_RGB.png",
+          "score": 0.764107,
+          "runner_up_margin": 0.319068,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_11_ROM_12C284_R19_INTERLEAVED_RGB.png",
+          "score": 0.997483,
+          "runner_up_margin": 0.233376,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "a955ba1d86e2e87e49813c35feae9df518630de7a6f0099f55ef42db0ffddaf7",
+      "source_rgb_sha256": "5b69d993a8e9912915020400b75c4b5affd6438b561d17f9cbb7226bc999a5ba",
+      "source_rgb_crc32": "6f17b045"
+    },
+    {
+      "retail_file_id": 12,
+      "retail_name": "12_wall2.png",
+      "priority": "oct",
+      "selected_archive": "Oct 1993.7z",
+      "selected_member": "environment_page_01_008000.png",
+      "match_correlation": 0.985544,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.985544,
+          "runner_up_margin": 0.492985,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "aug": {
+          "member": "JP90_35_ROM_06ECC8_R19_INTERLEAVED_RGB.png",
+          "score": 0.987149,
+          "runner_up_margin": 0.595045,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_12_ROM_12D3C8_R19_INTERLEAVED_RGB.png",
+          "score": 0.987149,
+          "runner_up_margin": 0.595045,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "eaa89f0c6ce59b0c2a452752f388530395185033f9dd7cbef8ccb1a861f2307e",
+      "source_rgb_sha256": "61f6e4dfda2b772108c8dac66195f1f5f9939a43eb5e230336268e9109c75df5",
+      "source_rgb_crc32": "cf826c55"
+    },
+    {
+      "retail_file_id": 13,
+      "retail_name": "13_wall3.png",
+      "priority": "oct",
+      "selected_archive": "Oct 1993.7z",
+      "selected_member": "environment_page_02_010000.png",
+      "match_correlation": 0.986443,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.986443,
+          "runner_up_margin": 0.934605,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "aug": {
+          "member": "JP90_36_ROM_070538_R19_INTERLEAVED_RGB.png",
+          "score": 0.989602,
+          "runner_up_margin": 0.702991,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_13_ROM_12EC38_R19_INTERLEAVED_RGB.png",
+          "score": 0.989602,
+          "runner_up_margin": 0.596863,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "6403f0ba7aad0f5139670c86984af356767a4eccf9cbfcd76158565e78375edd",
+      "source_rgb_sha256": "2eb5786ac828cc99f11552f66d5b7d528697638fcaa73ea1d69abed8ef451a9c",
+      "source_rgb_crc32": "7ae590f3"
+    },
+    {
+      "retail_file_id": 14,
+      "retail_name": "14_wall6.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_15_ROM_132ECC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.994585,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.516081,
+          "runner_up_margin": 0.213035,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_13_ROM_052A78_R19_INTERLEAVED_RGB.png",
+          "score": 0.43943,
+          "runner_up_margin": 0.007233,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_15_ROM_132ECC_R19_INTERLEAVED_RGB.png",
+          "score": 0.994585,
+          "runner_up_margin": 0.54215,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "3ba610d095d2c0869c4342a6d6235aa8f4f1c374aefab9316ad736d2359adc6f",
+      "source_rgb_sha256": "a559794b2afedc1876a2bf9aa8baebddf03f630647259e786ebc6d4c4db8bd8f",
+      "source_rgb_crc32": "57fab8cb"
+    },
+    {
+      "retail_file_id": 15,
+      "retail_name": "15_wallfix.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_37_ROM_071CAC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.963976,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.169883,
+          "runner_up_margin": 0.095461,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_37_ROM_071CAC_R19_INTERLEAVED_RGB.png",
+          "score": 0.963976,
+          "runner_up_margin": 0.724149,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_16_ROM_1349B4_R19_INTERLEAVED_RGB.png",
+          "score": 0.963976,
+          "runner_up_margin": 0.724149,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "00d710beb0a71a4b532702f02fa071a442e141ebc5711b89c42b2d2a77670b4c",
+      "source_rgb_sha256": "1911822f6dff4a87be330ce23733ca5305f9ebf812053ccb4d5478e1d5b80fb6",
+      "source_rgb_crc32": "2ba8c3c8"
+    },
+    {
+      "retail_file_id": 16,
+      "retail_name": "16_notice.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_17_ROM_136388_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.995742,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.330582,
+          "runner_up_margin": 0.21961,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_01_ROM_043638_R19_INTERLEAVED_RGB.png",
+          "score": 0.793741,
+          "runner_up_margin": 0.001219,
+          "best_match_unique": true,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_17_ROM_136388_R19_INTERLEAVED_RGB.png",
+          "score": 0.995742,
+          "runner_up_margin": 0.328553,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "1b26e623539c8a8887a75d0f7a857dca945cc0feb60240bdbb87cf31fb431c32",
+      "source_rgb_sha256": "d57e1a750d1ed62ef86f3e3c73817ee800e2df303f5c51be9d4f0cc053d0de47",
+      "source_rgb_crc32": "f9b3437c"
+    },
+    {
+      "retail_file_id": 17,
+      "retail_name": "17_armbulk.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_39_ROM_074A60_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.973112,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.265507,
+          "runner_up_margin": 0.01304,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_39_ROM_074A60_R19_INTERLEAVED_RGB.png",
+          "score": 0.973112,
+          "runner_up_margin": 0.660174,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_18_ROM_1379A8_R19_INTERLEAVED_RGB.png",
+          "score": 0.973112,
+          "runner_up_margin": 0.660174,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "97c0071a5e30e0633440296a33f32252ef00d520c4598b0caf5b997f53a1e805",
+      "source_rgb_sha256": "acafce0ccad63ac9f4004080da554a67ee32a077492bbd5d32b5aac3f2ef85d3",
+      "source_rgb_crc32": "d8bbffbe"
+    },
+    {
+      "retail_file_id": 18,
+      "retail_name": "18_armceil.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_42_ROM_079528_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.999321,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.748649,
+          "runner_up_margin": 0.607795,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_42_ROM_079528_R19_INTERLEAVED_RGB.png",
+          "score": 0.999321,
+          "runner_up_margin": 0.251693,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_19_ROM_138820_R19_INTERLEAVED_RGB.png",
+          "score": 0.999321,
+          "runner_up_margin": 0.193186,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "eca462ab3a1f78b7255ded98c002f81ac73c79811d530dd31e3907d4ee785ef1",
+      "source_rgb_sha256": "ff2bf5a06155264a8cca9fa3a1f023fbba43f8b26b3ff8a90e3d5f6b7e194133",
+      "source_rgb_crc32": "97ece22b"
+    },
+    {
+      "retail_file_id": 19,
+      "retail_name": "19_armdor2.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_40_ROM_0758D8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997376,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_05_028000.png",
+          "score": 0.219255,
+          "runner_up_margin": 0.004274,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_40_ROM_0758D8_R19_INTERLEAVED_RGB.png",
+          "score": 0.997376,
+          "runner_up_margin": 0.525036,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_20_ROM_1398F8_R19_INTERLEAVED_RGB.png",
+          "score": 0.997376,
+          "runner_up_margin": 0.525036,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "4cbb72c0ddc1fd21820d8bf44afc5d3485a15d9cd0525cddfd2faee79252397e",
+      "source_rgb_sha256": "90ec4b58ffb3936de731c3d7122ffaa9b7127a1623e04ba54f6c8b8bfd7ea91f",
+      "source_rgb_crc32": "9a3613b9"
+    },
+    {
+      "retail_file_id": 20,
+      "retail_name": "20_armflor.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_43_ROM_07A600_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.982429,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.095827,
+          "runner_up_margin": 0.040859,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_43_ROM_07A600_R19_INTERLEAVED_RGB.png",
+          "score": 0.982429,
+          "runner_up_margin": 0.807523,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_21_ROM_13AA44_R19_INTERLEAVED_RGB.png",
+          "score": 0.982429,
+          "runner_up_margin": 0.807523,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "9a21c179e68588f89e4a9bafed65444c6a54121bd0c0db2d244991f006c8dbc9",
+      "source_rgb_sha256": "795b98d2c1b96f0fe141f7ed393e505e419efe447744dce1239222964259a3e6",
+      "source_rgb_crc32": "53a86132"
+    },
+    {
+      "retail_file_id": 21,
+      "retail_name": "21_armwall1.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_46_ROM_07ED0C_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.978959,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_07_038000.png",
+          "score": 0.39241,
+          "runner_up_margin": 0.128723,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_46_ROM_07ED0C_R19_INTERLEAVED_RGB.png",
+          "score": 0.978959,
+          "runner_up_margin": 0.662012,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_22_ROM_13BDB8_R19_INTERLEAVED_RGB.png",
+          "score": 0.978959,
+          "runner_up_margin": 0.662012,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "398630c6c8a6bc35ac432a9262f55c19153bcf52fac91bba3b230680caf8c490",
+      "source_rgb_sha256": "80115f02682a84f176274b6ff2619a9553b515cd1dff64d7561a4efbfc4c9760",
+      "source_rgb_crc32": "c951b0f0"
+    },
+    {
+      "retail_file_id": 22,
+      "retail_name": "22_armwall2.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_38_ROM_073680_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.984532,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.187725,
+          "runner_up_margin": 0.038197,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_38_ROM_073680_R19_INTERLEAVED_RGB.png",
+          "score": 0.984532,
+          "runner_up_margin": 0.715525,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_23_ROM_13CB60_R19_INTERLEAVED_RGB.png",
+          "score": 0.984532,
+          "runner_up_margin": 0.715525,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7400afb057c466ee81822a9c289edff34275177ecd6f92a7c2f0fe04e997dfb4",
+      "source_rgb_sha256": "6999f65c4e5a8c8465cda90c41a2694fff8b94dc282dc85c5f77224134ec4630",
+      "source_rgb_crc32": "11d0c970"
+    },
+    {
+      "retail_file_id": 23,
+      "retail_name": "23_comp1.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_10_ROM_04EE00_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.994928,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.158315,
+          "runner_up_margin": 0.084977,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_10_ROM_04EE00_R19_INTERLEAVED_RGB.png",
+          "score": 0.994928,
+          "runner_up_margin": 0.684745,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_24_ROM_13DF40_R19_INTERLEAVED_RGB.png",
+          "score": 0.994928,
+          "runner_up_margin": 0.684745,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7df5b05dbdaa4ae479e6e2c0319cf594ab3c3061fe3387fa4d7a42e35a750782",
+      "source_rgb_sha256": "adbdedf743009583e6cc97f41813294a916cbe3f3ba5ab0efe2c532e4b551a76",
+      "source_rgb_crc32": "271c4629"
+    },
+    {
+      "retail_file_id": 24,
+      "retail_name": "24_medceil.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_25_ROM_05FDF4_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997694,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_03_018000.png",
+          "score": 0.089112,
+          "runner_up_margin": 0.002511,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_25_ROM_05FDF4_R19_INTERLEAVED_RGB.png",
+          "score": 0.997694,
+          "runner_up_margin": 0.190987,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_25_ROM_13F424_R19_INTERLEAVED_RGB.png",
+          "score": 0.997694,
+          "runner_up_margin": 0.190987,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "b2cb328af15831b119505fae38eebd2b44f9c42ff8a6c126ab056b4eb0d8d708",
+      "source_rgb_sha256": "9ed49119334730ec77ccc61e580bc5c14d06568758654c244f1c170ac1282062",
+      "source_rgb_crc32": "c51b2bc1"
+    },
+    {
+      "retail_file_id": 25,
+      "retail_name": "25_medcomp.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_26_ROM_0611E8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.993163,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.115876,
+          "runner_up_margin": 0.039971,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_26_ROM_0611E8_R19_INTERLEAVED_RGB.png",
+          "score": 0.993163,
+          "runner_up_margin": 0.865575,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_26_ROM_140818_R19_INTERLEAVED_RGB.png",
+          "score": 0.993163,
+          "runner_up_margin": 0.865575,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "15cd9f298e8bf6c4347c68c2d0e761fe7cdf4a312e35279518224ed1290d85c1",
+      "source_rgb_sha256": "5514e8f96903d08f2e5af8943755a164fa098ee3027f682b566089c74e8bbd7d",
+      "source_rgb_crc32": "3d548ae2"
+    },
+    {
+      "retail_file_id": 26,
+      "retail_name": "26_medflor.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_27_ROM_06260C_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.98267,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_03_018000.png",
+          "score": 0.408321,
+          "runner_up_margin": 0.296531,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_27_ROM_06260C_R19_INTERLEAVED_RGB.png",
+          "score": 0.98267,
+          "runner_up_margin": 0.524076,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_27_ROM_141C3C_R19_INTERLEAVED_RGB.png",
+          "score": 0.98267,
+          "runner_up_margin": 0.524076,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "5cbe564375500670692a4a2e4167d7129ea8fe4ed2a3f59ebe8ecdd88670d310",
+      "source_rgb_sha256": "980676a45bcf8bc5d459920a5b169b487c1fee6e0425d5bf7892b5236532f8d9",
+      "source_rgb_crc32": "6ce0120a"
+    },
+    {
+      "retail_file_id": 27,
+      "retail_name": "27_medwall3.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_30_ROM_066DD8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.986635,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.145515,
+          "runner_up_margin": 0.053696,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_30_ROM_066DD8_R19_INTERLEAVED_RGB.png",
+          "score": 0.986635,
+          "runner_up_margin": 0.704971,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_28_ROM_142D0C_R19_INTERLEAVED_RGB.png",
+          "score": 0.986635,
+          "runner_up_margin": 0.678188,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "8499c3dfc56f1a6a98b54e4b02c0ced7e0f4b0b0caf3a96ee5ff329aa662da59",
+      "source_rgb_sha256": "cc8ecc1ee0a0ec02e9ae6eb07fb3486098e3c09c47d30aa9690a91b7fc328eb3",
+      "source_rgb_crc32": "94ed9ef8"
+    },
+    {
+      "retail_file_id": 28,
+      "retail_name": "28_medwin.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_31_ROM_0682D8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.999584,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.263828,
+          "runner_up_margin": 0.033966,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_31_ROM_0682D8_R19_INTERLEAVED_RGB.png",
+          "score": 0.999584,
+          "runner_up_margin": 0.531489,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_29_ROM_14420C_R19_INTERLEAVED_RGB.png",
+          "score": 0.999584,
+          "runner_up_margin": 0.531489,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7284d9250987eebc7682d9b92d17a30bb4596d4e87f2b45e78809e027d23cc80",
+      "source_rgb_sha256": "006a0542ea24c154661a83b20a9214d479819eb113cd9256e77cce7224cf1347",
+      "source_rgb_crc32": "40abeb77"
+    },
+    {
+      "retail_file_id": 29,
+      "retail_name": "29_medoor.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_29_ROM_065800_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.998586,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.364678,
+          "runner_up_margin": 0.152307,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_29_ROM_065800_R19_INTERLEAVED_RGB.png",
+          "score": 0.998586,
+          "runner_up_margin": 0.526211,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_30_ROM_1452B0_R19_INTERLEAVED_RGB.png",
+          "score": 0.998586,
+          "runner_up_margin": 0.526211,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "b1593db0fd016e19341009f9673aa1bf53b1a4792609ec926e0e87267605beb3",
+      "source_rgb_sha256": "4cd5ed80629b76a861a29876e8f6d5cf8ff7a201bf43848013d39802466d69d5",
+      "source_rgb_crc32": "dcaa873e"
+    },
+    {
+      "retail_file_id": 30,
+      "retail_name": "30_airlock.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_00_ROM_041408_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.990822,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.142866,
+          "runner_up_margin": 0.033181,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_00_ROM_041408_R19_INTERLEAVED_RGB.png",
+          "score": 0.990822,
+          "runner_up_margin": 0.747978,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_31_ROM_146888_R19_INTERLEAVED_RGB.png",
+          "score": 0.990822,
+          "runner_up_margin": 0.747978,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "78618d0f862af14fd21b540d00b65ff5d7d70ff2446d7538e12f95f18886fd93",
+      "source_rgb_sha256": "e747d5c7ef97867c1c45ce0344d49c5d3858ab0a122c7b4c6a0d2227a8298cee",
+      "source_rgb_crc32": "90456105"
+    },
+    {
+      "retail_file_id": 31,
+      "retail_name": "31_kitceil.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_32_ROM_148AB8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.99967,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.526537,
+          "runner_up_margin": 0.320188,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_45_ROM_07D4DC_R19_INTERLEAVED_RGB.png",
+          "score": 0.841889,
+          "runner_up_margin": 0.035727,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_32_ROM_148AB8_R19_INTERLEAVED_RGB.png",
+          "score": 0.99967,
+          "runner_up_margin": 0.15778,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "1d710d4c1a4b4ae0d634048a38e18cd813fc8a8bef067b1742af33cb47fe4ac6",
+      "source_rgb_sha256": "a8ce078802d25514b9f9ecf2cced171bf6436677b43596baa2c55c713b7db159",
+      "source_rgb_crc32": "aa4b4b97"
+    },
+    {
+      "retail_file_id": 32,
+      "retail_name": "32_kitflor.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_33_ROM_149818_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.997927,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.056342,
+          "runner_up_margin": 0.02223,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_08_ROM_04BA4C_R19_INTERLEAVED_RGB.png",
+          "score": 0.418486,
+          "runner_up_margin": 0.018804,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_33_ROM_149818_R19_INTERLEAVED_RGB.png",
+          "score": 0.997927,
+          "runner_up_margin": 0.530687,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "720bb08b270869b1e23f8b8c020b82588b6de39daa6561cc12cf2d930455bb27",
+      "source_rgb_sha256": "2d1df3a6d4553579640c5bf95166cf12ea02bbe0b90effde3dadf809ecc5e268",
+      "source_rgb_crc32": "b54d2253"
+    },
+    {
+      "retail_file_id": 33,
+      "retail_name": "33_kitwall1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_34_ROM_14A9FC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.994722,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.389802,
+          "runner_up_margin": 0.188468,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_36_ROM_070538_R19_INTERLEAVED_RGB.png",
+          "score": 0.392989,
+          "runner_up_margin": 0.014255,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_34_ROM_14A9FC_R19_INTERLEAVED_RGB.png",
+          "score": 0.994722,
+          "runner_up_margin": 0.5887,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "581dd9e2358043a1236d40fa7d65738820b30641d819f8227a11b1dc0426bfeb",
+      "source_rgb_sha256": "9a971235efb791e80d265869e5a312812f566e49e7f4cf44a58fdfe12dd3a61e",
+      "source_rgb_crc32": "dd881e13"
+    },
+    {
+      "retail_file_id": 34,
+      "retail_name": "34_kitwall2.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_35_ROM_14C6BC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.989399,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.170323,
+          "runner_up_margin": 0.1296,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_30_ROM_066DD8_R19_INTERLEAVED_RGB.png",
+          "score": 0.214488,
+          "runner_up_margin": 0.023122,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_35_ROM_14C6BC_R19_INTERLEAVED_RGB.png",
+          "score": 0.989399,
+          "runner_up_margin": 0.583313,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "3377d195e4330e0884253a52707626844a2b03a55591d14a9e5b53bda69fea3a",
+      "source_rgb_sha256": "38e04a86690b788bf8db227992b9e41b5765f3fb7a6beae47b74ba5028879ec7",
+      "source_rgb_crc32": "11b29c81"
+    },
+    {
+      "retail_file_id": 35,
+      "retail_name": "35_baybulka.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_06_ROM_049118_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.992257,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_07_038000.png",
+          "score": 0.129856,
+          "runner_up_margin": 0.009015,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_06_ROM_049118_R19_INTERLEAVED_RGB.png",
+          "score": 0.992257,
+          "runner_up_margin": 0.673021,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_37_ROM_14F798_R19_INTERLEAVED_RGB.png",
+          "score": 0.992257,
+          "runner_up_margin": 0.61728,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "4ca61a73df0faa50c02efaca24bb1fa5ee589353d939e16998650d3151c4692b",
+      "source_rgb_sha256": "c11d78bbb972518786502eb959ee5493fba5523295b97fc02f092130cd95380b",
+      "source_rgb_crc32": "bdfd0a87"
+    },
+    {
+      "retail_file_id": 36,
+      "retail_name": "36_airduct.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_47_ROM_15691C_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.988361,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.294795,
+          "runner_up_margin": 0.100548,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_45_ROM_07D4DC_R19_INTERLEAVED_RGB.png",
+          "score": 0.548765,
+          "runner_up_margin": 0.063925,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_47_ROM_15691C_R19_INTERLEAVED_RGB.png",
+          "score": 0.988361,
+          "runner_up_margin": 0.439596,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "4b4ea054e21b5ff278c06d77d329092de3da8591feed0484d39effeb86acee51",
+      "source_rgb_sha256": "d7822500e69cfb31f1be2927bb34d4178ce6757d9ca0f868d8c5eb660b77c966",
+      "source_rgb_crc32": "403bd923"
+    },
+    {
+      "retail_file_id": 37,
+      "retail_name": "37_airduct1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_48_ROM_157C00_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.996407,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.463943,
+          "runner_up_margin": 0.144286,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_19_ROM_057464_R19_INTERLEAVED_RGB.png",
+          "score": 0.559289,
+          "runner_up_margin": 0.03655,
+          "best_match_unique": true,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_48_ROM_157C00_R19_INTERLEAVED_RGB.png",
+          "score": 0.996407,
+          "runner_up_margin": 0.437118,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "b9230bcbaaff8e3e684be74bf9928604b36a8b7ca5c4b91cae2ea5a48bfc3ed8",
+      "source_rgb_sha256": "442694ee720959f3ec56b12cc20b142969de671b3f732a0ba618e450f30965d9",
+      "source_rgb_crc32": "123a14fc"
+    },
+    {
+      "retail_file_id": 38,
+      "retail_name": "38_gunk1.png",
+      "priority": "retail",
+      "selected_archive": "Final Retail.7z",
+      "selected_member": "38_gunk1.png",
+      "match_correlation": 1.0,
+      "confidence": "original retail fallback",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.102774,
+          "runner_up_margin": 0.017619,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_13_ROM_052A78_R19_INTERLEAVED_RGB.png",
+          "score": 0.230877,
+          "runner_up_margin": 0.042661,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_40_ROM_1514F8_R19_INTERLEAVED_RGB.png",
+          "score": 0.230877,
+          "runner_up_margin": 0.042661,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      }
+    },
+    {
+      "retail_file_id": 39,
+      "retail_name": "39_gunk2.png",
+      "priority": "retail",
+      "selected_archive": "Final Retail.7z",
+      "selected_member": "39_gunk2.png",
+      "match_correlation": 1.0,
+      "confidence": "original retail fallback",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.183354,
+          "runner_up_margin": 0.086082,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_02_ROM_045344_R19_INTERLEAVED_RGB.png",
+          "score": 0.274295,
+          "runner_up_margin": 0.088027,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_38_ROM_1505F4_R19_INTERLEAVED_RGB.png",
+          "score": 0.274209,
+          "runner_up_margin": 0.087941,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      }
+    },
+    {
+      "retail_file_id": 40,
+      "retail_name": "40_gunk3a.png",
+      "priority": "retail",
+      "selected_archive": "Final Retail.7z",
+      "selected_member": "40_gunk3a.png",
+      "match_correlation": 1.0,
+      "confidence": "original retail fallback",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.214778,
+          "runner_up_margin": 0.030517,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_16_ROM_05568C_R19_INTERLEAVED_RGB.png",
+          "score": 0.205826,
+          "runner_up_margin": 0.022751,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_43_ROM_15410C_R19_INTERLEAVED_RGB.png",
+          "score": 0.205826,
+          "runner_up_margin": 0.012641,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      }
+    },
+    {
+      "retail_file_id": 41,
+      "retail_name": "41_respan4.png",
+      "priority": "retail",
+      "selected_archive": "Final Retail.7z",
+      "selected_member": "41_respan4.png",
+      "match_correlation": 1.0,
+      "confidence": "original retail fallback",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.123209,
+          "runner_up_margin": 0.010785,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_12_ROM_0520C4_R19_INTERLEAVED_RGB.png",
+          "score": 0.32352,
+          "runner_up_margin": 0.018041,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_39_ROM_150B44_R19_INTERLEAVED_RGB.png",
+          "score": 0.32352,
+          "runner_up_margin": 0.018041,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      }
+    },
+    {
+      "retail_file_id": 42,
+      "retail_name": "42_aceil.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_08_ROM_04BA4C_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.978205,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.14243,
+          "runner_up_margin": 0.136627,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_08_ROM_04BA4C_R19_INTERLEAVED_RGB.png",
+          "score": 0.978205,
+          "runner_up_margin": 0.712557,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_49_ROM_15933C_R19_INTERLEAVED_RGB.png",
+          "score": 0.996021,
+          "runner_up_margin": 0.527538,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "a360fc16ca4056683ea92f6fb36045b02a415e7b8dea66b0ec7115d7fa328476",
+      "source_rgb_sha256": "da35e64245fd70f73bfecfac9160f9d6fbaaafbf75600f4373640617ac00f66b",
+      "source_rgb_crc32": "905a4464"
+    },
+    {
+      "retail_file_id": 43,
+      "retail_name": "43_abulk1.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_32_ROM_06937C_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.950894,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.396907,
+          "runner_up_margin": 0.200913,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_32_ROM_06937C_R19_INTERLEAVED_RGB.png",
+          "score": 0.950894,
+          "runner_up_margin": 0.401152,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_50_ROM_15A968_R19_INTERLEAVED_RGB.png",
+          "score": 0.993535,
+          "runner_up_margin": 0.443793,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "b99d574f6e4b9510cc4f7d2a7647d15375673c2b90fbeaaca2294c6ad3d29b6b",
+      "source_rgb_sha256": "1becf0d5082f5e59db53550dda7183012e81f33ba9fe17c637f905c2c6c07a86",
+      "source_rgb_crc32": "fa4359c0"
+    },
+    {
+      "retail_file_id": 44,
+      "retail_name": "44_abulk2.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_51_ROM_15BC70_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.996146,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.368229,
+          "runner_up_margin": 0.128732,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_12_ROM_0520C4_R19_INTERLEAVED_RGB.png",
+          "score": 0.407596,
+          "runner_up_margin": 0.040602,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_51_ROM_15BC70_R19_INTERLEAVED_RGB.png",
+          "score": 0.996146,
+          "runner_up_margin": 0.58855,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "e0c9b554db76be19038485ae8340d9920ce992c25428c25ed3728b598c49ddb2",
+      "source_rgb_sha256": "fcf384a609b62296d347557bcb695065008af466b0205c503bb757f4fa587ebd",
+      "source_rgb_crc32": "c979d268"
+    },
+    {
+      "retail_file_id": 45,
+      "retail_name": "45_alight1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_52_ROM_15D2C8_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.99775,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.6432,
+          "runner_up_margin": 0.566398,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_42_ROM_079528_R19_INTERLEAVED_RGB.png",
+          "score": 0.739213,
+          "runner_up_margin": 0.09588,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_52_ROM_15D2C8_R19_INTERLEAVED_RGB.png",
+          "score": 0.99775,
+          "runner_up_margin": 0.258537,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "9c0da12dcd95778b1ea1a88d309798218bde6838f99d2719ed444c188cbf7b97",
+      "source_rgb_sha256": "4702638d0774c1e172314439bea20e9880d6f3ed09ef55fe35d4a36dae3538ee",
+      "source_rgb_crc32": "fa69174a"
+    },
+    {
+      "retail_file_id": 46,
+      "retail_name": "46_alight2.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_34_ROM_06C7AC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.986339,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.152353,
+          "runner_up_margin": 0.017348,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_34_ROM_06C7AC_R19_INTERLEAVED_RGB.png",
+          "score": 0.986339,
+          "runner_up_margin": 0.768357,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_53_ROM_15F3C0_R19_INTERLEAVED_RGB.png",
+          "score": 0.985454,
+          "runner_up_margin": 0.767472,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7d330adcf0bc5893f36186fd058d656c210b8a651efc92087d233e49de74643f",
+      "source_rgb_sha256": "28c4f5c28d426aee5c25449d4e321f367727f856317d589e356b0301416c0e9d",
+      "source_rgb_crc32": "06494841"
+    },
+    {
+      "retail_file_id": 47,
+      "retail_name": "47_awall1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_54_ROM_161414_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.991943,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.294558,
+          "runner_up_margin": 0.133032,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_35_ROM_06ECC8_R19_INTERLEAVED_RGB.png",
+          "score": 0.293374,
+          "runner_up_margin": 0.131689,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_54_ROM_161414_R19_INTERLEAVED_RGB.png",
+          "score": 0.991943,
+          "runner_up_margin": 0.194188,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "7d0357f0f05e681503d2b40c907caef1e505c8456d24431d7e5172abdcbf9c4c",
+      "source_rgb_sha256": "d033882d8c11c1a8638060462757747e5fe0c99adaceaa0122ed97ff95860513",
+      "source_rgb_crc32": "e5d28116"
+    },
+    {
+      "retail_file_id": 48,
+      "retail_name": "48_afloor1.png",
+      "priority": "aug",
+      "selected_archive": "1993-08-18.7z",
+      "selected_member": "JP90_41_ROM_076A24_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.955187,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_03_018000.png",
+          "score": 0.086058,
+          "runner_up_margin": 0.014042,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_41_ROM_076A24_R19_INTERLEAVED_RGB.png",
+          "score": 0.955187,
+          "runner_up_margin": 0.778909,
+          "best_match_unique": true,
+          "status": "accepted"
+        },
+        "apr": {
+          "member": "JP90_47_ROM_15691C_R19_INTERLEAVED_RGB.png",
+          "score": 0.176973,
+          "runner_up_margin": 0.000695,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      },
+      "source_png_sha256": "e9b5e65265a7f55378666aada6ca8f460c68cc8c822ad294ef2d39b618764137",
+      "source_rgb_sha256": "d737b17d1a19a3860e871f8d6880dbe81f762749189cac9adcdacab920c32e05",
+      "source_rgb_crc32": "b4eaf3aa"
+    },
+    {
+      "retail_file_id": 49,
+      "retail_name": "49_black.png",
+      "priority": "retail",
+      "selected_archive": "Final Retail.7z",
+      "selected_member": "49_black.png",
+      "match_correlation": 1.0,
+      "confidence": "original retail fallback",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.0,
+          "runner_up_margin": 0.0,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_00_ROM_041408_R19_INTERLEAVED_RGB.png",
+          "score": 0.0,
+          "runner_up_margin": 0.0,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_00_ROM_11B630_R19_INTERLEAVED_RGB.png",
+          "score": 0.0,
+          "runner_up_margin": 0.0,
+          "best_match_unique": false,
+          "status": "unverified"
+        }
+      }
+    },
+    {
+      "retail_file_id": 50,
+      "retail_name": "50_wallfad.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_57_ROM_165370_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.992552,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_02_010000.png",
+          "score": 0.187924,
+          "runner_up_margin": 0.084902,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_36_ROM_070538_R19_INTERLEAVED_RGB.png",
+          "score": 0.184713,
+          "runner_up_margin": 0.032212,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_57_ROM_165370_R19_INTERLEAVED_RGB.png",
+          "score": 0.992552,
+          "runner_up_margin": 0.194765,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "eadfbf9f2d797c3eca20e0de7542d2e88ae406c6b8707d29df5bd08a7f729882",
+      "source_rgb_sha256": "ddabe304f562cd2a85c455eed901ba6921ec49536ec72a14d64379b7d59266ad",
+      "source_rgb_crc32": "155a319f"
+    },
+    {
+      "retail_file_id": 51,
+      "retail_name": "51_predbulk.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_58_ROM_167210_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.9634,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_06_030000.png",
+          "score": 0.772246,
+          "runner_up_margin": 0.163884,
+          "best_match_unique": true,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_05_ROM_048904_R19_INTERLEAVED_RGB.png",
+          "score": 0.609584,
+          "runner_up_margin": 0.206765,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_58_ROM_167210_R19_INTERLEAVED_RGB.png",
+          "score": 0.9634,
+          "runner_up_margin": 0.352925,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "fc67d96f5f934b5a07246d9715cc7cce49fa6f34e4bc67114e6564fba205404a",
+      "source_rgb_sha256": "d75701e326710d0376bf51f21dcfe14a6dbe4d61f9bae5d7210d0366231bbba6",
+      "source_rgb_crc32": "0c98116f"
+    },
+    {
+      "retail_file_id": 52,
+      "retail_name": "52_predrof1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_59_ROM_169130_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.98589,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.129302,
+          "runner_up_margin": 0.116278,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_20_ROM_057E9C_R19_INTERLEAVED_RGB.png",
+          "score": 0.278563,
+          "runner_up_margin": 0.012023,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_59_ROM_169130_R19_INTERLEAVED_RGB.png",
+          "score": 0.98589,
+          "runner_up_margin": 0.667347,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "c9e154067065886538dbddf068deaa7dc119efb0b279d43f3b0b783309b319be",
+      "source_rgb_sha256": "e23eb2699013b698f7cc78150fa9fe2b3c5c984a59cfcac1125dc48c1dbeef23",
+      "source_rgb_crc32": "c9faa385"
+    },
+    {
+      "retail_file_id": 53,
+      "retail_name": "53_predrof2.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_60_ROM_16B8FC_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.951943,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_01_008000.png",
+          "score": 0.087281,
+          "runner_up_margin": 0.025682,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_22_ROM_05A9AC_R19_INTERLEAVED_RGB.png",
+          "score": 0.232617,
+          "runner_up_margin": 0.065606,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_60_ROM_16B8FC_R19_INTERLEAVED_RGB.png",
+          "score": 0.951943,
+          "runner_up_margin": 0.719326,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "1a795f3240b4e0a7d7e27741cb89d0375e5fa778dddd4a9a41b2ac3a69fbeec0",
+      "source_rgb_sha256": "a9ddfcc9a5e67649ee54c2decd2858c3d1e7135c06c71dc85beea3764aa38cfd",
+      "source_rgb_crc32": "72d99d7c"
+    },
+    {
+      "retail_file_id": 54,
+      "retail_name": "54_ppan1.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_61_ROM_16E704_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.969215,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_04_020000.png",
+          "score": 0.186073,
+          "runner_up_margin": 0.115447,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_27_ROM_06260C_R19_INTERLEAVED_RGB.png",
+          "score": 0.278244,
+          "runner_up_margin": 0.004151,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_61_ROM_16E704_R19_INTERLEAVED_RGB.png",
+          "score": 0.969215,
+          "runner_up_margin": 0.690971,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "f8f41a4b81bc6795171ac78af9a0d99c3c272a51f0d081b417697287243d6f93",
+      "source_rgb_sha256": "2410d243f556237b649fb81a7873868c7b8d752e5b54341c582cf734fada0022",
+      "source_rgb_crc32": "bbfa015b"
+    },
+    {
+      "retail_file_id": 55,
+      "retail_name": "55_ppan4.png",
+      "priority": "apr",
+      "selected_archive": "1994-04-08.7z",
+      "selected_member": "JP90_62_ROM_171340_R19_INTERLEAVED_RGB.png",
+      "match_correlation": 0.983545,
+      "confidence": "high visual match",
+      "candidates": {
+        "oct": {
+          "member": "environment_page_03_018000.png",
+          "score": 0.13914,
+          "runner_up_margin": 0.055308,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "aug": {
+          "member": "JP90_27_ROM_06260C_R19_INTERLEAVED_RGB.png",
+          "score": 0.309204,
+          "runner_up_margin": 0.112886,
+          "best_match_unique": false,
+          "status": "unverified"
+        },
+        "apr": {
+          "member": "JP90_62_ROM_171340_R19_INTERLEAVED_RGB.png",
+          "score": 0.983545,
+          "runner_up_margin": 0.674341,
+          "best_match_unique": true,
+          "status": "accepted"
+        }
+      },
+      "source_png_sha256": "86e10fb99633a8f138603ed91435490a1e4828b7419fd7069b7b680b545ec89a",
+      "source_rgb_sha256": "5c613d67dc6b30dd6ed8921fd10fecaadbae5f3e26119cf7a8eb9539f6ceb4ff",
+      "source_rgb_crc32": "ceef773c"
+    }
+  ],
+  "not_covered": [
+    "sprites",
+    "HUD artwork",
+    "notice text composites",
+    "gameplay assets"
+  ],
+  "warning": "Prototype source filenames with JP90 tags suggest JagPEG-compressed historical data; PNG is only the decoded storage format. Preserve retail when no verified candidate. Visual correspondence does not mean identical image quality.",
+  "pack_version": 2,
+  "pack_format": "AVPTEX1\\0 + uint32 little-endian payload length + uint32 little-endian crc32 + 49152-byte RGB888 payload (file suffix .prgb); legacy .rgb remains readable"
+}
