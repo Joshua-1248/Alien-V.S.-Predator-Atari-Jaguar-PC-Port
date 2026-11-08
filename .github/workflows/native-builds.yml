@@ -1,0 +1,127 @@
+name: AVP PC Port - Windows, Linux and macOS checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 (UCRT64)
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-winpthreads
+      - name: Build and package Windows port
+        shell: msys2 {0}
+        run: |
+          bash tools/package_windows_ucrt64.sh build-win dist/windows
+          mkdir -p dist/windows/prototype_texture_restoration
+          cp prototype_texture_restoration/*.prgb dist/windows/prototype_texture_restoration/
+          cp prototype_texture_restoration/PROVENANCE.json dist/windows/prototype_texture_restoration/
+      - name: Upload Windows executable and texture pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Windows-x64
+          path: dist/windows/
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    name: Linux x64 (GCC and Clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang cmake ninja-build libx11-dev libxext-dev libxrandr-dev libssl-dev zlib1g-dev
+      - name: Build with GCC
+        run: |
+          cmake -S . -B build-linux-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON -DAVP_BUILD_JAG_REFERENCE=OFF -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          cmake --build build-linux-gcc --parallel 4 --target avp_pc test_pc_prototype_textures_s105
+          ./build-linux-gcc/avp_pc --help
+          mkdir -p build-linux-gcc/texture-fixture
+          ./build-linux-gcc/test_pc_prototype_textures_s105 build-linux-gcc/texture-fixture prototype_texture_restoration
+      - name: Build with Clang
+        run: |
+          cmake -S . -B build-linux-clang -G Ninja -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON -DAVP_BUILD_JAG_REFERENCE=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --build build-linux-clang --parallel 4 --target avp_pc test_pc_prototype_textures_s105
+          ./build-linux-clang/avp_pc --help
+          mkdir -p build-linux-clang/texture-fixture
+          ./build-linux-clang/test_pc_prototype_textures_s105 build-linux-clang/texture-fixture prototype_texture_restoration
+      - name: Package both executables and prototype textures
+        run: |
+          mkdir -p dist/linux/LINUX dist/linux/prototype_texture_restoration
+          install -m755 build-linux-gcc/avp_pc dist/linux/LINUX/avp_pc
+          install -m755 build-linux-clang/avp_pc dist/linux/LINUX/avp_pc_clang
+          cp prototype_texture_restoration/*.prgb dist/linux/prototype_texture_restoration/
+          cp prototype_texture_restoration/PROVENANCE.json dist/linux/prototype_texture_restoration/
+          cat > dist/linux/README.txt <<'TXT'
+          AVP Atari Jaguar PC Port - Linux GCC and Clang
+          Place your own supported retail AVP.jag beside the executable or pass --rom /path/to/AVP.jag.
+          Run LINUX/avp_pc or LINUX/avp_pc_clang. The prototype texture pack is included.
+          No retail ROM is included. Shared libraries from your distribution may be required.
+          TXT
+          chmod 755 dist/linux/LINUX/avp_pc dist/linux/LINUX/avp_pc_clang
+          tar -C dist/linux -czf dist/AVP-Linux-x64.tar.gz .
+          tar -tzf dist/AVP-Linux-x64.tar.gz > /dev/null
+      - name: Upload Linux binaries and texture pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Linux-x64
+          path: dist/linux/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Linux tarball (preserves executable permissions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Linux-x64-tar-gz
+          path: dist/AVP-Linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-portability:
+    name: macOS (portability tests only; NOT a playable game build)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable code (no macOS game backend exists yet)
+        run: |
+          cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON -DAVP_BUILD_PC=OFF -DAVP_BUILD_JAG_REFERENCE=OFF
+      - name: Build and exercise portable targets
+        run: |
+          cmake --build build-macos --parallel 4 --target avp_jaguar_compat avp_static_recomp test_static_rom_loader test_host_distance
+          ./build-macos/test_static_rom_loader
+          ./build-macos/test_host_distance
+      - name: Publish macOS portability artifacts and status
+        run: |
+          mkdir -p dist/macos-portability
+          cp build-macos/test_static_rom_loader build-macos/test_host_distance dist/macos-portability/
+          cat > dist/macos-portability/README.txt <<'TXT'
+          macOS portability tests ONLY. No playable macOS port is built by this workflow.
+          Native macOS video, audio, input and packaging backends are not yet implemented.
+          The original CMake PC game target currently supports Linux/X11 and Windows/Win32.
+          TXT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVP-macOS-portability-only-NOT-GAME
+          path: dist/macos-portability/
+          if-no-files-found: error
+          retention-days: 30
