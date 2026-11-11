@@ -19,11 +19,11 @@ static int send_event(int fd,unsigned char type,unsigned char number,short value
 int main(void)
 {
     AvpMpPadReader r;
-    AvpMpControllerSample out;
     memset(&r,0,sizeof(r));r.fd=-1;
     CHECK(!avp_mp_pad_reader_open(&r,""));
 #ifndef _WIN32
     {
+        AvpMpControllerSample out;
         int fds[2],flags;
         CHECK(!avp_mp_pad_reader_open(&r,"/dev/null")); /* Not a joystick. */
         CHECK(pipe(fds)==0);
