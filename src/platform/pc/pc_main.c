@@ -143,7 +143,13 @@ static const char *auto_find_rom(const char *argv0)
 #ifdef _WIN32
     {
         char glob[PATH_MAX];WIN32_FIND_DATAA data;HANDLE h;
-        snprintf(glob,sizeof(glob),"%s/*.jag",dir);
+        {
+            const size_t dl = strlen(dir);
+            static const char pattern[] = "/*.jag";
+            if (dl > sizeof(glob) - sizeof(pattern)) return NULL;
+            memcpy(glob, dir, dl);
+            memcpy(glob + dl, pattern, sizeof(pattern));
+        }
         h=FindFirstFileA(glob,&data);
         if(h!=INVALID_HANDLE_VALUE){do{
             if(!(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&ends_jag(data.cFileName)){
