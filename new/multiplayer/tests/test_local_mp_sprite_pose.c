@@ -268,6 +268,14 @@ int main(void)
     CHECK(avp_mp_sprite_predator_pain_pose(1).active);
     CHECK(avp_mp_sprite_predator_pain_pose(1).sequence==AS_KNOCKBACK);
     CHECK(!avp_mp_sprite_predator_pain_pose(2).active);
+    /* Marine, Alien, and Predator third-person recoil all use the same two
+     * original AMP.S 10 Hz frames rather than long PLAYER.S pain timers. */
+    for(unsigned species=0;species<3;species++)
+        for(unsigned age=0;age<6;age++){
+            AvpMpSpritePose recoil=avp_mp_sprite_enemy_recoil_pose(age);
+            CHECK(recoil.active==(age<2u));
+            if(age<2u)CHECK(recoil.sequence==AS_KNOCKBACK && recoil.frame==0);
+        }
     /* Alien enemy recoil is the same two 10 Hz frames as Predator AMP.S.
      * It must end even if PLAYER.S's first-person pain fade persists. */
     for(unsigned age=0;age<4;age++){

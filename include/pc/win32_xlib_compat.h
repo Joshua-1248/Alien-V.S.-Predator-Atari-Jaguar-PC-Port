@@ -80,11 +80,16 @@ typedef struct AvpWinEvent {
 #define XK_Page_Down 0xff56u
 #define XK_Shift_L 0xffe1u
 #define XK_Shift_R 0xffe2u
+#define XK_Control_L 0xffe3u
+#define XK_Control_R 0xffe4u
 #define XK_F2 0xffbfu
 #define XK_F3 0xffc0u
 #define XK_F5 0xffc2u
+#define XK_F6 0xffc3u
+#define XK_F7 0xffc4u
 #define XK_F8 0xffc5u
 #define XK_F9 0xffc6u
+#define XK_F10 0xffc7u
 #define XK_F12 0xffc9u
 #define XK_space 0x20u
 #define XK_numbersign 0x23u

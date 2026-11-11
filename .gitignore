@@ -1,11 +1,10 @@
-# CMake, Ninja, Make, and compiler outputs
 /build/
 /build-*/
 /cmake-build-*/
 /out/
 /dist/
-/Debug/
-/Release/
+/LINUX/
+/WINDOWS/
 /CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -30,14 +29,11 @@ Makefile
 *.profraw
 *.profdata
 *.dSYM/
-# Local compiled game / tool executables (NOT source)
 /avp_pc
 /avp_pc_clang
 /AVP_Jaguar_PC.exe
 /jagref
-/LINUX/
-/WINDOWS/
-# Retail games, prototypes, extracted copyrighted material (case-insensitive)
+# User-owned game and hardware data. Never commit.
 *.[jJ][aA][gG]
 *.[jJ]64
 *.[rR][oO][mM]
@@ -57,7 +53,7 @@ Makefile
 /extracted_assets/
 /roms/
 /ROMs/
-# Personal settings, saves, maps, traces and generated local screenshots
+# Local saves, settings and output
 settings.cfg
 avp_eeprom.bin
 avp_quickstate.bin
@@ -74,7 +70,6 @@ custom_maps/
 /screenshots/
 /captures/
 /recordings/
-# Release bundles and local experimentation
 *.zip
 *.tar
 *.tar.gz
@@ -89,7 +84,6 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .idea/
-# Credentials, tokens, and local environment
 .env
 .env.*
 !.env.example
@@ -97,4 +91,3 @@ __pycache__/
 *.p12
 *.key
 *credentials*.json
-.github/workflows/windows-release.yml

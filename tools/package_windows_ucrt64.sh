@@ -13,7 +13,7 @@ if [[ "${MSYSTEM:-}" != UCRT64 ]]; then
 fi
 
 cmake -S "$root" -B "$build" -G Ninja -DAVP_STRICT=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build "$build" -j4 --target avp_pc
+cmake --build "$build" -j4
 exe="$build/AVP_Jaguar_PC.exe"
 if [[ ! -s "$exe" ]]; then echo "ERROR: missing executable $exe" >&2; exit 1; fi
 "$exe" --help >/dev/null

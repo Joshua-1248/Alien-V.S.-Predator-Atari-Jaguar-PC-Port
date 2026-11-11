@@ -220,6 +220,19 @@ int main(void)
     m.custom_map=1; /* Blank custom map must not carry retail enemies. */
     CHECK(avp_mm_playtest_bind_amp(&m));
     for(unsigned g=0;g<4u;g++)CHECK(installed[g]&&installed[g][0].x==-1);
+    /* RE34: a retail-derived draft launched as custom ID 16 also must not
+     * inherit enemies, pickups or original door scripts. */
+    m.custom_map=0;m.standalone_runtime=1u;
+    CHECK(avp_mm_playtest_bind_amp(&m));
+    for(unsigned g=0;g<4u;g++)CHECK(installed[g]&&installed[g][0].x==-1);
+    CHECK(avp_mm_playtest_bind_scripts(&m));
+    CHECK(door_bound_count==15u && door_bound[1].exit_count==0u &&
+          door_bound[1].access_count==0u && door_bound[1].interlock_count==0u);
+    avp_mm_playtest_clear_runtime_overrides();
+    for(unsigned g=0;g<4u;g++)CHECK(installed[g]==original[g]);
+    /* Repeated cleanup may not free retail-owned placement records. */
+    avp_mm_playtest_clear_runtime_overrides();
+    for(unsigned g=0;g<4u;g++)CHECK(installed[g]==original[g]);
     printf("Map maker playtest AMP overlay: %d PASS\n",checks);
     return 0;
 }

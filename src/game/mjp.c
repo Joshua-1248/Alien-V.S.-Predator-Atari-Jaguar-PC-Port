@@ -21,6 +21,14 @@ static int escape_skip_enabled;
 static s32 mjp_pad_wait;
 static AvpMjpObject *pool;static unsigned pool_cap;static const u8 *save_slots;static size_t save_stride=20;static const char *current_text;static unsigned selected_character;
 static int text_abort;
+/* Retail Do_Escap $01DC52/$01DCA0/$01DD78 increments the actual
+ * Show_Tex Y cursor by the $4BEA8 14-pixel line step between successive
+ * countdown records on the SAME page. The renderer's line index must carry
+ * that source-owned advance, instead of restarting each word on row zero. */
+static unsigned mjp_escape_text_line;
+/* Original $4BEC8: the spoken Five/Four/Three/Two/One/Zero cues suppress
+ * TYP1B even though later Escape report pages enable it ($01E226). */
+static unsigned mjp_suppress_typing_sound;
 
 typedef struct AvpMjpFameEntry { char species; char name[7]; s32 score; } AvpMjpFameEntry;
 static AvpMjpFameEntry fame[5];
@@ -244,6 +252,17 @@ void New_Text(const char*t){current_text=t;}
  * at each new line, $01D2D4).  Do_Intro/Do_Escap set $18; other scenes keep
  * the port's established origin until individually verified. */
 static unsigned mjp_text_x0;
+/* Only modes that actually draw the green Show_Tex square need a cursor
+ * retirement callback. Keep SELECT/FAME/other MJP screens free from new
+ * incidental event-triggered host repaints. */
+static void mjp_cursor_retire(void)
+{
+    if(current_mjp_mode==AVP_MJP_INTRO ||
+       current_mjp_mode==AVP_MJP_ESCAPE ||
+       current_mjp_mode==AVP_MJP_SIM_TERMINATED ||
+       current_mjp_mode==AVP_MJP_BASE_EXPLODES)
+        evt(0x4d4a505au,0,0); /* MJPZ */
+}
 void Show_Tex(void)
 {
     /* Retail $01D1E0 walks a sequence of NUL-terminated lines terminated by
@@ -255,31 +274,63 @@ void Show_Tex(void)
     const AvpRuntimeOps *o=avp_runtime_ops();
     const unsigned char *p=(const unsigned char*)current_text;
     unsigned line=0;
-    int fast=(current_mjp_mode==AVP_MJP_FAME);
+    /* Retail Show_Tex at $01D3FE checks $4BEC8 and branches straight
+     * to the next character, bypassing BOTH the DEL cursor and the VBlank
+     * wait. R95 muted only TYP1B, unintentionally delaying the escape
+     * countdown by every padding-space and letter glyph. */
+    int fast=(current_mjp_mode==AVP_MJP_FAME || mjp_suppress_typing_sound);
     text_abort=0;
+    /* MJPZ is PC presentation metadata: the original screen contains a
+     * cursor only while Show_Tex is actively revealing characters. Retiring
+     * it changes no 68000 timing, audio, text, or screen-clearing operations.
+     * Always retire the previous message's cursor, including empty input. */
+    mjp_cursor_retire(); /* no cursor until a live glyph advances */
     if(!p)return;
     for(;;){
         unsigned x=mjp_text_x0;
         while(*p){
             unsigned char c=*p++;
             unsigned char draw=(c==' '||c=='~'||c=='@')?'_':c;
-            if(mjp_typewriter_sound_mode() && !fast && c!=' ' && c!=0 && o->frontend_event)
+            /* Retail Show_Tex $01D2FE..$01D376 skips TFX for ASCII
+             * space (mapped to underscore) AND a literal underscore.
+             * Tilde/@ are mapped later, after the TFX decision. */
+            if(mjp_typewriter_sound_mode() && !mjp_suppress_typing_sound && !fast && c!=' ' && c!='_' && c!=0 && o->frontend_event)
                 o->frontend_event(o->user,0x4d4a5041u,0x000221B8, -1); /* MJPA */
-            mjp_text_char(line,x,draw);
+            /* One_Tick's text position belongs to the original global Y cursor.
+             * Advance the host line only for the first spoken escape page's
+             * successive messages, preserving all authored line breaks. */
+            const unsigned display_line=line+
+                (current_mjp_mode==AVP_MJP_ESCAPE?mjp_escape_text_line:0u);
+            mjp_text_char(display_line,x,draw);
             x+=(c=='@')?(glyph_width>>1):glyph_width;
+            /* Presentation metadata, not an extra text/audio/video tick:
+             * The ROM's visible DEL/0x7F green block follows the next
+             * glyph X. It is distinct from silent/transparent ASCII '_'. */
+            if(!fast && (current_mjp_mode==AVP_MJP_INTRO ||
+                         current_mjp_mode==AVP_MJP_ESCAPE ||
+                         current_mjp_mode==AVP_MJP_SIM_TERMINATED ||
+                         current_mjp_mode==AVP_MJP_BASE_EXPLODES))
+                evt(0x4d4a5043u,(s32)x,(s32)display_line); /* MJPC */
             if(!fast){
                 One_Tick();mjppad();
                 if(mjp_pad&0x22002000u){
-                    if(current_mjp_mode==AVP_MJP_INTRO){text_abort=1;return;}
+                    if(current_mjp_mode==AVP_MJP_INTRO){
+                        text_abort=1;
+                        mjp_cursor_retire(); /* skipped text */
+                        return;
+                    }
                     fast=1;
                 }
             }
         }
         /* The retail renderer emits its underscore/blank cursor cell at each
          * line terminator before testing for the final empty line. */
-        mjp_text_char(line,x,'_');
+        mjp_text_char(line+(current_mjp_mode==AVP_MJP_ESCAPE?mjp_escape_text_line:0u),x,'_');
         ++p;
-        if(*p==0)return;
+        if(*p==0){
+            mjp_cursor_retire(); /* text completed, no cursor on hold */
+            return;
+        }
         ++line;
     }
 }
@@ -734,7 +785,25 @@ static int mjp_timed_wait(s32 count)
     }
 }
 static int mjp_wait_300(void){return mjp_timed_wait(300);}
+extern volatile u32 one_second_ticks;
 static void mjp_wait_exact(unsigned ticks){while(ticks--)One_Tick();}
+/* Original Do_Escap uses 70 $01E15A VBlank waits between consecutive
+ * spoken cues, or a 30+40-field hold/slide. Those are 70/60 seconds on
+ * a 60-Hz Jaguar. The user requests literal 1.000-second spoken intervals
+ * in the PC port, so compensate at this ONE presentation seam, without
+ * changing the original 68000 ROM or generic MJP tick clock.
+ * The current CROSS host reconstruction costs 8+16*2 = 40 fields. */
+static unsigned mjp_escape_cue_interval(void)
+{
+    return one_second_ticks==50u?50u:60u;
+}
+static int mjp_escape_before_slide_wait(void)
+{
+    const unsigned slide_fields=8u+16u*2u;
+    const unsigned target=mjp_escape_cue_interval();
+    /* mjp_timed_wait(N) waits N+1 fields, and then the slide costs 40. */
+    return mjp_timed_wait((s32)(target-slide_fields-1u));
+}
 static void mjp_scene_begin(unsigned tag)
 {
     /* Retail common local $01D740: Quick_St, Make_Rel, build the two initial
@@ -950,6 +1019,8 @@ void Do_Escap(void)
     mjp_scene_begin(0x45534350u); /* ESCP */
     mjp_slide_min=10;mjp_slide_max=10; /* $01DBA6, $01DBB0 */
     mjp_text_x0=0x18u;            /* $01DB92 */
+    mjp_escape_text_line=0u;
+    mjp_suppress_typing_sound=1u; /* $4BEC8=1: countdown words are silent TYP1B */
     Clear();Clear();              /* Buffer1 / Buffer2 */
 
     for(;;){
@@ -957,23 +1028,33 @@ void Do_Escap(void)
         mjp_transition(AVP_MJP_PAGE_BLANK,0); /* D6=$4BE18 -> first escape page */
         Clear();
 
-        mjp_text_id(0x0002ADDAu);mjp_audio_id(0x00022848u,0x2600);
-        mjp_wait_exact(70);
-        mjp_text_id(0x0002AE01u);mjp_audio_id(0x00022898u,0x2600);
-        mjp_wait_exact(70);
-        mjp_text_id(0x0002AE28u);mjp_audio_id(0x000228E8u,0x2600);
-        if(mjp_timed_wait(30)<0)break;
+        /* $01DC28..$01DCEE: the spoken sample starts BEFORE Show_Tex.
+         * The original countdown text cells are displayed on successive
+         * Y=$A6,$B4,$C2 lines; $4BEC8=1 suppresses ordinary TYP1B here. */
+        mjp_audio_id(0x00022848u,0x2600);mjp_text_id(0x0002ADDAu);
+        ++mjp_escape_text_line;
+        mjp_wait_exact(mjp_escape_cue_interval());
+        mjp_audio_id(0x00022898u,0x2600);mjp_text_id(0x0002AE01u);
+        ++mjp_escape_text_line;
+        mjp_wait_exact(mjp_escape_cue_interval());
+        mjp_audio_id(0x000228E8u,0x2600);mjp_text_id(0x0002AE28u);
+        if(mjp_escape_before_slide_wait()<0)break;
 
         mjp_transition(0,1);Clear();
-        mjp_text_id(0x0002AE4Fu);mjp_audio_id(0x00022938u,0x2600);
-        mjp_wait_exact(70);
-        mjp_text_id(0x0002AE76u);mjp_audio_id(0x00022988u,0x2600);
-        if(mjp_timed_wait(30)<0)break;
+        mjp_escape_text_line=0u; /* retail resets $4BEB4=$A6 for new page */
+        mjp_audio_id(0x00022938u,0x2600);mjp_text_id(0x0002AE4Fu);
+        ++mjp_escape_text_line;
+        mjp_wait_exact(mjp_escape_cue_interval());
+        mjp_audio_id(0x00022988u,0x2600);mjp_text_id(0x0002AE76u);
+        if(mjp_escape_before_slide_wait()<0)break;
 
-        mjp_transition(1,2);Clear();mjp_text_id(0x0002AE9Du);
+        mjp_transition(1,2);Clear();
+        mjp_escape_text_line=0u;
         mjp_audio_id(0x00021718u,-1);
+        mjp_text_id(0x0002AE9Du);
         if(mjp_wait_300()<0)break;
         if(mjp_wait_300()<0)break;
+        mjp_suppress_typing_sound=0u; /* $01E226: report text enables TYP1B */
         if(mjp_page(2,3,0x0002AEC4u)<0)break;
         if(mjp_page(3,4,0x0002AF39u)<0)break;
         if(mjp_wait_300()<0)break;
@@ -981,12 +1062,16 @@ void Do_Escap(void)
         if(mjp_wait_300()<0)break;
 
         Clear();mjp_transition(4,AVP_MJP_PAGE_BLANK); /* $01DEFC: page 4 -> $4BE18 */
+        mjp_suppress_typing_sound=1u;
+        mjp_escape_text_line=0u;
         escape_skip_enabled=1;   /* retail $01DF14 */
         ++unwind_clears;         /* one $01DF24 clear after this nested call */
     }
 
     while(unwind_clears--)Clear();
     mjp_text_x0=0u;
+    mjp_escape_text_line=0u;
+    mjp_suppress_typing_sound=0u;
     evt(0x4d4a5045u,0x45534350u,0);
 }
 
@@ -998,6 +1083,9 @@ void Do_Lose(void)
     Clear();Clear();Clear();
     mjp_slide_dir=0;              /* $01DA78 */
     mjp_transition(AVP_MJP_PAGE_BLANK,0);Clear(); /* D6=$4BE18, D7=page 0 */
+    /* The retail Do_Lose sets $4BEB0=$18 at $01DAAE before the text walk.
+     * In particular the Marine self-destruct report was hosted at X=0. */
+    if(!terminated)mjp_text_x0=0x18u;
     mjp_text_id(terminated?0x0002AFC3u:0x0002B036u);
     if(terminated){
         if(mjp_wait_300()<0)goto done;
@@ -1094,6 +1182,13 @@ void MTEST(AvpMjpMode m){
      * pixel storage are resource/backend work; the 68000-side selection of the
      * assets and controller remains explicit here. */
     load_mode_resources(m);
+#ifdef AVP_PC_HOST
+    /* Keep the original MJP text SFX commands unchanged; restrict only
+     * hosted overlap of TYP1B for Intro, matching the one-lane escape
+     * report's user-confirmed auditory cadence. MTEST owns cleanup for
+     * both ordinary scene completion and an A/B/C interruption. */
+    if(m==AVP_MJP_INTRO)avp_music_set_intro_typ1b_single_lane(1);
+#endif
     switch(m){
     case AVP_MJP_TITLE:Do_Title();break;
     case AVP_MJP_SELECT:
@@ -1115,4 +1210,7 @@ void MTEST(AvpMjpMode m){
     case AVP_MJP_PRED_WIN:case AVP_MJP_ALIEN_WIN:Do_Win();break;
     case AVP_MJP_SIM_TERMINATED:case AVP_MJP_BASE_EXPLODES:Do_Lose();break;
     }
+#ifdef AVP_PC_HOST
+    if(m==AVP_MJP_INTRO)avp_music_set_intro_typ1b_single_lane(0);
+#endif
 }

@@ -51,6 +51,7 @@
 #include "local_mp_bot_levels.h"
 #include "local_mp_bot_awareness.h"
 #include "local_mp_bot_targeting.h"
+#include "local_mp_cheat_targets.h"
 #include "local_mp_tracker_peers.h"
 #include "local_mp_enhancement_buffer.h"
 #include <math.h>
@@ -87,6 +88,7 @@ typedef struct AvpMpWalkHost {
     unsigned actors; /* human players + standalone bot actors */
     uint8_t random_species[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpBotState bots[AVP_LOCAL_MP_MAX_ACTORS];
+    AvpMpBotDoorClaims shared_door_claims;
     AvpMpBotContact contacts[AVP_LOCAL_MP_MAX_ACTORS][AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpBotTrail amp_trails[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     AvpMpBotTrail player_trails[AVP_LOCAL_MP_MAX_ACTORS];
@@ -123,7 +125,8 @@ typedef struct AvpMpWalkHost {
     unsigned collecting_player;
     u32 spawn_x[AVP_LOCAL_MP_MAX_ACTORS];
     u32 spawn_y[AVP_LOCAL_MP_MAX_ACTORS];
-    AvpMpSharedArrivalGrace shared_arrival; /* PC-only pair grace */
+    AvpMpSharedArrivalGrace shared_arrival; /* Existing P1-P4 arrival policy. */
+    AvpMpPeerGrace peer_spawn_grace; /* All 16 actors. */
     AvpMpEnhancementBuffer host_input_buffer; /* Opt-in P2-P4 sub-tick pulses. */
     u32 last_pad;
     float p1_forward, p1_strafe, p1_turn;
@@ -646,10 +649,9 @@ static int walk_join_group(void *u,AvpMpNativeWorld *w,unsigned mask,
     }
     return 1;
 }
-/* The co-op host tracks pairs that have just been placed on the same
- * valid floor point. There is currently no inter-player solid collision;
- * retaining these pair masks makes the landing contract explicit for the
- * future optional player collision setting without changing retail physics. */
+/* The co-op host tracks pairs recently placed on the same valid floor
+ * point. Original P1-P4 shared-arrival accounting is retained alongside
+ * the 16-actor PC-only peer-collision grace for overlapping arrivals. */
 static void walk_shared_arrival_refresh(AvpMpWalkHost *t,unsigned arriving_mask)
 {
     uint8_t present[4]={0};
@@ -667,6 +669,24 @@ static void walk_shared_arrival_refresh(AvpMpWalkHost *t,unsigned arriving_mask)
         }
     }
     avp_mp_shared_arrival_update(&t->shared_arrival,present,world_level,x,y,arriving_mask);
+    /* All 16 actors, including headless bots, share the same original
+     * same-world / PLAYER_WIDTH rule. The reusable helper also handles
+     * grace expiry when either actor moves away or changes worlds. */
+    {
+        uintptr_t worlds[AVP_MP_PEER_COUNT]={0};
+        uint32_t xs[AVP_MP_PEER_COUNT]={0},ys[AVP_MP_PEER_COUNT]={0};
+        uint32_t mask=0u;
+        for(unsigned p=0;p<t->actors;p++){
+            const AvpMpActiveWorld *world=avp_mp_session_player_world(&t->session,p);
+            const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
+            if(world&&a){
+                worlds[p]=(uintptr_t)(const void *)world;
+                xs[p]=a->player.x_pos;ys[p]=a->player.y_pos;
+                mask|=1u<<p;
+            }
+        }
+        avp_mp_peer_grace_update(&t->peer_spawn_grace,mask,worlds,xs,ys,arriving_mask);
+    }
 }
 /* Derive passengers only from the source map's authored closed chamber,
  * never distance or a visible open door. Keep the initiator's destination
@@ -950,6 +970,7 @@ static int walk_actor(void *u,unsigned p)
     s32 previous_x=new_x,previous_y=new_y;
     u32 prior_exit_effect=levfx_ID;
     int result=1;
+    AvpMpPeerCollisionView peer_view={0};
     /* Each dead player owns a 60-Hz fade. Neither their original movement
      * nor weapons advance while waiting for their own respawn. Their renderer
      * AMP snapshot is refreshed separately before each world update. */
@@ -1014,6 +1035,27 @@ static int walk_actor(void *u,unsigned p)
         avp_pc_runtime_set_mp_bot_floor_guard(t->session.setup.bot_enabled[p]);
         avp_pc_runtime_set_mp_player_floor_guard(!t->session.setup.bot_enabled[p]);
         avp_pc_runtime_set_mp_fast_sweep_guard(t->dm.enabled && t->dm.fast_movement);
+        /* Player collisions apply to humans AND native bots in the same
+         * physical world, with spawn/transport grace only for overlapping
+         * pairs.  The original SafePos/MovePlayer physics is unchanged. */
+        if(t->session.setup.player_collisions){
+            const AvpMpActiveWorld *own=avp_mp_session_player_world(&t->session,p);
+            peer_view.count=t->actors;
+            peer_view.from_x=(int32_t)x_pos;
+            peer_view.from_y=(int32_t)y_pos;
+            for(unsigned q=0;q<t->actors;q++)if(q!=p){
+                const AvpMpActiveWorld *other=avp_mp_session_player_world(&t->session,q);
+                const AvpMpActorNativeState *actor=(const AvpMpActorNativeState *)t->session.player[q];
+                if(own&&own==other&&actor&&actor->player.player_energy>0 &&
+                   !avp_mp_life_busy(&t->player_life[q]) &&
+                   !avp_mp_peer_grace_exempt(&t->peer_spawn_grace,p,q)){
+                    peer_view.active[q]=1;
+                    peer_view.x[q]=actor->player.x_pos;
+                    peer_view.y[q]=actor->player.y_pos;
+                }
+            }
+            avp_pc_runtime_set_mp_peer_collision_view(&peer_view);
+        }
         avp_player_set_pain_sounds(primary?avp_pc_video_player_pain_sounds_enabled(t->video):
                  (pref?pref->audio_player_pain:1));
         avp_player_set_facehug_pain_sounds(primary?avp_pc_video_facehug_pain_sounds_enabled(t->video):
@@ -1080,9 +1122,12 @@ static int walk_actor(void *u,unsigned p)
     avp_player_host_live_heading(t->live_heading[p].active &&
         !t->quick_turn[p].active,
         avp_pc_live_heading_word(&t->live_heading[p]));
-    avp_doors_mp_restrict_interactions(t->dm.enabled,
-                                      t->dm.level_travel);
+    avp_doors_mp_restrict_interactions(t->dm.enabled ||
+                                      t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL,
+                                      t->dm.level_travel &&
+                                      t->session.setup.custom_session_id!=AVP_MP_CUSTOM_LEVEL);
     avp_mp_player_native_step_actor();
+    avp_pc_runtime_set_mp_peer_collision_view(NULL);
     avp_pc_runtime_set_mp_bot_floor_guard(0);
     avp_pc_runtime_set_mp_player_floor_guard(0);
     avp_pc_runtime_set_mp_fast_sweep_guard(0);
@@ -1306,21 +1351,32 @@ static int walk_choose_target(void *u,const AvpAmp *a,unsigned amp_index,
         to.x=(s32)p->player.x_pos;to.y=(s32)p->player.y_pos;
         clear=LineOfSight(&from,&to)==0;
         if((int)i==t->amp_locked_player[(cur_level>=1&&cur_level<=15)?(unsigned)cur_level-1u:0u][amp_index] && clear){
-            t->dm_amp_target=i;
-            return (int)i;
+            /* R114: retained locks MUST pass through the same per-target
+             * cheat binding as newly chosen targets. Returning here reused
+             * the previous AMP's flags and could protect the wrong player. */
+            best=i;
+            visible=i;
+            break;
         }
         if(d<best_dist){best_dist=d;best=i;}
         if(clear && d<visible_dist){visible_dist=d;visible=i;}
     }
     best=visible!=~0u?visible:best;
     if(best!=~0u){
-        const AvpMpInputProfile *pref=&t->profiles.player[best<AVP_LOCAL_MP_MAX_PLAYERS?best:1u];
+        const AvpMpTargetCheatFlags flags=avp_mp_target_cheats(&t->profiles,best,
+            avp_pc_video_attacks_disabled(t->video),
+            avp_pc_video_facehug_attach_disabled(t->video));
         /* The original AMP mode runs with one actor scoped at a time.
-         * Rebind only that target's co-op cheat flags, never another player. */
-        avp_amp_set_attacks_disabled(best==0u?
-            avp_pc_video_attacks_disabled(t->video):pref->cheat_no_enemy_attack);
-        avp_amp_set_facehug_attach_disabled(best==0u?
-            avp_pc_video_facehug_attach_disabled(t->video):pref->cheat_no_facehug);
+         * Always bind only this target's flags, including retained locks.
+         * Bots cannot inherit P2's cheat flags. The AMP scoped visitor
+         * restores the prior world flags after each enemy update. */
+        avp_amp_set_attacks_disabled(flags.no_enemy_attack);
+        avp_amp_set_facehug_attach_disabled(flags.no_facehug);
+    }else{
+        /* No target: never carry the previous actor's protection into the
+         * next AMP update (especially a later bot or unprotected human). */
+        avp_amp_set_attacks_disabled(0);
+        avp_amp_set_facehug_attach_disabled(0);
     }
     t->amp_locked_player[(cur_level>=1&&cur_level<=15)?(unsigned)cur_level-1u:0u][amp_index]=best==~0u?-1:(int8_t)best;
     if(best!=~0u)t->dm_amp_target=best;
@@ -1800,11 +1856,10 @@ static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
                         t->sprite_cloak_tick[q]=t->session.tick;
                     }
                 }
-                /* Alien and Predator enemy recoil lasts two native ticks.
-                 * Track third-person hits independently from the original
-                 * PLAYER.S pain/fade clock (which remains unchanged). */
-                if(type==PT_ALIEN || type==PT_PREDATOR)
-                    avp_mp_sprite_enemy_recoil_observe(&t->sprite_pain_valid[q],
+                /* All three third-person avatars use their original AMP
+                 * enemy recoil cadence (two native ticks). The player's
+                 * longer first-person PLAYER.S pain/fade stays unchanged. */
+                avp_mp_sprite_enemy_recoil_observe(&t->sprite_pain_valid[q],
                         &t->sprite_pain_last_energy[q],&t->sprite_pain_tick[q],
                         b->player.player_energy,t->session.tick);
                 if((pose=avp_mp_sprite_pending_death_pose(
@@ -1823,15 +1878,11 @@ static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
                                     t->session.tick-t->sprite_roar_tick[q]))).active){
                     others[visible].animation=pose.sequence;
                     others[visible].frame=pose.frame;
-                }else if((type==PT_ALIEN || type==PT_PREDATOR) &&
-                         t->sprite_pain_valid[q] &&
+                }else if(t->sprite_pain_valid[q] &&
                          (pose=avp_mp_sprite_enemy_recoil_pose((unsigned)(
                                     t->session.tick-t->sprite_pain_tick[q]))).active){
                     others[visible].animation=pose.sequence;
                     others[visible].frame=pose.frame;
-                }else if(type==PT_HUMAN && b->player.pain>0){
-                    others[visible].animation=AS_KNOCKBACK;
-                    others[visible].frame=0;
                 }else if(type==PT_HUMAN &&
                     avp_mp_sprite_marine_crouch_weapon(t->sprite_fire_weapon[q]) &&
                     walk_marine_attack_front(&others[visible],rx,ry) &&
@@ -2068,22 +2119,7 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
     setup.enabled=1;setup.players=t->players;setup.campaign=t->species;
     {const AvpLocalMpSetup *menu=avp_pc_video_local_mp_setup(v);
      if(menu){
-         setup.layout=menu->layout;
-         setup.respawn_campaign_start=menu->respawn_campaign_start;
-         setup.game_mode=menu->game_mode;
-         setup.dm_score_limit=menu->dm_score_limit;
-         setup.dm_time_limit=menu->dm_time_limit;
-         setup.dm_fast_movement=menu->dm_fast_movement;
-         setup.dm_fast_equip=menu->dm_fast_equip;
-         setup.dm_enemies=menu->dm_enemies;
-         setup.dm_level=menu->dm_level;
-         setup.dm_level_travel=menu->dm_level_travel;
-        setup.dm_cloak_damage=menu->dm_cloak_damage;
-         setup.bot_count=menu->bot_count;
-         setup.show_whole_map=menu->show_whole_map;
-         setup.random_species_on_respawn=menu->random_species_on_respawn;
-         memcpy(setup.bot_species,menu->bot_species,sizeof setup.bot_species);
-         memcpy(setup.bot_behavior,menu->bot_behavior,sizeof setup.bot_behavior);
+         avp_local_mp_copy_session_options(&setup,menu);
          for(unsigned p=0;p<t->players;p++)
              setup.bot_enabled[p]=menu->bot_enabled[p];
      }}
@@ -2091,22 +2127,8 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
         AvpLocalMpSetup selected=*requested;
         avp_local_mp_validate(&selected);
         if(selected.players!=t->players || selected.campaign!=t->species)return 0;
-        setup.layout=selected.layout;
-        setup.respawn_campaign_start=selected.respawn_campaign_start;
-        setup.game_mode=selected.game_mode;
-        setup.dm_score_limit=selected.dm_score_limit;
-        setup.dm_time_limit=selected.dm_time_limit;
-        setup.dm_fast_movement=selected.dm_fast_movement;
-        setup.dm_fast_equip=selected.dm_fast_equip;
-        setup.dm_enemies=selected.dm_enemies;
-        setup.dm_level=selected.dm_level;
-        setup.dm_level_travel=selected.dm_level_travel;
-        setup.dm_cloak_damage=selected.dm_cloak_damage;
-        setup.bot_count=selected.bot_count;
-        setup.show_whole_map=selected.show_whole_map;
-        setup.random_species_on_respawn=selected.random_species_on_respawn;
-        memcpy(setup.bot_species,selected.bot_species,sizeof setup.bot_species);
-        memcpy(setup.bot_behavior,selected.bot_behavior,sizeof setup.bot_behavior);
+        avp_local_mp_copy_session_options(&setup,&selected);
+        setup.custom_session_id=selected.custom_session_id;
         for(unsigned p=0;p<t->players;p++){
             setup.species[p]=selected.species[p];
             setup.bot_enabled[p]=selected.bot_enabled[p];
@@ -2339,8 +2361,22 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
             t->patrol[p].valid=0u;
         }
     }
-    if(!t->patrol[p].valid && avp_mp_bot_patrol_pick(&v->map,x,y,
-         t->patrol[p].visits,(uint32_t)v->tick+(p+1u)*0x9e3779b9u,&tx,&ty)){
+    if(!t->patrol[p].valid){
+        uint16_t personal[AVP_MP_BOT_MAP_CELLS];
+        memcpy(personal,t->patrol[p].visits,sizeof personal);
+        /* Existing per-bot visits are independent. Also reserve other
+         * live bot patrol destinations (not opponents' hidden locations),
+         * so similarly spawned bots don't all choose the same route. */
+        for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+           t->session.setup.bot_enabled[q] && t->patrol[q].valid &&
+           t->patrol[q].level==level){
+            int px=(int)(t->patrol[q].x>>16),py=(int)(t->patrol[q].y>>16);
+            for(int yy=py-2;yy<=py+2;yy++)for(int xx=px-2;xx<=px+2;xx++)
+                if(xx>=0&&yy>=0&&xx<64&&yy<64)
+                    personal[(unsigned)yy*64u+(unsigned)xx]=65535u;
+        }
+        if(avp_mp_bot_patrol_pick(&v->map,x,y,personal,
+         (uint32_t)(p+1u)*0x9e3779b9u+(uint32_t)(v->tick/180u),&tx,&ty)){
         t->patrol[p].x=(tx<<16)|0x8000u;
         t->patrol[p].y=(ty<<16)|0x8000u;
         t->patrol[p].expires=v->tick+180u;
@@ -2360,6 +2396,7 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
         t->bots[p].immobile_ticks=0u;
         t->bots[p].evade_ticks=0u;
         t->bots[p].last_motion=0u;
+        }
     }
     if(t->patrol[p].valid){
         v->has_target=1u;v->hostile_target=0u;
@@ -2650,6 +2687,7 @@ static int walk_bot_choose_level_route(AvpMpWalkHost *t,unsigned player,
     uint64_t tick=view->tick;
     if(!t||!world||!world->map||!map||!map->cells||
        player>=AVP_LOCAL_MP_MAX_ACTORS ||
+       t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL ||
        (t->dm.enabled && !t->dm.level_travel))return 0;
     if(t->retail_catalog_ready){
         /* Cache only for a bounded eight original ticks. Revalidate that
@@ -2727,6 +2765,19 @@ static void walk_bot_commands(AvpMpWalkHost *t,
         view.behavior=p<t->players?AVP_MP_BOT_BALANCED:
             t->session.setup.bot_behavior[p-t->players];
         view.heading=a->player.centre_angle;view.player_index=p;view.tick=tick;
+        view.door_claims=&t->shared_door_claims;
+        /* Read the ORIGINAL currently animated doors, not only their maze
+         * opening bytes. A door may be active with byte zero for one tick
+         * after the first bot's Use, and another Use would reverse it. */
+        if(world->doors.valid && world->map &&
+           world->doors.maze==world->map->bytes+8u){
+            for(unsigned d=0;d<2u;d++)if(world->doors.door[d].active &&
+                 world->doors.door[d].offset<
+                     (size_t)world->map->width*world->map->height*8u){
+                view.active_door_offsets[view.active_door_count++]=
+                    (uint32_t)world->doors.door[d].offset;
+            }
+        }
         view.player_species=species;
         view.deathmatch=t->dm.enabled;
         view.current_weapon=(unsigned)(a->weapon.cur_wepno>0 ? a->weapon.cur_wepno : 0);
@@ -3766,6 +3817,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
     AvpMpWalkHost *t=(AvpMpWalkHost *)calloc(1,sizeof(*t));
     uint64_t next_tick, next_display, next_render;
     int quit=0,failed=0,completed=0,return_to_title=0,restart_from_f2=0;
+    int start_custom_from_cheat=0;
     int f2_menu_audio_suspended=0;
     uint64_t dm_finished_at=0;
     int victory_ending=0;
@@ -4011,6 +4063,9 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
             t->p1_enhanced_aim=avp_pc_video_enhanced_analog_enabled(video);
             t->p1_mouse_aim=avp_pc_video_mouse_aim_active(video);
             t->pending_actions=avp_pc_video_take_actions(video);
+            if(t->pending_actions&AVP_PC_ACTION_CUSTOM_MAP_START){
+                start_custom_from_cheat=1;break;
+            }
             for(unsigned p=0;p<t->players;p++)
                 t->pending_cheat_actions[p]=avp_pc_video_take_local_mp_cheat_actions(video,p);
             t->p1_weapon_delta=avp_pc_video_take_weapon_delta(video);
@@ -4411,7 +4466,8 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
     player_type=host_campaign_type;
     avp_pc_video_local_mp_walktest_mode(video,0);
     free(t);
-    return failed?AVP_MP_RUN_ERROR:(restart_from_f2?AVP_MP_RUN_RESTART:
+    return failed?AVP_MP_RUN_ERROR:(start_custom_from_cheat?AVP_MP_RUN_CUSTOM_MAP:
+           (restart_from_f2?AVP_MP_RUN_RESTART:
            (return_to_title?AVP_MP_RUN_TITLE:
-           (completed?AVP_MP_RUN_COMPLETED:AVP_MP_RUN_EXIT)));
+           (completed?AVP_MP_RUN_COMPLETED:AVP_MP_RUN_EXIT))));
 }

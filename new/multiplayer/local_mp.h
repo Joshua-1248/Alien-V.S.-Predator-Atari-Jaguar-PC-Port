@@ -8,7 +8,10 @@
 #define AVP_LOCAL_MP_MAX_PLAYERS 4u /* human input and viewports */
 #define AVP_LOCAL_MP_MAX_BOTS 12u
 #define AVP_LOCAL_MP_MAX_ACTORS (AVP_LOCAL_MP_MAX_PLAYERS+AVP_LOCAL_MP_MAX_BOTS)
-#define AVP_LOCAL_MP_ROWS 50u
+#define AVP_LOCAL_MP_ROWS 53u
+#define AVP_MP_CUSTOM_LEVEL 16u /* PC-only session identity; source art remains mapped explicitly. */
+#define AVP_LOCAL_MP_CUSTOM_NAME_ROW 50u
+#define AVP_LOCAL_MP_CUSTOM_LOAD_ROW 51u
 /* UI-only F2 submenus. Existing 0..49 setting IDs are unchanged. */
 #define AVP_LOCAL_MP_MENU_ROWS (AVP_LOCAL_MP_ROWS+3u)
 #define AVP_LOCAL_MP_MENU_BOTS_ROW AVP_LOCAL_MP_ROWS
@@ -19,6 +22,7 @@ enum AvpLocalMpMenuPage {
     AVP_LOCAL_MP_MENU_MODIFIERS, AVP_LOCAL_MP_MENU_OPTIONS
 };
 #define AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW 49u /* Both co-op and Deathmatch */
+#define AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW 52u /* New stable row; default on */
 #define AVP_LOCAL_MP_BOT_COUNT_ROW 20u
 #define AVP_LOCAL_MP_BOT_SPECIES_ROW 21u
 #define AVP_LOCAL_MP_BOT_BEHAVIOR_ROW 25u
@@ -57,7 +61,10 @@ typedef struct AvpLocalMpSetup {
     unsigned dm_fast_movement; /* Deathmatch only; native speed/acceleration x2. */
     unsigned dm_fast_equip; /* Deathmatch only: faster original-weapon presentation. */
     unsigned dm_enemies; /* Default 0: no hostile NPCs in Deathmatch. */
-    unsigned dm_level; /* 1..15 original retail levels, independent of campaign. */
+    unsigned dm_level;
+    unsigned level_explicit; /* F2 user changed Level Select; do not override default co-op. */
+    unsigned custom_session_id; /* 0 retail, 16 custom; never index retail arrays with 16. */ /* 1..15 retail, 16 = PC-only custom map, not a Jaguar LEVELS index. */
+    char custom_map_stem[96]; /* safe filename stem, selected by map browser. */
     unsigned dm_level_travel; /* Deathmatch only; default off. */
     unsigned dm_cloak_damage; /* Deathmatch modifier: cloaked Predator takes 4x PvP damage. */
     unsigned bot_count; /* Separate headless native players, not P1-P4 AI flags. */
@@ -66,6 +73,7 @@ typedef struct AvpLocalMpSetup {
     unsigned random_species_on_respawn;
     unsigned show_whole_map;
     unsigned show_other_players_on_automap; /* Default on; affects map dots only, never radar. */
+    unsigned player_collisions; /* Default on; includes bots and co-op/DM. */
     unsigned respawn_campaign_start; /* Co-op choice: 1=campaign start, 0=own species start. */
     unsigned bot_enabled[AVP_LOCAL_MP_MAX_ACTORS]; /* PC-only per-slot bot control, including P1. */
     unsigned species[AVP_LOCAL_MP_MAX_ACTORS];
@@ -81,6 +89,10 @@ typedef struct AvpLocalMpWorld {
 } AvpLocalMpWorld;
 
 void avp_local_mp_defaults(AvpLocalMpSetup *s);
+/* Preserve user-selected options when building a fresh playable session.
+ * Does not replace player identity, active level, or runtime-only state. */
+void avp_local_mp_copy_session_options(AvpLocalMpSetup *dst,
+                                       const AvpLocalMpSetup *src);
 void avp_local_mp_validate(AvpLocalMpSetup *s);
 int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction);
 int avp_local_mp_row_visible(const AvpLocalMpSetup *s,unsigned row);

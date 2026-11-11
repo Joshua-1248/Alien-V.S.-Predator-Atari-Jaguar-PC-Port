@@ -176,7 +176,7 @@ int main(void)
             avp_gpu_frontend_event(&st,0x5449434bu,0,0); /* TICK */
         /* The title plane remains through the CPU's original 141-VBL wait. */
         assert(st.frontend_title_splash==1u);
-        assert(st.frontend_title_reveal_tick==96u);
+        assert(st.frontend_title_reveal_tick==128u);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
         const u32 bright=fb.pixels[225u*fb.width+310u];
         assert(bright!=0u);
@@ -233,9 +233,8 @@ int main(void)
         st.frontend_loaded[0u][0u]=0u;
     }
     /* Retail title slot 0 is an unscaled 320x280 BITOBJ. Make_TLi +
-     * Make_New encodes initial YPOS=2*Zero_Line=56. With NTSC VDB=28,
-     * the first picture row is (56-28)/2=14. In the 320x228 host aperture
-     * the source rows 0..213 are clipped without compression. */
+     * Make_New encodes YPOS=2*Zero_Line=28, equal to VDB=28. The first
+     * picture row is native row ZERO; rows 0..227 remain unscaled. */
     {
         u8 *backdrop=(u8*)calloc(320u*280u*3u,1u);
         assert(backdrop);
@@ -252,19 +251,15 @@ int main(void)
         /* No logos, menu glyphs or fades interfere with these samples. */
         const u16 first=avp_gpu_rgb16_pack(0u,70u,24u);
         u8 r,g,b;
-        /* The top 14 active-display rows are blank before the title BITOBJ.
-         * The source begins at native Y=14, not at the framebuffer top. */
+        /* The retail title BITOBJ begins at the first active row. */
         avp_gpu_rgb16_unpack(first,&r,&g,&b);
-        assert(fb.pixels[0u*fb.width+310u]==0u);
-        assert(fb.pixels[13u*fb.width+310u]==0u);
-        assert(fb.pixels[14u*fb.width+310u]==
+        assert(fb.pixels[0u*fb.width+310u]==
                (((u32)r<<16)|((u32)g<<8)|(u32)b));
         avp_gpu_rgb16_unpack(avp_gpu_rgb16_pack(100u,70u,24u),&r,&g,&b);
-        assert(fb.pixels[114u*fb.width+310u]==
+        assert(fb.pixels[100u*fb.width+310u]==
                (((u32)r<<16)|((u32)g<<8)|(u32)b));
-        /* 228px host output line 227 maps to source row 213, not R204's
-         * 238 (unpositioned and vertically shrunk). */
-        avp_gpu_rgb16_unpack(avp_gpu_rgb16_pack(213u,70u,24u),&r,&g,&b);
+        /* 228px host output line 227 maps to source row 227. */
+        avp_gpu_rgb16_unpack(avp_gpu_rgb16_pack(227u,70u,24u),&r,&g,&b);
         assert(fb.pixels[227u*fb.width+310u]==
                (((u32)r<<16)|((u32)g<<8)|(u32)b));
         avp_gpu_frontend_enter_mode(&st,AVP_MJP_CREDITS);
@@ -272,8 +267,7 @@ int main(void)
         /* CREDITS shares this unscaled title origin and dims at 6/16. */
         const u16 faded=avp_gpu_rgb16_fraction(first,6u);
         avp_gpu_rgb16_unpack(faded,&r,&g,&b);
-        assert(fb.pixels[13u*fb.width+310u]==0u);
-        assert(fb.pixels[14u*fb.width+310u]==
+        assert(fb.pixels[0u*fb.width+310u]==
                (((u32)r<<16)|((u32)g<<8)|(u32)b));
         st.frontend_loaded[0u][0u]=0u;
         st.frontend_img[0u][0u].rgb=NULL;
@@ -288,10 +282,10 @@ int main(void)
         st.mjp_font_size=224u*39u*2u;
         set_mjp_cell(st.mjp_font,'A',0x11e0u);
         avp_gpu_frontend_event(&st,0x5449544cu,0,0);
-        for(unsigned i=0u;i<82u;i++)avp_gpu_frontend_event(&st,0x5449434bu,0,0);
+        for(unsigned i=0u;i<114u;i++)avp_gpu_frontend_event(&st,0x5449434bu,0,0);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
         for(unsigned x=0u;x<fb.width;x++)assert(fb.pixels[182u*fb.width+x]==0u);
-        avp_gpu_frontend_event(&st,0x5449434bu,0,0); /* 83: copyright */
+        avp_gpu_frontend_event(&st,0x5449434bu,0,0); /* 115: copyright after logo reveal */
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
         int has_letter=0;
         for(unsigned x=0u;x<fb.width;x++)
@@ -997,40 +991,45 @@ int main(void)
         for(unsigned i=16u;i<32u;i++)avp_gpu_frontend_event(&st,0x5449434bu,0,0);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
         assert(fb.pixels[70u*fb.width+10u]==expected_rgb16(60u,60u,60u));
-        /* MJP Object Processor half-line YPOS is not a pixel Y coordinate.
-         * NTSC VDB=$1C: Alien = ((2*(28+32))-28)/2 = 46, not 32. */
-        assert(fb.pixels[46u*fb.width+42u]==0xf02818u); /* Update phase 32 */
-        assert(fb.pixels[32u*fb.width+42u]!=0xf02818u);
-        for(unsigned i=32u;i<40u;i++){
+        /* R77: the first 32 VBLs show the backdrop, before the PC's
+         * scaled logo animation begins. The exact original delay remains
+         * unverified without the owner's ROM and reference capture. */
+        assert(fb.pixels[32u*fb.width+42u]==expected_rgb16(60u,60u,60u));
+        for(unsigned i=32u;i<64u;i++)
             avp_gpu_frontend_event(&st,0x5449434bu,0,0);
-            if(i==32u||i==33u||i==34u){
+        avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
+        /* Retail model: Alien YPOS=$5c, NTSC VDB=$1c -> row 32. */
+        assert(fb.pixels[32u*fb.width+42u]==0xf02818u); /* Update phase 32 */
+        assert(fb.pixels[31u*fb.width+42u]!=0xf02818u);
+        for(unsigned i=64u;i<72u;i++){
+            avp_gpu_frontend_event(&st,0x5449434bu,0,0);
+            if(i==64u||i==65u||i==66u){
                 avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
-                if(i<=33u){ /* same original phase 1 for two ticks */
-                    assert(fb.pixels[120u*fb.width+12u]==0x30dc50u);
-                    assert(fb.pixels[115u*fb.width+21u]==expected_rgb16(60u,60u,60u));
+                if(i<=65u){ /* same original phase 1 for two ticks */
+                    assert(fb.pixels[106u*fb.width+12u]==0x30dc50u);
+                    assert(fb.pixels[101u*fb.width+21u]==expected_rgb16(60u,60u,60u));
                 }else{ /* original phase 3 after the increment */
-                    assert(fb.pixels[115u*fb.width+21u]==0x30dc50u);
-                    assert(fb.pixels[120u*fb.width+12u]==expected_rgb16(60u,60u,60u));
+                    assert(fb.pixels[101u*fb.width+21u]==0x30dc50u);
+                    assert(fb.pixels[106u*fb.width+12u]==expected_rgb16(60u,60u,60u));
                 }
             }
         }
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
-        assert(fb.pixels[46u*fb.width+42u]==0xf02818u);
+        assert(fb.pixels[32u*fb.width+42u]==0xf02818u);
         /* Update2 phase 7 after two ticks at each odd phase. */
-        assert(fb.pixels[106u*fb.width+40u]==0x30dc50u);
+        assert(fb.pixels[92u*fb.width+40u]==0x30dc50u);
         assert(fb.pixels[20u*fb.width+220u]==expected_rgb16(60u,60u,60u));
-        for(unsigned i=40u;i<80u;i++)avp_gpu_frontend_event(&st,0x5449434bu,0,0);
+        for(unsigned i=72u;i<112u;i++)avp_gpu_frontend_event(&st,0x5449434bu,0,0);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
         /* R279: the GPU advances the ALIEN strip $23 times (Clear_Bu
          * $1FA82-$1FAE0), so it rests at Update phase 35: x=(32-35)*8+42=18. */
-        assert(fb.pixels[46u*fb.width+18u]==0xf02818u);
+        assert(fb.pixels[32u*fb.width+18u]==0xf02818u);
         assert(fb.pixels[46u*fb.width+17u]==expected_rgb16(60u,60u,60u));
-        /* Predator Update2 at phase 33: YPOS=2*28+216-148=124,
-         * native y=(124-VDB)/2=48, aligned with the Alien logo. */
-        assert(fb.pixels[48u*fb.width+155u]==0x30dc50u); /* phase 33 */
-        assert(fb.pixels[48u*fb.width+314u]==0x30dc50u);
-        assert(fb.pixels[48u*fb.width+315u]==expected_rgb16(60u,60u,60u));
-        assert(st.frontend_title_reveal_tick==80u);
+        /* Predator phase 33: YPOS=28+216-148=96 -> row 34. */
+        assert(fb.pixels[34u*fb.width+155u]==0x30dc50u); /* phase 33 */
+        assert(fb.pixels[34u*fb.width+314u]==0x30dc50u);
+        assert(fb.pixels[34u*fb.width+315u]==expected_rgb16(60u,60u,60u));
+        assert(st.frontend_title_reveal_tick==112u);
         /* FILES 237 is 320x76 although the OP aperture says 82 lines.
          * A safe source read must not wrap into other allocation pixels. */
         /* At x=200 we are outside the now two-scanline-taller ALIEN
@@ -1045,8 +1044,8 @@ int main(void)
             alien[source_at]=240u;alien[source_at+1u]=40u;alien[source_at+2u]=25u;
         }
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
-        assert(fb.pixels[53u*fb.width+22u]==0xf02818u);
-        assert(fb.pixels[53u*fb.width+23u]==expected_rgb16(60u,60u,60u));
+        assert(fb.pixels[39u*fb.width+22u]==0xf02818u);
+        assert(fb.pixels[39u*fb.width+23u]==expected_rgb16(60u,60u,60u));
         /* Original SCBITOBJ vertical REMAINDER is VSCALE+0x20, so at
          * scale 9 the first two *displayed* rows share source row 0,
          * source rows 1-2 are skipped, displayed row 2 samples source
@@ -1067,12 +1066,12 @@ int main(void)
         alien[3u*109u*320u+1u]=40u;
         alien[3u*109u*320u+2u]=25u;         /* never displayed */
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
-        assert(fb.pixels[46u*fb.width+18u]==0xf02818u);
-        assert(fb.pixels[47u*fb.width+18u]==0xf02818u);
-        assert(fb.pixels[48u*fb.width+18u]==0x30dc50u);
-        assert(fb.pixels[49u*fb.width+18u]==expected_rgb16(60u,60u,60u));
-        assert(fb.pixels[77u*fb.width+18u]==0xf02818u);
-        assert(fb.pixels[78u*fb.width+18u]==expected_rgb16(60u,60u,60u));
+        assert(fb.pixels[32u*fb.width+18u]==0xf02818u);
+        assert(fb.pixels[33u*fb.width+18u]==0xf02818u);
+        assert(fb.pixels[34u*fb.width+18u]==0x30dc50u);
+        assert(fb.pixels[35u*fb.width+18u]==expected_rgb16(60u,60u,60u));
+        assert(fb.pixels[63u*fb.width+18u]==0xf02818u);
+        assert(fb.pixels[64u*fb.width+18u]==expected_rgb16(60u,60u,60u));
         /* Each of the 35 original ALIEN Update phases must use the exact
          * OP phrase remainder, not proportional nearest-neighbor sampling.
          * Give each source row a unique native-RGB16 marker at X=0, walk an
@@ -1092,7 +1091,7 @@ int main(void)
             const unsigned x=(32u-tick)*8u+42u;
             unsigned srcrow=0u,remainder=scale+32u;
             assert(width>0u && x<320u);
-            st.frontend_title_reveal_tick=tick;
+            st.frontend_title_reveal_tick=tick+32u;
             st.frontend_title_splash=1u;
             avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
             for(unsigned yy=0u; yy<height;yy++){
@@ -1100,13 +1099,13 @@ int main(void)
                     (u8)((srcrow&31u)*8u),
                     (u8)((1u+(srcrow>>5))*48u),32u);
                 assert(srcrow<110u);
-                assert(fb.pixels[(46u+yy)*fb.width+x]==expected);
+                assert(fb.pixels[(32u+yy)*fb.width+x]==expected);
                 while(remainder<32u){remainder+=scale;srcrow++;}
                 remainder-=32u;
             }
             assert(srcrow>=110u);
         }
-        st.frontend_title_reveal_tick=80u;
+        st.frontend_title_reveal_tick=112u;
         /* Restore fully covered synthetic title before the keyed test. */
         for(size_t i=0;i<sizeof(alien);i+=3u){alien[i]=240u;alien[i+1u]=40u;alien[i+2u]=25u;}
         /* Retail OP TRANS keys exactly on RGB16 color zero. Low-intensity
@@ -1116,7 +1115,7 @@ int main(void)
             static u8 keyed_sprite[320u*122u*3u]={24u,0u,0u};
             st.frontend_img[AVP_MJP_TITLE][3]=(AvpGpuRgbImage){320,122,keyed_sprite,NULL};
             avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
-            assert(fb.pixels[46u*fb.width+18u]==0x180000u);
+            assert(fb.pixels[32u*fb.width+18u]==0x180000u);
             assert(fb.pixels[32u*fb.width+120u]==expected_rgb16(60u,60u,60u));
         }
         /* R188: the unscaled title background is an original RGB16 Object
@@ -1129,9 +1128,9 @@ int main(void)
             avp_gpu_frontend_present(&st,&fb,AVP_MJP_TITLE,0);
             packed=avp_gpu_rgb16_pack(123u,101u,37u);
             avp_gpu_rgb16_unpack(packed,&rr,&gg,&bb);
-            assert(fb.pixels[0]==0u); /* title source begins at Y=14 */
-            assert(fb.pixels[14u*fb.width]==(((u32)rr<<16)|((u32)gg<<8)|bb));
-            assert(fb.pixels[14u*fb.width]!=0x7b6525u);
+            assert(fb.pixels[0]==(((u32)rr<<16)|((u32)gg<<8)|bb)); /* title OP starts at Y=0 */
+            assert(fb.pixels[14u*fb.width]==expected_rgb16(60u,60u,60u));
+            assert(fb.pixels[0]!=0x7b6525u);
             background[0]=60u;background[1]=60u;background[2]=60u;
         }
         st.frontend_loaded[AVP_MJP_TITLE][0]=0u;
@@ -1237,11 +1236,21 @@ int main(void)
         st.mjp_font=(u8*)calloc(224u*39u*2u,1u);assert(st.mjp_font);
         st.mjp_font_size=224u*39u*2u;
         set_mjp_cell(st.mjp_font,'S',0x11c0u);
+        set_mjp_cell(st.mjp_font,'_',0x11c0u);
         avp_gpu_frontend_enter_mode(&st,AVP_MJP_SIM_TERMINATED);
         avp_gpu_frontend_draw_text(&st,1u,"S",63u);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_SIM_TERMINATED,0);
         assert(fb.pixels[28u*fb.width+63u]!=0u);
         assert(fb.pixels[178u*fb.width+91u]==0u);
+        /* R92: advancing CPU text moves a visible cursor brush at the
+         * next glyph position without moving already printed characters. */
+        avp_gpu_frontend_event(&st,0x4d4a5043u,70,1);
+        avp_gpu_frontend_present(&st,&fb,AVP_MJP_SIM_TERMINATED,0);
+        assert(fb.pixels[28u*fb.width+70u]!=0u);
+        avp_gpu_frontend_event(&st,0x4d4a5043u,77,1);
+        avp_gpu_frontend_present(&st,&fb,AVP_MJP_SIM_TERMINATED,0);
+        assert(fb.pixels[28u*fb.width+77u]!=0u);
+        assert(fb.pixels[28u*fb.width+70u]==0u);
         avp_gpu_frontend_event(&st,0x4d4a5050u,0,0); /* first same-page MJPP */
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_SIM_TERMINATED,0);
         assert(fb.pixels[28u*fb.width+63u]==0u);

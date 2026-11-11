@@ -10,6 +10,7 @@ void avp_pc_audio_update_generator_alarm(s32 volume,s32 pitch);
 /* FX_xp1b15 word 3; rate -1 preserves the last descriptor value. */
 void avp_pc_audio_play_explosion(s32 rate);
 void avp_pc_audio_play_handle(unsigned descriptor_address,u32 handle,unsigned voice,s32 left,s32 right);
+void avp_pc_audio_play_handle_d1(unsigned descriptor_address,u32 handle,unsigned voice,s32 left,s32 right,s32 d1);
 void avp_pc_audio_stop_handle(u32 handle);
 int avp_pc_audio_handle_active(u32 handle);
 int avp_pc_audio_voice_active(unsigned voice);

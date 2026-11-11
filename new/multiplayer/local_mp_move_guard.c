@@ -1,7 +1,64 @@
 #include "local_mp_move_guard.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
+int avp_mp_move_guard_peers(const AvpMpPeerCollisionView *view,
+                            int32_t x,int32_t y)
+{
+    if(!view)return 1;
+    for(unsigned q=0;q<view->count && q<AVP_MP_PEER_COUNT;q++){
+        if(!view->active[q])continue;
+        const int64_t dx=(int64_t)x-(int32_t)view->x[q];
+        const int64_t dy=(int64_t)y-(int32_t)view->y[q];
+        if(dx>-(int64_t)AVP_MP_PEER_CLEARANCE &&
+           dx<(int64_t)AVP_MP_PEER_CLEARANCE &&
+           dy>-(int64_t)AVP_MP_PEER_CLEARANCE &&
+           dy<(int64_t)AVP_MP_PEER_CLEARANCE){
+            /* If the toggle is switched on while two people ALREADY
+             * overlap, never pin them together. Only permit displacement
+             * which increases separation without shrinking either axis;
+             * the next clear position becomes normally solid again. */
+            const int64_t sx=(int64_t)view->from_x-(int32_t)view->x[q];
+            const int64_t sy=(int64_t)view->from_y-(int32_t)view->y[q];
+            const uint64_t ax=(uint64_t)(dx<0?-dx:dx),
+                           ay=(uint64_t)(dy<0?-dy:dy);
+            const uint64_t oldx=(uint64_t)(sx<0?-sx:sx),
+                           oldy=(uint64_t)(sy<0?-sy:sy);
+            if(oldx<AVP_MP_PEER_CLEARANCE && oldy<AVP_MP_PEER_CLEARANCE &&
+               ax>=oldx && ay>=oldy && (ax>oldx||ay>oldy))continue;
+            return 0;
+        }
+    }
+    return 1;
+}
+void avp_mp_peer_grace_update(AvpMpPeerGrace *grace,
+    uint32_t present_mask,const uintptr_t worlds[AVP_MP_PEER_COUNT],
+    const uint32_t x[AVP_MP_PEER_COUNT],const uint32_t y[AVP_MP_PEER_COUNT],
+    uint32_t arriving_mask)
+{
+    if(!grace||!worlds||!x||!y)return;
+    for(unsigned p=0;p<AVP_MP_PEER_COUNT;p++)
+      for(unsigned q=p+1u;q<AVP_MP_PEER_COUNT;q++){
+        const int both=(present_mask&(1u<<p)) && (present_mask&(1u<<q));
+        const int nearby=both && worlds[p] && worlds[p]==worlds[q] &&
+            (int64_t)llabs((long long)(int32_t)x[p]-(int32_t)x[q])<AVP_MP_PEER_CLEARANCE &&
+            (int64_t)llabs((long long)(int32_t)y[p]-(int32_t)y[q])<AVP_MP_PEER_CLEARANCE;
+        if(!nearby){
+            grace->ignore[p]&=(uint16_t)~(1u<<q);
+            grace->ignore[q]&=(uint16_t)~(1u<<p);
+        }else if(arriving_mask&((1u<<p)|(1u<<q))){
+            grace->ignore[p]|=(uint16_t)(1u<<q);
+            grace->ignore[q]|=(uint16_t)(1u<<p);
+        }
+      }
+}
+int avp_mp_peer_grace_exempt(const AvpMpPeerGrace *g,
+                             unsigned p,unsigned q)
+{
+    return g&&p<AVP_MP_PEER_COUNT&&q<AVP_MP_PEER_COUNT&&p!=q&&
+      (g->ignore[p]&(1u<<q)) && (g->ignore[q]&(1u<<p));
+}
 static int floor_cell(const uint8_t *cells,unsigned width,unsigned height,
                       int64_t x,int64_t y)
 {

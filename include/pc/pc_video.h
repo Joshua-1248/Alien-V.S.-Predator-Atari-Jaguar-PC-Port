@@ -1,6 +1,7 @@
 #ifndef AVP_PC_VIDEO_H
 #define AVP_PC_VIDEO_H
 #include "avp_types.h"
+#include <stddef.h>
 #include "jaguar/avp_gpu/state.h"
 #include "pc/pc_platform.h"
 
@@ -27,14 +28,21 @@ typedef enum AvpPcVideoAction {
     AVP_PC_ACTION_ORIG_LEVEL_PREVIOUS=1u<<17,
     AVP_PC_ACTION_CLEAR_ENEMIES=1u<<18,
     AVP_PC_ACTION_CLEAR_HAZARDS=1u<<19,
-    AVP_PC_ACTION_REFRESH_LEVEL=1u<<20
+    AVP_PC_ACTION_REFRESH_LEVEL=1u<<20,
+    AVP_PC_ACTION_CUSTOM_MAP_START=1u<<21
 } AvpPcVideoAction;
 AvpPcVideo *avp_pc_video_create(unsigned width,unsigned height,const char *title);
 void avp_pc_video_destroy(AvpPcVideo *v);
+/* Optional original-ROM title graphics. No-op when reference model disabled. */
+void avp_pc_video_title_native_begin(AvpPcVideo *v,const AvpRomImage *rom);
+void avp_pc_video_title_native_boot_field(AvpPcVideo *v);
+void avp_pc_video_title_native_replay_begin(AvpPcVideo *v,const AvpRomImage *rom);
 /* Register an immutable copy of a retail maze for the PC Map Maker.
  * It never rebinds, patches, or applies map bytes to the live game. */
 void avp_pc_video_map_maker_bind(AvpPcVideo *v,unsigned level,const u8 *decoded,size_t bytes);
 void avp_pc_video_map_maker_rom_path(AvpPcVideo *v,const char *path);
+/* Resolve only validated .avpm/.avpo stems beside the executable. */
+int avp_pc_video_custom_map_path(const char *stem,const char *extension,char *out,size_t cap);
 int avp_pc_video_poll(AvpPcVideo *v,u32 *active_low_pad,int *quit);
 void avp_pc_video_set_frontend_input(AvpPcVideo *v,int active);
 int avp_pc_video_alien_use_down(const AvpPcVideo *v);
@@ -57,6 +65,7 @@ int avp_pc_video_full_cpu_systems(const AvpPcVideo *v);
 int avp_pc_video_marine_start_shotgun(const AvpPcVideo *v);
 int avp_pc_video_debug_immediate_in_game(const AvpPcVideo *v);
 unsigned avp_pc_video_take_actions(AvpPcVideo *v);
+int avp_pc_video_cheat_custom_map(const AvpPcVideo *v,char *out,size_t cap);
 /* One-shot F12 > Miscellaneous > Restart Game, including during co-op. */
 int avp_pc_video_take_restart_title(AvpPcVideo *v);
 /* Require a fresh frontend confirmation after leaving gameplay. */
@@ -155,6 +164,7 @@ int avp_pc_video_local_mp_menu_open(const AvpPcVideo *v);
 int avp_pc_video_title_mp_menu_open(const AvpPcVideo *v);
 int avp_pc_video_local_mp_launch_pending(const AvpPcVideo *v);
 int avp_pc_video_take_local_mp_launch(AvpPcVideo *v,AvpLocalMpSetup *out);
+void avp_pc_video_local_mp_select_custom(AvpPcVideo *v,const char *stem);
 /* Explicit opt-in native movement/view smoke, not co-op gameplay. */
 int avp_pc_video_local_mp_walktest_mode(AvpPcVideo *v,int enable);
 const AvpMpInputConfig *avp_pc_video_local_mp_profiles(const AvpPcVideo *v);

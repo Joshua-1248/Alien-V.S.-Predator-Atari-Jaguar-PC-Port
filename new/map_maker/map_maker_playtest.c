@@ -5,6 +5,15 @@
 #include <string.h>
 
 static AvpAmpPlacement *g_test_lists[4];
+static unsigned g_test_list_levels[4];
+void avp_mm_playtest_clear_runtime_overrides(void)
+{
+    for(unsigned g=0;g<4u;g++)if(g_test_lists[g]){
+        const AvpAmpPlacement *original=avp_resources_retail_amp_list(g,g_test_list_levels[g]);
+        avp_amp_bind_level_list(g,g_test_list_levels[g],original);
+        free(g_test_lists[g]);g_test_lists[g]=NULL;g_test_list_levels[g]=0u;
+    }
+}
 static AvpMmPlaytestDoorMeta g_playtest_door_meta;
 /* Only child-process playtest state, never serialized or installed into
  * the original Jaguar game. Offsets are canonical door state bytes. */
@@ -173,7 +182,16 @@ int avp_mm_playtest_build_door_meta(const AvpMapMaker *m, AvpMmPlaytestDoorMeta 
 int avp_mm_playtest_bind_scripts(const AvpMapMaker *m)
 {
     if(!m)return 0;
-    if(!m->script_modified)return 1; /* Preserve exact retail binding. */
+    if(!m->script_modified){
+        if(m->standalone_runtime){
+            /* Custom ID 16 has NO inherited Jaguar exit, access-code or
+             * interlock tables. These are the PC session's own empty
+             * metadata; the resource-bank number is art lookup only. */
+            memset(&g_playtest_door_meta,0,sizeof g_playtest_door_meta);
+            avp_doors_bind_level_meta(g_playtest_door_meta.levels,AVP_MM_LEVELS);
+        }
+        return 1; /* Ordinary retail-derived playtest preserves originals. */
+    }
     if(!avp_mm_playtest_build_door_meta(m,&g_playtest_door_meta))return 0;
     avp_doors_bind_level_meta(g_playtest_door_meta.levels,AVP_MM_LEVELS);
     return 1;
@@ -194,7 +212,7 @@ int avp_mm_playtest_bind_amp(const AvpMapMaker *m)
     AvpAmpPlacement *new_lists[4]={0};
     if(!m||m->level<1u||m->level>AVP_MM_LEVELS ||
        m->object_count>AVP_MM_MAX_OBJECTS)return 0;
-    if(!m->object_count && !m->custom_map && !m->playtest_no_enemies)return 1;
+    if(!m->object_count && !m->custom_map && !m->standalone_runtime && !m->playtest_no_enemies)return 1;
     for(unsigned i=0;i<m->object_count;i++){
         const AvpMmObjectRecord *a=&m->objects[i];
         if(a->group>3u||a->def>=60u||a->x8>=m->w*256u||
@@ -204,7 +222,7 @@ int avp_mm_playtest_bind_amp(const AvpMapMaker *m)
     for(unsigned g=0;g<4u;g++){
         /* A custom blank map must not inherit the original campaign's
          * enemy/object placements. A retail-derived draft still does. */
-        if(!m->custom_map){
+        if(!m->custom_map && !m->standalone_runtime){
             retail[g]=avp_resources_retail_amp_list(g,m->level);
             if(!retail[g])return 0;
             unsigned i=0u;
@@ -225,7 +243,7 @@ int avp_mm_playtest_bind_amp(const AvpMapMaker *m)
     if(count[1u]<least)least=count[1u];
     if(count[2u]<least)least=count[2u];
     if(total-least>AVP_NUM_AMPS)return 0;
-    for(unsigned g=0;g<4u;g++)if(added[g]||m->custom_map||m->playtest_no_enemies){
+    for(unsigned g=0;g<4u;g++)if(added[g]||m->custom_map||m->standalone_runtime||m->playtest_no_enemies){
         unsigned at=0;
         AvpAmpPlacement *list=(AvpAmpPlacement*)calloc((size_t)count[g]+1u,sizeof(*list));
         if(!list){for(unsigned i=0;i<4u;i++)free(new_lists[i]);return 0;}
@@ -242,8 +260,12 @@ int avp_mm_playtest_bind_amp(const AvpMapMaker *m)
         }
         list[at].x=-1;list[at].y=0;list[at].def=0;
     }
+    /* Only after all validation and allocations succeed may we drop the
+     * prior override: freeing a still-bound AMP list causes a UAF on a
+     * subsequent restart or when selecting another custom file. */
+    avp_mm_playtest_clear_runtime_overrides();
     for(unsigned g=0;g<4u;g++)if(new_lists[g]){
-        free(g_test_lists[g]);g_test_lists[g]=new_lists[g];
+        g_test_lists[g]=new_lists[g];g_test_list_levels[g]=m->level;
         avp_amp_bind_level_list(g,m->level,new_lists[g]);
     }
     return 1;

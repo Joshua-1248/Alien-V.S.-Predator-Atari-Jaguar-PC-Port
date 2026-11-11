@@ -437,7 +437,8 @@ if(NOT WIN32)
   target_link_libraries(test_local_mp_bot PRIVATE m)
 endif()
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(test_local_mp_bot PRIVATE -Wall -Wextra -Werror)
+  # R115: Release builds set NDEBUG; keep routing/door test assertions live.
+  target_compile_options(test_local_mp_bot PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endif()
 
 # RE30 R8: sensory acquisition, 15-m motion tracker and finite contact memory.
@@ -565,4 +566,12 @@ add_executable(test_local_mp_move_guard tests/test_local_mp_move_guard.c local_m
 target_include_directories(test_local_mp_move_guard PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_move_guard PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# R84 Guerilla regression: visible ranged enemies stay under fire while
+# approaching/backpedaling; original melee hit range remains enforced.
+add_executable(test_local_mp_guerilla_fire_r84 tests/test_local_mp_guerilla_fire_r84.c)
+target_link_libraries(test_local_mp_guerilla_fire_r84 PRIVATE avp_local_multiplayer m)
+if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(test_local_mp_guerilla_fire_r84 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endif()

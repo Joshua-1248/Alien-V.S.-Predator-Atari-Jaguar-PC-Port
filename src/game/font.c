@@ -116,9 +116,10 @@ void cursor(void)
     }
 }
 
-void pr_string(const char *encoded)
+static void pr_string_source(const char *encoded,uintptr_t source_address)
 {
     const u8 *p=(const u8 *)encoded;
+    const u8 *start=p;
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(!p||repeat_pad)return;
     repeat_pad=0xffu;s_delay=0;typeflag=0;cursor_on=cursor_off=0;
@@ -133,7 +134,13 @@ getcoords:
         if((c_joy_edge&(1u<<FIRE_C))||(c_joy_edge&(1u<<FIRE_A))||(c_joy_edge&(1u<<FIRE_B)))return;
         if(c==TTYPE_ON){typeflag=1;continue;}
         if(c==TTYPE_OFF){typeflag=0;continue;}
-        if(c==NEW_XY){if((uintptr_t)p&1u)++p;goto getcoords;}
+        if(c==NEW_XY){
+            /* MOVE.L A0,D0 / BTST #0,D0 in the original FONT.S
+             * considers the 68000 pointer. A host malloc address is not
+             * necessarily the same parity as the RDB.DTA record. */
+            if((source_address+(uintptr_t)(p-start))&1u)++p;
+            goto getcoords;
+        }
         s_delay^=1;
         if(!s_delay&&o->play_sfx)o->play_sfx(o->user,AVP_FX_TYP1B);
         if(c==' ')x_print_pos=(s16)(x_print_pos+6);
@@ -150,6 +157,17 @@ getcoords:
             hide_cursor();
         }
     }
+}
+
+void pr_string_retail(const char *encoded,u32 source_address)
+{
+    pr_string_source(encoded,(uintptr_t)source_address);
+}
+
+/* Non-ROM callers retain their existing pointer-based alignment contract. */
+void pr_string(const char *encoded)
+{
+    pr_string_source(encoded,(uintptr_t)encoded);
 }
 
 static void line_evt(unsigned event,s16 x,s16 y,s16 len)

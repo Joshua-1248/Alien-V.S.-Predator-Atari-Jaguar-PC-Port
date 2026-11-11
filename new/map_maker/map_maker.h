@@ -8,6 +8,7 @@
 #include "map_maker_scripts.h"
 #include <stddef.h>
 #define AVP_MM_LEVELS 15u
+#define AVP_MM_CUSTOM_SESSION_ID 16u /* PC host identity, never index retail LEVELS or texture arrays. */
 #define AVP_MM_DIM 64u
 #define AVP_MM_CELL 8u
 #define AVP_MM_MAX_BYTES (AVP_MM_DIM*AVP_MM_DIM*AVP_MM_CELL)
@@ -44,6 +45,7 @@ typedef struct AvpMapMaker {
     int selection_2d_range; /* Shift+arrow rectangular selection, UI only */
     unsigned select_anchor_x,select_anchor_y;
     int playtest_no_enemies; /* launch-only; not written to .avpm */
+    int standalone_runtime; /* PC-only custom session ID 16; preserve source level for artwork. */
     u8 wall_brush;
     int wall_drag_lock; /* keep zoomed 2D overview fixed while mouse paints */
     unsigned wall_drag_x,wall_drag_y;
@@ -64,7 +66,7 @@ typedef struct AvpMapMaker {
     unsigned char copied_texture,has_copied_texture;
     unsigned copied_field,copied_level; /* translate between wall and flat sets */
     double camera_pitch; /* host-only editor look pitch in radians */
-    int context_open, browser_open, name_edit_open;
+    int context_open, browser_open, name_edit_open, new_confirm_open;
     unsigned browser_count,browser_cursor;
     char browser_files[128][96];
     char map_stem[96], edit_stem[96];

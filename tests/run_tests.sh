@@ -57,6 +57,8 @@ build_run test_pc_terminal_roundtrip "$ROOT/src/game/computer.c" "$ROOT/src/game
 # R248: FONT.S line command packing must preserve signed word bits without C UB.
 build_run test_font_line_packed_r248 "$ROOT/src/game/font.c" "$ROOT/src/game/runtime.c" -ffunction-sections -fdata-sections -Wl,--gc-sections
 build_run test_pc_retail_terminal_timing "$ROOT/src/game/font.c" "$ROOT/src/game/computer.c" "$ROOT/src/game/runtime.c" "$ROOT/src/game/objects.c" "$ROOT/src/jaguar/host/joypad_host.c" -ffunction-sections -fdata-sections -Wl,--gc-sections
+# R108: original RDB.DTA coordinate escape alignment must ignore host pointer parity.
+build_run test_pc_retail_font_address_alignment_r108 "$ROOT/src/game/font.c" "$ROOT/src/game/computer.c" "$ROOT/src/game/runtime.c" "$ROOT/src/game/objects.c" "$ROOT/src/jaguar/host/joypad_host.c" -ffunction-sections -fdata-sections -Wl,--gc-sections
 build_run test_pc_retail_terminal_menu -D_DEFAULT_SOURCE "$ROOT/src/jaguar/avp_gpu/software_renderer.c" -ffunction-sections -fdata-sections -Wl,--gc-sections
 build_run test_eeprom "$ROOT/src/game/eeprom.c"
 # R278: retail Check_EE key $1234FAC3 (legacy PC key accepted on load) and 600000 default.
@@ -70,6 +72,13 @@ rm -r "$AVP_EEPROM_TEST_DIR"
 # Verify the host CPU frame still follows MAZE.S NextFrame/PlayAvP order.
 python3 "$ROOT/tests/test_pc_gameplay_host_order.py"
 python3 "$ROOT/tests/test_pc_postfirst_order.py"
+# R78 PC-only reference-machine title fields and original Fire-terminated waits.
+build_run test_pc_title_pacer_r78
+build_run test_title_hw_wait_r78 -ffunction-sections -fdata-sections -Wl,--gc-sections
+build_run test_title_music_black_r80 -ffunction-sections -fdata-sections -Wl,--gc-sections
+build_run test_title_hw_stages_r78 "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
+# R79: Jaguar-model partial background and two-wave PREDATOR composition.
+build_run test_title_gpu_reveal_r79 "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
 # Retail title presentation enters the MJP menu automatically after 141 VBLs.
 build_run test_title_automatic_menu -ffunction-sections -fdata-sections -Wl,--gc-sections
 build_run test_mjp "$ROOT/src/game/mjp.c" "$ROOT/src/game/runtime.c"
@@ -182,8 +191,13 @@ build_run test_pc_maze_restart "$ROOT/src/platform/pc/pc_resources.c" -ffunction
 # not the old native frontend buffer left by character selection.
 build_run test_pc_pause_world_snapshot "$ROOT/src/jaguar/hw/object_processor.c" "$ROOT/src/jaguar/hw/cry.c"
 build_run test_frontend_renderer "$ROOT/src/jaguar/avp_gpu/frontend_renderer.c" "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
+# R83: align the live ROM-rendered title with the PC menu/credits staging
+# aperture, preserving all 240 native visible rows and foreground glyphs.
+build_run test_title_menu_aperture_r83 "$ROOT/src/platform/pc/pc_title_native.c" "$ROOT/src/jaguar/avp_gpu/frontend_renderer.c" "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
 # R279: retail title ALIEN logo settles at GPU phase 35; Legal_Pic FILES 233 bitmap.
 build_run test_title_logo_legal_r279 "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
+# RE34 R77: background-first hosted title interval; no ROM bytes in tests.
+build_run test_title_logo_wait_r77 "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c" "$ROOT/src/jaguar/hw/framebuffer.c"
 # R280: retail CROSS stage kernels for the $01DF2C scene transition.
 build_run test_scene_cross_r280 "$ROOT/src/jaguar/avp_gpu/frontend_fade.c" "$ROOT/src/jaguar/hw/cry.c"
 build_run test_srcshade "$ROOT/src/jaguar/hw/cry.c"

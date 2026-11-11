@@ -100,7 +100,7 @@ typedef struct AvpAvpGpuState {
     /* Host Object Processor title presentation only; Jaguar CPU remains untouched. */
     unsigned char frontend_title_splash;
     unsigned char frontend_title_reveal_active;
-    unsigned char frontend_title_reveal_tick;
+    unsigned frontend_title_reveal_tick;
     /* PC presentation only: title-to-character-select video fade. */
     unsigned char frontend_title_depart_active;
     unsigned char frontend_title_depart_phase;
@@ -156,6 +156,11 @@ typedef struct AvpAvpGpuState {
     /* Preserve exact Show_Tex per-glyph X from the original 68000.
        Its @ half-space cannot be represented by 7px string advance. */
     unsigned short frontend_text_glyph_x[12][96];
+    /* Original Show_Tex advances a green cursor block each video field;
+     * do not leave it fixed at the end of each completed text line. */
+    unsigned short frontend_text_cursor_x;
+    unsigned char frontend_text_cursor_line;
+    unsigned char frontend_text_cursor_active;
     /* Fame_Tex's score and six-character name occupy independent X columns.
      * Store the score separately rather than appending it to the name. */
     char frontend_fame_score[5][16];
@@ -248,6 +253,9 @@ typedef struct AvpAvpGpuState {
     double map_editor_pitch; /* PC editor only, shifts projection horizon */
     int host_continuous_heading; /* PC enhancement only; retail rendering remains integer */
     int host_widescreen_fov; /* Host-only: additional 3D columns, never a gameplay/ROM rule. */
+    double host_stereo_projection_shift; /* Off-axis image-plane tangent; 0 for original Jaguar. */
+    int host_vr_hud_anchor_enabled; /* Stereo: HUD/tracker position belongs to original player. */
+    u32 host_vr_hud_anchor_x,host_vr_hud_anchor_y,host_vr_hud_anchor_angle;
     int host_extend_draw_distance; /* Host-only: 0=8, 1=16, 2=24, 3=32, 4=whole map. */
     int host_extend_fog_distance; /* Host-only: 0=original, 1=2x, 2=3x, 3=4x. */
     int host_disable_fog; /* Host-only: bypass distance CRY darkening, not geometry. */

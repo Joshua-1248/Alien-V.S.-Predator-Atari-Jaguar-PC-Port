@@ -4,6 +4,7 @@
  * transfer-file caching are CPU responsibilities and are kept here. */
 #include "music.h"
 #include "avp_runtime.h"
+#include "avp_sfx_ids.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -35,6 +36,20 @@ u32 current_music,alarm_id,ambient_id;
 static AvpVoiceState voice[AVP_SOUND_VOICES];
 static u32 ident;
 static unsigned protected_voices=AVP_DEFAULT_PROTECTED;
+#ifdef AVP_PC_HOST
+/* The PC currently hosts the music sequencer separately from general SFX,
+ * so Intro's six nominally unprotected effect lanes can overlap one TYP1B
+ * each glyph. The correctly sounding Marine escape-report path has only
+ * one effective lane. Until shared JERRY music/effect voice ownership can
+ * be reconstructed completely, match that user-verified single-lane
+ * TYP1B behavior in INTRO *without* changing the original 68000
+ * ProtectV(2) CPU state or any other sound effect. */
+static int host_intro_typ1b_single_lane;
+void avp_music_set_intro_typ1b_single_lane(int enabled)
+{
+    host_intro_typ1b_single_lane=!!enabled;
+}
+#endif
 static const AvpSoundMeta *sound_meta;
 static unsigned sound_meta_count;
 static AvpTnfCacheEntry tnf_cache[AVP_TNF_CACHE];
@@ -125,7 +140,12 @@ static u32 begin_voice(unsigned i,unsigned id,s16 priority,s32 mod_value)
     voice[i].handle=h;
     voice[i].sound_id=id;
     voice[i].mod_value=mod_value;
-    if(o->play_sfx_handle)o->play_sfx_handle(o->user,id,h,i);
+    /* TFX's positive D1 overrides BOTH the occupied-voice comparator and
+     * the new DSP module's low volume word. Send it atomically with start;
+     * a post-start ModSfx would change a different host gain and race audio. */
+    if(mod_value>=0 && o->play_sfx_handle_d1)
+        o->play_sfx_handle_d1(o->user,id,h,i,mod_value);
+    else if(o->play_sfx_handle)o->play_sfx_handle(o->user,id,h,i);
     else if(o->play_sfx)o->play_sfx(o->user,id);
     return h;
 }
@@ -199,6 +219,9 @@ void InitSynt(void)
         voice[i].type=AVP_SOUND_TYPE_STOPPED;
     }
     ProtectV(AVP_DEFAULT_PROTECTED);
+#ifdef AVP_PC_HOST
+    host_intro_typ1b_single_lane=0;
+#endif
     InitTnF();
 }
 void StopMusi(void)
@@ -321,11 +344,22 @@ void Ambient(void)
     {const AvpRuntimeOps *o=avp_runtime_ops();if(o->ambient)o->ambient(o->user);}
 }
 
-u32 DoEffect(unsigned id)
+static u32 do_effect_d1(unsigned id,s32 d1)
 {
     const AvpSoundMeta *m=meta_for(id);
     unsigned i,best=AVP_SOUND_VOICES;
-    s16 p=m->priority;
+    unsigned search_start=protected_voices;
+    /* MUSIC.o $9C6E TST.W D1 / $9C70 BPL: nonnegative D1 is
+     * the caller's explicit DSP volume and allocation priority, not the
+     * cartridge module's default. MJP Do_Escap supplies $2600. */
+    s16 p=((d1&0x8000)==0)?(s16)(d1&0xffff):m->priority;
+#ifdef AVP_PC_HOST
+    /* The intro matches the one-voice escape text reference for TYP1B
+     * only. Normal voice counts and retail priority/effect identity remain
+     * unchanged; an occupied equal-priority lane rejects the request. */
+    if(host_intro_typ1b_single_lane && id==AVP_FX_TYP1B)
+        search_start=AVP_SOUND_VOICES-1u;
+#endif
     /* The Jaguar DSP marks a completed voice stopped in shared DSP RAM.
        The native mixer keeps its own voice state; synchronize completed
        one-shots here, at the next allocation, on the game thread.  Without
@@ -345,7 +379,7 @@ u32 DoEffect(unsigned id)
      }
     }
     /* First pass mirrors the retail search for a -4/stopped slot. */
-    for(i=protected_voices;i<AVP_SOUND_VOICES;i++){
+    for(i=search_start;i<AVP_SOUND_VOICES;i++){
         if(voice[i].type<0){best=i;break;}
     }
     /* The retail MC68000 at $9CC4-$9CC6 executes CMP.W D4,D1; BGT.W
@@ -356,7 +390,7 @@ u32 DoEffect(unsigned id)
      * host control enhancements retain their established behavior. */
     if(best==AVP_SOUND_VOICES){
         const int original_retail=retail_meta_valid && !sound_meta;
-        for(i=protected_voices;i<AVP_SOUND_VOICES;i++){
+        for(i=search_start;i<AVP_SOUND_VOICES;i++){
             if(original_retail ? (p>voice[i].priority) : (p>=voice[i].priority)){
                 best=i;break;
             }
@@ -365,7 +399,7 @@ u32 DoEffect(unsigned id)
     /* Retail code has no third "same sound ID" exception.  Leave the
      * existing same-ID recovery strictly on the non-retail host/test path. */
     if(best==AVP_SOUND_VOICES && (!retail_meta_valid || sound_meta)){
-        for(i=protected_voices;i<AVP_SOUND_VOICES;i++){
+        for(i=search_start;i<AVP_SOUND_VOICES;i++){
             if(voice[i].sound_id==id&&voice[i].type>=0){best=i;break;}
         }
     }
@@ -375,10 +409,12 @@ u32 DoEffect(unsigned id)
      * DSP voice long that the next steal scan reads at $9CD4-$9CDA, so later
      * effects compare against the quartered word, not the module word. */
     if(retail_meta_valid && !sound_meta && m->synth_type==4u)
-        return begin_voice(best,id,(s16)((u16)p>>2),-1);
-    return begin_voice(best,id,p,-1);
+        return begin_voice(best,id,(s16)((u16)p>>2),d1);
+    return begin_voice(best,id,p,d1);
 }
-u32 TFX(unsigned id){return DoEffect(id);}
+u32 DoEffect(unsigned id){return do_effect_d1(id,-1);}
+u32 TFX(unsigned id){return do_effect_d1(id,-1);}
+u32 avp_music_tfx_d1(unsigned id,s32 d1){return do_effect_d1(id,d1);}
 /* Retail MUSIC.o PlacedEf $9C3A: start an effect directly in reserved DSP
  * voice D3 (no free/steal search), then share DoEffect's store path $9CE8.
  * MAZESCRN.S `wep_sfx` uses voice 1 (weapon), `pause_sfx` voice 0. */

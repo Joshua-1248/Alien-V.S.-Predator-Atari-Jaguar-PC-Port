@@ -11,6 +11,10 @@ void avp_font_bind_brushes(const u8 *font_a,const u8 *font_b,const u8 *font_c,si
 const AvpFontMetric *avp_font_metrics(void);
 void init_font(void);
 void pr_string(const char *encoded);
+/* A cartridge-authored FONT.S string carries a historical RDB.DTA address.
+ * Alignment after a $FF coordinate escape is based on that 68000 address,
+ * not on the pointer to the host decompression buffer. */
+void pr_string_retail(const char *encoded,u32 source_address);
 void cursor(void);
 void hide_cursor(void);
 void blitchar(unsigned ch);

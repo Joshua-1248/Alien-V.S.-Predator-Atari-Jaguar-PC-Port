@@ -38,6 +38,7 @@
 #include "font.h"
 #include "savegame.h"
 #include "main_game.h"
+#include "pc/pc_title_reference.h"
 #include "eeprom.h"
 #include "dev_cheats.h"
 #include "avp_runtime.h"
@@ -142,14 +143,7 @@ static const char *auto_find_rom(const char *argv0)
 #ifdef _WIN32
     {
         char glob[PATH_MAX];WIN32_FIND_DATAA data;HANDLE h;
-        static const char suffix[]="/*.jag";
-        size_t dl=strlen(dir);
-        /* A long executable directory cannot fit the search wildcard.
-           Reject it rather than silently truncating the path.  This also
-           avoids GCC 16's -Wformat-truncation warning under -Werror. */
-        if(dl>sizeof(glob)-sizeof(suffix))return NULL;
-        memcpy(glob,dir,dl);
-        memcpy(glob+dl,suffix,sizeof(suffix));
+        snprintf(glob,sizeof(glob),"%s/*.jag",dir);
         h=FindFirstFileA(glob,&data);
         if(h!=INVALID_HANDLE_VALUE){do{
             if(!(data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)&&ends_jag(data.cFileName)){
@@ -362,8 +356,19 @@ static int pc_debug_refresh_current_level(const AvpRomImage *rom,
 {
     AvpMazeCandidate *lm=find_level_maze(mazes,maze_count<64u?maze_count:64u,
                                          logical_level);
-    if(!lm || !rom || !rom->exact_retail_sha256 ||
-       !avp_pc_restore_single_maze(rom,lm))return 0;
+    /* A custom map uses the retail FILES level only as an artwork/resource
+     * bank. Refresh its original loaded draft, never substitute retail
+     * floor, wall or door geometry into the active custom session. */
+    if(!lm || !rom || !rom->exact_retail_sha256)return 0;
+    if(g_map_test && g_map_test->level==logical_level &&
+       (g_map_test->w!=lm->width || g_map_test->h!=lm->height ||
+        lm->decoded_size<8u+(size_t)g_map_test->w*g_map_test->h*8u ||
+        (g_map_test->script_modified &&
+         !avp_mm_playtest_validate_relocated_geometry(g_map_test))))return 0;
+    if(!avp_pc_restore_single_maze(rom,lm))return 0;
+    if(g_map_test && g_map_test->level==logical_level &&
+       !avp_mm_playtest_overlay_maze(g_map_test,logical_level,
+                                     lm->decoded,lm->decoded_size))return 0;
     avp_doors_bind_maze(lm->decoded+8u,lm->width,lm->height);
     avp_collision_bind_maze(lm->decoded+8u,lm->width,lm->height);
     /* Capture pristine door bytes in the existing level-specific save slot
@@ -574,6 +579,86 @@ static int pc_begin_campaign(const AvpRomImage *rom,AvpMazeCandidate *mazes,
 #define AVP_MP_OPTION_HELP ""
 #endif
 static void usage(const char*exe){fprintf(stderr,"Usage: %s [--rom AVP.jag] [--maze-candidate N] [--diagnostic] [--log FILE]%s\n",exe,AVP_MP_OPTION_HELP);}
+/* RE34: A custom map has PC session ID 16.  Its AVPM header still names
+ * the Jaguar artwork/script resource bank (1..15), since those tables
+ * physically contain only 15 entries.  Never pass ID 16 to native LEVELS,
+ * AMP, or texture-array code.  Validate and stage the whole map before the
+ * game can advance, and keep a selected map separate from editor RAM. */
+#ifdef AVP_LOCAL_MULTIPLAYER
+static int pc_custom_ee_active;
+static void pc_custom_eeprom_enter(void)
+{
+    for(unsigned n=0;n<AVP_EE_SIZE/2u;n++)g_test_eeprom[n]=0xffffu;
+    avp_eeprom_bind(map_test_ee_read,map_test_ee_write,NULL);
+    Init_EE();pc_custom_ee_active=1;
+    logmsg("Custom map: isolated volatile EEPROM (retail saves protected).\n");
+}
+static void pc_custom_eeprom_leave(void)
+{
+    if(!pc_custom_ee_active)return;
+    avp_eeprom_bind(avp_pc_eeprom_read_word,avp_pc_eeprom_write_word,NULL);
+    Init_EE();pc_custom_ee_active=0;
+}
+static int pc_custom_map_session_prepare(AvpPcVideo *v,
+    const AvpMazeCandidate *mazes,unsigned maze_count,
+    AvpLocalMpSetup *setup,unsigned *resource_level)
+{
+    char map[1200],objects[1200];u8 hdr[20];FILE *f;
+    unsigned source_level;const AvpMazeCandidate *retail;
+    AvpMapMaker *m=NULL;int found=0;
+    if(!v||!setup||!resource_level||setup->dm_level!=AVP_MP_CUSTOM_LEVEL)return 0;
+    if(!avp_pc_video_custom_map_path(setup->custom_map_stem,"avpm",map,sizeof map)||
+       !avp_pc_video_custom_map_path(setup->custom_map_stem,"avpo",objects,sizeof objects))return 0;
+    f=fopen(map,"rb");if(!f)return 0;
+    found=fread(hdr,1,sizeof hdr,f)==sizeof hdr &&
+          (!memcmp(hdr,"AVPMAP01",8)||!memcmp(hdr,"AVPMAP02",8));
+    if(fclose(f)!=0)found=0;
+    if(!found)return 0;
+    source_level=(unsigned)hdr[8]*256u+(unsigned)hdr[9];
+    if(source_level<1u||source_level>AVP_MM_LEVELS)return 0;
+    retail=find_level_maze((AvpMazeCandidate*)mazes,maze_count,source_level);
+    if(!retail || !(m=malloc(sizeof *m)))return 0;
+    avp_mm_init(m);
+    if(!avp_mm_bind(m,source_level,retail->decoded,retail->decoded_size) ||
+       !avp_mm_select(m,source_level)||!avp_mm_load(m,map)||
+       m->w!=retail->width||m->h!=retail->height)goto fail;
+    f=fopen(objects,"rb");
+    if(f){fclose(f);if(!avp_mm_objects_load(m,objects))goto fail;}
+    /* Find a authored floor tile.  No invented floor or fallback to a retail
+     * spawn location when a custom draft is invalid/unplayable. */
+    found=0;
+    for(unsigned y=0;y<m->h&&!found;y++)for(unsigned x=0;x<m->w;x++){
+        double xx=(double)x+0.5,yy=(double)y+0.5;
+        if(avp_mm_test_start_valid(m,xx,yy)){
+            g_test_x=xx;g_test_y=yy;g_test_heading=0.0;
+            found=1;break;
+        }
+    }
+    if(!found)goto fail;
+    m->standalone_runtime=1;
+    if(!avp_mm_playtest_bind_amp(m))goto fail;
+    if(g_map_test){
+        avp_mm_destroy(g_map_test);free(g_map_test);g_map_test=NULL;
+    }
+    /* No retail level destination can be synthesized for a custom map. */
+    setup->dm_level=source_level;
+    setup->custom_session_id=AVP_MM_CUSTOM_SESSION_ID;
+    setup->dm_level_travel=0u;
+    *resource_level=source_level;
+    g_map_test=m;
+    logmsg("Custom map ID %u: %s.avpm, Jaguar resource bank %u.\n",
+        AVP_MM_CUSTOM_SESSION_ID,setup->custom_map_stem,source_level);
+    return 1;
+fail:
+    avp_mm_destroy(m);free(m);return 0;
+}
+static void pc_custom_map_session_finish(void)
+{
+    avp_mm_playtest_clear_runtime_overrides();
+    avp_doors_bind_retail_meta();
+    if(g_map_test){avp_mm_destroy(g_map_test);free(g_map_test);g_map_test=NULL;}
+}
+#endif
 int main(int argc,char**argv)
 {
     const char*rom_path=NULL,*log_path=NULL;int diagnostic=0,quit=0,rom_ok=0,debug_immediate=0;const char *map_test_path=NULL,*map_objects_path=NULL;unsigned map_test_level=0;int map_test_no_enemies=0;unsigned maze_pick=0,logical_level=1;AvpRomImage rom={0};AvpMazeCandidate mazes[64];unsigned maze_count=0;AvpPcVideo*v;AvpPcQuickState *quickstate=NULL;AvpGpuAutomapSnapshot quick_map={0};u64 next_sim,next_display,next_render,ticks=0;unsigned simulation_hz=10u;u32 prev_x=0,prev_y=0,prev_angle=0;double last_enhanced_delta=0.0;int last_enhanced_tick=0;AvpPcLiveHeading live_heading={0};AvpPcQuickTurn quick_turn={0};u32 live_last_game_angle=0;int i;
@@ -581,6 +666,7 @@ int main(int argc,char**argv)
     int mp_walktest=0,mp_combat=0;unsigned mp_players=2u;
     AvpLocalMpSetup mp_menu_setup;
     int mp_from_f2=0;
+    unsigned mp_custom_resource_level=0u;
 #endif
     for(i=1;i<argc;i++){if(!strcmp(argv[i],"--help")||!strcmp(argv[i],"-h")){usage(argv[0]);return 0;}if(!strcmp(argv[i],"--rom")&&i+1<argc)rom_path=argv[++i];else if(!strcmp(argv[i],"--diagnostic"))diagnostic=1;
 #ifdef AVP_LOCAL_MULTIPLAYER
@@ -616,9 +702,10 @@ else if(!strcmp(argv[i],"--maze-candidate")&&i+1<argc)maze_pick=(unsigned)strtou
     }
     if(!rom_path&&!diagnostic){rom_path=auto_find_rom(argv[0]);if(rom_path)logmsg("Auto-selected ROM beside executable: %s\n",rom_path);}
     if(rom_path){char err[256];if(!avp_pc_rom_load(rom_path,&rom,err,sizeof(err))){logmsg("ROM error: %s\n",err);if(pc_log)fclose(pc_log);return 1;}logmsg("ROM SHA-256: %s\n",rom.sha256_hex);if(!rom.exact_retail_sha256){logmsg("This is not the canonical 4 MiB retail-world ROM expected by the current port.\n");avp_pc_rom_free(&rom);if(pc_log)fclose(pc_log);return 1;}rom_ok=1;{char cache_dir[PATH_MAX];if(avp_pc_prepare_rom_cache(&rom,argv[0],cache_dir,sizeof(cache_dir)))logmsg("ROM-derived cache ready: %s\n",cache_dir);else logmsg("WARNING: could not prepare ROM-derived asset cache; continuing with direct ROM reads.\n");}}
-    /* AVP.jag is the only ROM input.  JERRY's internal waveform tables are
-     * modeled in our existing synthesizer; no external hardware ROM lookup
-     * or newly generated/distributed proprietary image is performed. */
+    /* AVP.jag supplies the game's cartridge data.  Separately, the existing
+     * optional JERRY wavetable loader can read an authenticated user-supplied
+     * 4 KiB hardware wave ROM beside the executable (or from the override).
+     * No JERRY ROM bytes are built into the distributable executable. */
     avp_amp_bind_retail_source_templates_and_random();
     if(rom_ok){if(avp_resources_bind_retail_level_info(&rom))logmsg("Retail LEVELS start-position table recovered from ROM-backed RDB.DTA.\n");else logmsg("WARNING: retail LEVELS start-position table recovery failed.\n");}
     if(rom_ok){unsigned al=0,ae=0;if(avp_resources_bind_retail_amp_placements(&rom,&al,&ae))logmsg("Retail AMP authored placement tables recovered from ROM: %u level lists / %u placement records.\n",al,ae);else logmsg("WARNING: retail AMP placement table recovery failed; campaign population remains unbound.\n");}
@@ -654,6 +741,7 @@ else if(!strcmp(argv[i],"--maze-candidate")&&i+1<argc)maze_pick=(unsigned)strtou
 #endif
         }
         g_map_test->playtest_no_enemies=map_test_no_enemies;
+        g_map_test->standalone_runtime=1;
         if(!avp_mm_playtest_bind_amp(g_map_test)){
             logmsg("Playtest rejected: invalid or excessive AMP object placements.\n");return 2;
         }
@@ -704,7 +792,11 @@ else if(!strcmp(argv[i],"--maze-candidate")&&i+1<argc)maze_pick=(unsigned)strtou
             avp_font_bind_brushes(fa,fb,fc,fn);
             logmsg("Retail COMPUTER font brushes bound from OVERS.DB descriptors (%zu bytes minimum).\n",fn);
         }else logmsg("WARNING: retail COMPUTER font brushes could not be resolved.\n");
-        if(avp_pc_audio_init(&rom))logmsg("FullSynth compressed-SFX host mixer active at 20774 Hz.\n");else logmsg("Audio device unavailable; continuing without host PCM output.\n");
+        if(avp_pc_audio_init(&rom)){
+            logmsg("FullSynth compressed-SFX host mixer active at 20774 Hz.\n");
+            logmsg("JERRY hardware wavetable: %s; Marine FX_newal uses retail FM pitch $28F00.\n",
+                   avp_jaguar_fullsynth_uses_exact_waves()?"verified original 4096-byte ROM (optional)":"internal procedural tables (alarm FM phase calibrated; noise texture approximate; no separate ROM)");
+        }else logmsg("Audio device unavailable; continuing without host PCM output.\n");
         avp_pc_video_audio_apply_settings(v);
     }
     /* The retail back_in entry calls InitSynt before entering the title/game.
@@ -717,11 +809,23 @@ else if(!strcmp(argv[i],"--maze-candidate")&&i+1<argc)maze_pick=(unsigned)strtou
 avp_hud_set_countdown_callbacks(pc_countdown_cue,pc_alarm);
 
     if(!debug_immediate && rom_ok){
-        /* On the first executable boot, leave the window dark before the
-         * Jaguar title appears. This host-only pause is NOT a claimed ROM
-         * opcode/timer match; it does not apply on post-game title returns. */
+        /* R82: run original title GPU/OP alongside this one-time black
+         * cartridge preroll. Disabled/fallback builds retain PC renderer. */
+        avp_pc_video_title_native_begin(v,&rom);
+        /* First cartridge boot: the reference 68000/GPU/OP model remains
+         * dark through field 313 and publishes the title OP at field 314.
+         * Reproduce the observed visible blackout only on cold boot. The
+         * time spent on real hardware loading is modeled, not cycle-exact;
+         * do not repeat it when returning to the menu after gameplay. */
         avp_pc_video_present_boot_black(v);
-        for(unsigned boot_vbl=0u;boot_vbl<60u;boot_vbl++){
+        u64 boot_deadline_ns=avp_pc_now_ns();
+        for(unsigned boot_vbl=0u;boot_vbl<AVP_PC_TITLE_COLD_BOOT_FIELDS;boot_vbl++){
+            /* Retail MAIN.S starts title3_music at original model field 43,
+             * well before the first ALIEN pixel at 317. Advance FullSynth
+             * during the black presentation; NewTitle consumes this start
+             * exactly once so it cannot restart the already-playing score. */
+            if(boot_vbl==AVP_PC_TITLE_MUSIC_START_FIELD)
+                avp_pc_title_music_prestart();
             u32 pad=0xffffffffu;int boot_quit=0;
             /* Keep the OS event queue alive during the black first-boot
              * presentation. A plain sleep left the mapped X11 window
@@ -735,7 +839,10 @@ avp_hud_set_countdown_callbacks(pc_countdown_cue,pc_alarm);
                 if(pc_log)fclose(pc_log);
                 return 0;
             }
-            avp_pc_sleep_ns(16666667ull);
+            avp_pc_video_title_native_boot_field(v);
+            boot_deadline_ns=avp_pc_title_next_deadline(boot_deadline_ns,avp_pc_now_ns());
+            {u64 current=avp_pc_now_ns();if(current<boot_deadline_ns)
+                avp_pc_sleep_ns(boot_deadline_ns-current);}
         }
         logmsg("Retail frontend: translated NewTitle/MJP campaign selection.\n");
         NewTitle();
@@ -753,6 +860,20 @@ avp_hud_set_countdown_callbacks(pc_countdown_cue,pc_alarm);
         }
 #endif
     }
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(mp_from_f2 && mp_menu_setup.dm_level==AVP_MP_CUSTOM_LEVEL){
+        if(!pc_custom_map_session_prepare(v,mazes,maze_count,
+            &mp_menu_setup,&mp_custom_resource_level)){
+            logmsg("Custom F2 map failed validation; refusing to start retail map instead.\n");
+            avp_pc_video_destroy(v);avp_pc_rom_free(&rom);
+            if(pc_log)fclose(pc_log);
+            return 2;
+        }
+    }
+#endif
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(mp_custom_resource_level)pc_custom_eeprom_enter();
+#endif
     if(rom_ok){
         avp_doors_bind_retail_meta();
         /* The child Map Maker process owns a PRIVATE offset-only copy of
@@ -769,7 +890,8 @@ avp_hud_set_countdown_callbacks(pc_countdown_cue,pc_alarm);
         if(!pc_begin_campaign(&rom,mazes,maze_count,v,&logical_level,
                 g_map_test?1:!debug_immediate,
 #ifdef AVP_LOCAL_MULTIPLAYER
-                g_map_test?map_test_level:(mp_from_f2 && mp_menu_setup.game_mode==AVP_MP_DEATHMATCH?mp_menu_setup.dm_level:0u)
+                g_map_test?(mp_custom_resource_level?mp_custom_resource_level:map_test_level):
+                (mp_from_f2 && (mp_menu_setup.game_mode==AVP_MP_DEATHMATCH || mp_menu_setup.level_explicit)?mp_menu_setup.dm_level:0u)
 #else
                 g_map_test?map_test_level:0u
 #endif
@@ -827,7 +949,7 @@ multiplayer_dispatch:
                                  rom_ok?&rom:NULL,mp_combat,mp_players,
                                  mp_from_f2?&mp_menu_setup:NULL) : 1;
         if(mp_error==AVP_MP_RUN_COMPLETED || mp_error==AVP_MP_RUN_TITLE ||
-           mp_error==AVP_MP_RUN_RESTART){
+           mp_error==AVP_MP_RUN_RESTART || mp_error==AVP_MP_RUN_CUSTOM_MAP){
             /* The source MP backend has already waited out the original
              * FadeDown before freeing the level/actor snapshots. Only a
              * successful campaign-ending game_over reaches this branch.
@@ -837,6 +959,8 @@ multiplayer_dispatch:
                        player_type);
             else if(mp_error==AVP_MP_RUN_RESTART)
                 logmsg("F2 Start Game: cleanly restart multiplayer with edited setup.\n");
+            else if(mp_error==AVP_MP_RUN_CUSTOM_MAP)
+                logmsg("F12 Level Select: change multiplayer session to selected custom map.\n");
             else
                 logmsg("Multiplayer Restart Game: return to Jaguar title (not F2 setup).\n");
             avp_pc_runtime_set_gameplay_vblank(0);
@@ -846,7 +970,13 @@ multiplayer_dispatch:
             launch_flag=0;score=0;savegame=0;new_level=0;
             if(mp_error==AVP_MP_RUN_COMPLETED)avp_post_game_frontend_multiplayer();
             score=0;
-            if(mp_error!=AVP_MP_RUN_RESTART){
+            if(mp_error!=AVP_MP_RUN_RESTART && mp_error!=AVP_MP_RUN_CUSTOM_MAP){
+                /* Restore retail settings and actor-placement registrations
+                 * before the original title frontend can run. */
+                if(mp_custom_resource_level){
+                    pc_custom_map_session_finish();mp_custom_resource_level=0u;
+                    pc_custom_eeprom_leave();
+                }
                 /* Multiplayer F12 Return to Title has the same held-accept
                  * suppression as single-player. Otherwise the last input
                  * can immediately choose NEW GAME on the title screen. */
@@ -863,13 +993,53 @@ multiplayer_dispatch:
                 mp_players=mp_menu_setup.players;
                 player_type=(s16)(mp_menu_setup.campaign<<2);
                 savegame=0;
+            }else if(mp_error==AVP_MP_RUN_CUSTOM_MAP){
+                char stem[96];
+                if(!avp_pc_video_cheat_custom_map(v,stem,sizeof stem)){
+                    logmsg("F12 selected custom map not found.\n");
+                    quit=1;goto pc_shutdown;
+                }
+                if(!mp_from_f2){
+                    avp_local_mp_defaults(&mp_menu_setup);
+                    mp_menu_setup.players=mp_players;
+                    mp_menu_setup.campaign=(unsigned)player_type>>2;
+                }
+                mp_from_f2=1;mp_walktest=1;mp_combat=1;
+                mp_menu_setup.dm_level=AVP_MP_CUSTOM_LEVEL;
+                mp_menu_setup.level_explicit=1u;
+                mp_menu_setup.custom_session_id=0u;
+                snprintf(mp_menu_setup.custom_map_stem,
+                    sizeof mp_menu_setup.custom_map_stem,"%s",stem);
             }else if(mp_error==AVP_MP_RUN_RESTART){
                 logmsg("F2 restart request missing setup; cannot safely restart.\n");
                 quit=1;goto pc_shutdown;
             }
+            /* Reopen the chosen custom draft transactionally at every F2
+             * restart; never let its old overlay bleed into a retail game. */
+            if(mp_custom_resource_level){
+                pc_custom_map_session_finish();mp_custom_resource_level=0u;
+            }
+            if(mp_from_f2 && mp_menu_setup.dm_level==AVP_MP_CUSTOM_LEVEL){
+                if(!pc_custom_map_session_prepare(v,mazes,maze_count,
+                    &mp_menu_setup,&mp_custom_resource_level)){
+                    logmsg("Cannot start custom map: missing/invalid file.\n");
+                    quit=1;goto pc_shutdown;
+                }
+            }
+            if(mp_custom_resource_level){
+                pc_custom_eeprom_enter();
+                if(mp_error==AVP_MP_RUN_CUSTOM_MAP)
+                    avp_pc_video_local_mp_select_custom(v,mp_menu_setup.custom_map_stem);
+            }else pc_custom_eeprom_leave();
+            avp_doors_bind_retail_meta();
+            if(g_map_test && !avp_mm_playtest_bind_scripts(g_map_test)){
+                logmsg("Cannot bind custom map scripts after F2 restart.\n");
+                quit=1;goto pc_shutdown;
+            }
             if(rom_ok){
                 if(!pc_begin_campaign(&rom,mazes,maze_count,v,&logical_level,1,
-                        mp_from_f2 && mp_menu_setup.game_mode==AVP_MP_DEATHMATCH?mp_menu_setup.dm_level:0u)){
+                        mp_custom_resource_level?mp_custom_resource_level:
+                        (mp_from_f2 && (mp_menu_setup.game_mode==AVP_MP_DEATHMATCH || mp_menu_setup.level_explicit)?mp_menu_setup.dm_level:0u))){
                     logmsg("New campaign after multiplayer ending could not initialize.\n");
                     quit=1;goto pc_shutdown;
                 }
@@ -952,6 +1122,66 @@ multiplayer_dispatch:
          live_last_game_angle=centre_angle;
         }
         {unsigned actions=avp_pc_video_take_actions(v);
+#ifdef AVP_LOCAL_MULTIPLAYER
+            if(actions & AVP_PC_ACTION_CUSTOM_MAP_START){
+                AvpLocalMpSetup requested;char stem[96]={0};
+                unsigned target_resource=0;
+                if(!rom_ok || !avp_pc_video_cheat_custom_map(v,stem,sizeof stem)){
+                    logmsg("Level Select: no valid custom-map selection.\n");
+                }else{
+                    avp_local_mp_defaults(&requested);
+                    requested.dm_level=AVP_MP_CUSTOM_LEVEL;
+                    snprintf(requested.custom_map_stem,sizeof requested.custom_map_stem,"%s",stem);
+                    if(!pc_custom_map_session_prepare(v,mazes,maze_count,
+                        &requested,&target_resource)){
+                        logmsg("Level Select: custom map rejected; current session retained.\n");
+                    }else{
+                        mp_custom_resource_level=target_resource;
+                        avp_pc_video_local_mp_select_custom(v,stem);
+                        /* The cheat enters a single-player custom session;
+                         * its PC session ID is 16, with the original source
+                         * resource bank used strictly for the Jaguar arrays. */
+                        mp_walktest=0;mp_from_f2=0;
+                        pc_custom_eeprom_enter();
+                        avp_doors_bind_retail_meta();
+                        if(!avp_mm_playtest_bind_scripts(g_map_test)){
+                            logmsg("Level Select: invalid custom door scripts.\n");
+                            quit=1;goto pc_shutdown;
+                        }
+                        KillAlar();KillAll();KillAmbi();
+                        savegame=0;game_over=0;player_dead=0;
+                        avp_pc_quick_turn_cancel(&quick_turn);
+                        avp_player_host_quick_turn_reset();
+                        if(!pc_begin_campaign(&rom,mazes,maze_count,v,
+                             &logical_level,1,target_resource)){
+                            logmsg("Level Select: failed to initialize custom level.\n");
+                            quit=1;goto pc_shutdown;
+                        }
+                        {s32 nx=(s32)(g_test_x*65536.0),ny=(s32)(g_test_y*65536.0);
+                         if(SafePos(80,nx,ny,40)!=AVP_COLL_SAFE){
+                            logmsg("Custom level spawn blocked by native collision.\n");
+                            quit=1;goto pc_shutdown;
+                         }
+                         x_pos=(u32)nx;y_pos=(u32)ny;
+                         centre_angle=(u32)(int64_t)(-g_test_heading*
+                              (4294967296.0/6.2831853071795864769));}
+                        avp_pc_quickstate_destroy(quickstate);
+                        quickstate=avp_pc_quickstate_create();
+                        ticks=0;last_enhanced_tick=0;last_enhanced_delta=0.0;
+                        prev_x=x_pos;prev_y=y_pos;prev_angle=centre_angle;
+                        avp_pc_live_heading_reset(&live_heading);
+                        avp_pc_video_reset_presentation(v);
+                        avp_pc_video_snapshot_sim(v,avp_collision_maze_data(),maze_width,maze_height);
+                        avp_pc_runtime_set_gameplay_vblank(1);
+                        next_sim=avp_pc_now_ns()+(1000000000ull/simulation_hz);
+                        next_display=avp_pc_now_ns()+(1000000000ull/60u);
+                        next_render=avp_pc_now_ns();
+                        logmsg("Level Select: started custom session 16 (%s.avpm) using resources %u.\n",stem,target_resource);
+                        goto campaign_frame_complete;
+                    }
+                }
+            }
+#endif
             if(actions&AVP_PC_ACTION_KILL_SELECTED){unsigned killed=avp_amp_dev_kill_enemies(avp_pc_video_kill_selected_type(v));logmsg("Cheat: killed %u enemies of selected type.\n",killed);}
             if(actions&AVP_PC_ACTION_KILL_ALL){unsigned killed=avp_amp_dev_kill_enemies(-1);logmsg("Cheat: killed %u enemies in current level.\n",killed);}
             if(actions&AVP_PC_ACTION_CLEAR_ENEMIES){unsigned removed=avp_amp_dev_clear_enemies();logmsg("Cheat: removed %u enemies from current level.\n",removed);}
@@ -961,6 +1191,13 @@ multiplayer_dispatch:
             if(actions&AVP_PC_ACTION_GIVE_WEAPONS)avp_dev_cheats_give_weapons();
             if(actions&AVP_PC_ACTION_SECURITY_UP)avp_dev_cheats_adjust_security(1);
             if(actions&AVP_PC_ACTION_SECURITY_DOWN)avp_dev_cheats_adjust_security(-1);
+#ifdef AVP_LOCAL_MULTIPLAYER
+            if(mp_custom_resource_level &&
+               (actions&(AVP_PC_ACTION_ORIG_LEVEL_NEXT|AVP_PC_ACTION_ORIG_LEVEL_PREVIOUS))){
+                pc_custom_map_session_finish();mp_custom_resource_level=0u;
+                pc_custom_eeprom_leave();
+            }
+#endif
             avp_pc_original_cheat_apply(actions);
             if(actions&AVP_PC_ACTION_QUICKSAVE){
                 if(quickstate&&avp_pc_quickstate_save(quickstate,avp_collision_maze_data(),maze_width,maze_height,ticks)){
@@ -1306,6 +1543,12 @@ campaign_completed:
         KillAmbi();
         avp_post_game_frontend();
 restart_title_from_game:
+#ifdef AVP_LOCAL_MULTIPLAYER
+        if(mp_custom_resource_level){
+            pc_custom_map_session_finish();mp_custom_resource_level=0u;
+            pc_custom_eeprom_leave();
+        }
+#endif
         NewTitle();
         if(!pc_begin_campaign(&rom,mazes,maze_count,v,&logical_level,1,0u)){
             logmsg("Next campaign cannot start: missing level resources.\n");
@@ -1392,6 +1635,9 @@ campaign_frame_complete:
     }}
 #ifdef AVP_LOCAL_MULTIPLAYER
 pc_shutdown:
+#endif
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(mp_custom_resource_level){pc_custom_map_session_finish();pc_custom_eeprom_leave();}
 #endif
     logmsg("Shutting down normally at tick %llu.\n",(unsigned long long)ticks);avp_pc_runtime_set_gameplay_vblank(0);avp_pc_audio_shutdown();avp_pc_eeprom_close();avp_pc_quickstate_destroy(quickstate);avp_pc_video_destroy(v);avp_resources_free_mazes(mazes,maze_count<64?maze_count:64);avp_pc_rom_free(&rom);avp_runtime_reset_ops();if(pc_log)fclose(pc_log);return 0;
 }

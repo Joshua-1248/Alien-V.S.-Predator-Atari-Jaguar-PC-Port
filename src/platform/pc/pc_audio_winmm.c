@@ -141,11 +141,12 @@ int avp_pc_audio_init(const AvpRomImage *rom)
 {
     if(!avp_jaguar_fullsynth_init(rom))return 0;
     {const char *wave=getenv("AVP_JERRY_WAVE_ROM");
-     if(wave&&wave[0]) (void)avp_jaguar_fullsynth_load_wave_rom(wave);
-     else {
+     int loaded=(wave&&wave[0])?avp_jaguar_fullsynth_load_wave_rom(wave):0;
+     if(!loaded){
+         /* Even an invalid environment override must not hide a valid,
+          * user-provided original JERRY wave-ROM beside the executable. */
          char path[MAX_PATH];
          DWORD n=GetModuleFileNameA(NULL,path,(DWORD)sizeof(path));
-         int loaded=0;
          if(n>0u&&n<sizeof(path)){
              char *slash,*backslash;size_t len;
              path[n]=0;slash=strrchr(path,'/');backslash=strrchr(path,'\\');
@@ -180,6 +181,8 @@ void avp_pc_audio_play_explosion(s32 rate)
 void avp_pc_audio_update_generator_alarm(s32 volume,s32 pitch){avp_jaguar_fullsynth_update_generator_alarm(volume,pitch);}
 void avp_pc_audio_play_tracker(unsigned id,u32 v,u32 p,u32 e,u32 m){avp_jaguar_fullsynth_play_tracker(id,v,p,e,m);}
 void avp_pc_audio_play_handle(unsigned id,u32 h,unsigned voice,s32 l,s32 r){avp_jaguar_fullsynth_play_handle(id,h,voice,l,r);}
+void avp_pc_audio_play_handle_d1(unsigned id,u32 handle,unsigned voice,s32 left,s32 right,s32 d1)
+{avp_jaguar_fullsynth_play_handle_d1(id,handle,voice,left,right,d1);}
 void avp_pc_audio_stop_handle(u32 h){avp_jaguar_fullsynth_stop_handle(h);}
 int avp_pc_audio_handle_active(u32 h){return avp_jaguar_fullsynth_handle_active(h);}
 int avp_pc_audio_voice_active(unsigned voice){return avp_jaguar_fullsynth_voice_active(voice);}

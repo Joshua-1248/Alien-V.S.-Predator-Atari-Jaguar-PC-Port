@@ -70,6 +70,54 @@ int main(void)
                  (2<<16)|0x8000,(2<<16)|0x8000,0x2000u,point,&f)==0);
     assert(avp_mp_move_guard_sweep(0,0,INT32_MAX,INT32_MAX,
                  0x2000u,point,&f)!=0); /* implausible teleport fails closed */
+    /* Two living players in one world collide at the exact combined source
+     * half-width; both solo and fast-swept moves use this same geometry. */
+    {
+        AvpMpPeerCollisionView peers={0};
+        const int32_t px=(3<<16)|0x8000,py=(3<<16)|0x8000;
+        peers.count=16u;peers.active[1]=1u;
+        peers.x[1]=(uint32_t)px;peers.y[1]=(uint32_t)py;
+        assert(!avp_mp_move_guard_peers(&peers,px,py));
+        assert(!avp_mp_move_guard_peers(&peers,px+AVP_MP_PEER_CLEARANCE-1,py));
+        assert(avp_mp_move_guard_peers(&peers,px+AVP_MP_PEER_CLEARANCE,py));
+        /* On enabling the toggle mid-overlap, moving OUT remains legal,
+         * moving further INTO the other player remains blocked. */
+        peers.from_x=px+0x3000;peers.from_y=py;
+        assert(avp_mp_move_guard_peers(&peers,px+0x5000,py));
+        assert(!avp_mp_move_guard_peers(&peers,px+0x2000,py));
+        assert(!avp_mp_move_guard_peers(&peers,px+0x2000,py+0x800));
+        peers.active[1]=0u;
+        assert(avp_mp_move_guard_peers(&peers,px,py));
+    }
+    /* When players are spawned/transported atop each other, they remain
+     * non-solid ONLY until the two source-sized footprints separate. */
+    {
+        AvpMpPeerGrace grace={0};
+        uintptr_t world[AVP_MP_PEER_COUNT]={0};
+        uint32_t x[AVP_MP_PEER_COUNT]={0},y[AVP_MP_PEER_COUNT]={0};
+        world[0]=world[1]=1u;x[0]=x[1]=3u<<16;
+        y[0]=y[1]=3u<<16;
+        avp_mp_peer_grace_update(&grace,3u,world,x,y,3u);
+        assert(avp_mp_peer_grace_exempt(&grace,0u,1u));
+        x[1]+=AVP_MP_PEER_CLEARANCE;
+        avp_mp_peer_grace_update(&grace,3u,world,x,y,0u);
+        assert(!avp_mp_peer_grace_exempt(&grace,0u,1u));
+        x[1]=x[0];
+        avp_mp_peer_grace_update(&grace,3u,world,x,y,0u);
+        assert(!avp_mp_peer_grace_exempt(&grace,0u,1u));
+        avp_mp_peer_grace_update(&grace,3u,world,x,y,2u);
+        assert(avp_mp_peer_grace_exempt(&grace,0u,1u));
+        world[1]=2u;
+        avp_mp_peer_grace_update(&grace,3u,world,x,y,3u);
+        assert(!avp_mp_peer_grace_exempt(&grace,0u,1u));
+        world[1]=1u;
+        /* All 16 actors use the same pair rule; bot P5 vs P16. */
+        world[4]=world[15]=1u;x[4]=x[15]=5u<<16;
+        y[4]=y[15]=3u<<16;
+        avp_mp_peer_grace_update(&grace,(1u<<4)|(1u<<15),world,x,y,
+                                 (1u<<4)|(1u<<15));
+        assert(avp_mp_peer_grace_exempt(&grace,4u,15u));
+    }
     puts("PASS: player footprint, void cell, outside bounds, fast swept wall/void, safe diagonal");
     return 0;
 }

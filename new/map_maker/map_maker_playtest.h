@@ -33,6 +33,8 @@ unsigned avp_mm_playtest_restore_noncanonical_door_states(
 /* Test-process only: append independently authored AMP positions to the
  * read-only retail placement lists, without changing src/game/amp.c. */
 int avp_mm_playtest_bind_amp(const AvpMapMaker *m);
+/* Undo custom AMP-list bindings before the next in-process level session. */
+void avp_mm_playtest_clear_runtime_overrides(void);
 /* Apply the draft BEFORE the retail campaign's first collision/door bind.
  * Also used at transitions back to the tested level. */
 int avp_mm_playtest_overlay_maze(const AvpMapMaker *m,unsigned level,

@@ -1,4 +1,4 @@
-# Source and docs use LF consistently on both Linux and Windows.
+# Keep source formatting stable across platforms.
 * text=auto
 *.c text eol=lf
 *.h text eol=lf
@@ -10,6 +10,4 @@ CMakeLists.txt text eol=lf
 *.sh text eol=lf
 *.py text eol=lf
 *.yml text eol=lf
-
-# AVPTEX1 replacement texture panels are binary data, never text-normalized.
 *.prgb -text

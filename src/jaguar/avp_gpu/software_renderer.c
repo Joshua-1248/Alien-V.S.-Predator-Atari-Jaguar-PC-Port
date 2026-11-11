@@ -729,7 +729,7 @@ static void draw_amp_sprite(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,const
     if(ch.aaf<0||ch.aaf>=63||!state->aaf[ch.aaf])return;
     d=state->aaf[ch.aaf];n=state->aaf_size[ch.aaf];if(n<4)return;frames=pc_be16(d);if(!frames||4u+(size_t)frames*4u>n)return;
     fi=(unsigned)a->animframe%frames;fo=pc_be32(d+4u+(size_t)fi*4u);if(fo+2u>n)return;fr=d+fo;left=(int)(int8_t)fr[0];right=(int)(int8_t)fr[1];if(right<left)return;ncols=(unsigned)(right-left);coltab=fo+2u;if(coltab+(size_t)ncols*2u>n)return;
-    wx=(double)a->xpos/65536.0-px;wy=(double)a->ypos/65536.0-py;forward=wx*fx+wy*fy;if(forward<=0.04||forward>=avp_host_ray_limit(state ? state->host_extend_draw_distance : 0))return;side=wx*rx+wy*ry;cx=(double)fb->width*0.5+(side/forward)*focal;
+    wx=(double)a->xpos/65536.0-px;wy=(double)a->ypos/65536.0-py;forward=wx*fx+wy*fy;if(forward<=0.04||forward>=avp_host_ray_limit(state ? state->host_extend_draw_distance : 0))return;side=wx*rx+wy*ry;cx=(double)fb->width*0.5+(side/forward-(state?state->host_stereo_projection_shift:0.0))*focal;
     avp_gpu_sprite_viewport_scale(fb->width,fb->height,focal,forward,sprite_rescale,
                                   &scale_x,&scale_y);
     if(scale_x<0.03||scale_y<0.03)return;
@@ -1093,12 +1093,22 @@ void avp_gpu_computer_draw_glyph(AvpAvpGpuState *state,unsigned brush,unsigned s
                                  unsigned width,unsigned x,unsigned y,int clear)
 {
     if(!state||brush>=3u)return;
+    /* FONT.S positions are Jaguar signed 16-bit coordinates.  The generic
+     * runtime callback transports their raw 16-bit representation as an
+     * unsigned argument: convert it back before clipping the Blitter brush.
+     * In particular an X of -2 is a partly visible glyph, not a glyph at
+     * unsigned X=65534 that should disappear entirely.  Signed wider
+     * arithmetic also avoids accidental wraparound at the right edge. */
+    const int origin_x=(int)(s16)(u16)x;
+    const int origin_y=(int)(s16)(u16)y;
     for(unsigned yy=0;yy<9u;yy++)for(unsigned xx=0;xx<width;xx++){
-        unsigned dx=x+xx,dy=y+yy;int pv;
-        if(dx>=320u||dy>=240u)continue;
+        const int64_t dx=(int64_t)origin_x+(int64_t)xx;
+        const int64_t dy=(int64_t)origin_y+(int64_t)yy;
+        int pv;
+        if(dx<0||dx>=320||dy<0||dy>=240)continue;
         pv=computer_font_bitpair(state,brush,source_x+xx,yy);
-        if(clear||pv==0)state->computer_pixels[(size_t)dy*320u+dx]=0;
-        else state->computer_pixels[(size_t)dy*320u+dx]=0xff000000u|computer_col(state,(unsigned)pv);
+        if(clear||pv==0)state->computer_pixels[(size_t)dy*320u+(size_t)dx]=0;
+        else state->computer_pixels[(size_t)dy*320u+(size_t)dx]=0xff000000u|computer_col(state,(unsigned)pv);
     }
 }
 static void computer_text(AvpAvpGpuState *state,int x,int y,const char *t)
@@ -1145,8 +1155,11 @@ static void computer_retail_record(AvpAvpGpuState *state,
                 /* FONT.S advances to the next 15-pixel line when a glyph
                    would cross the 319-pixel typewriter edge. */
                 if(x+(int)w>319){y+=15;x=0;}
-                if(x>=0&&y>=0&&x<320&&y<240)
-                    avp_gpu_computer_draw_glyph(state,b,sx,w,(unsigned)x,(unsigned)y,0);
+                /* The Jaguar clips glyph brushes against the CTEXT plane;
+                 * don't discard a whole glyph when its signed origin is
+                 * just outside the screen and some columns remain visible. */
+                avp_gpu_computer_draw_glyph(state,b,sx,w,
+                                            (unsigned)(u16)x,(unsigned)(u16)y,0);
                 x+=(int)w;
             }else x+=6;
         }
@@ -2344,7 +2357,8 @@ static void avp_floor_rows(void *arg,unsigned first,unsigned last)
             avp_host_fog_distance(perp,p->state ? p->state->host_extend_fog_distance : 0)),
             p->state && p->state->host_disable_fog);
         avp_gpu_host_flat_row_shades(row_shades,floor_shade);
-        lefttan=(0.5-(double)fb->width*0.5)/p->focal;step=1.0/p->focal;
+        lefttan=(0.5-(double)fb->width*0.5)/p->focal+
+            (p->state?p->state->host_stereo_projection_shift:0.0);step=1.0/p->focal;
         wx=p->px+(p->fx+p->rx*lefttan)*perp;
         wy=p->py+(p->fy+p->ry*lefttan)*perp;
         wxstep=p->rx*step*perp;wystep=p->ry*step*perp;
@@ -2400,7 +2414,8 @@ static void avp_wall_columns(void *arg,unsigned first,unsigned last)
     const AvpWallPass *p=(const AvpWallPass*)arg;
     unsigned x;
     for(x=first;x<last;x++){
-        double tanoff=((double)x+0.5-(double)p->fb->width*0.5)/p->focal;
+        double tanoff=((double)x+0.5-(double)p->fb->width*0.5)/p->focal+
+            (p->state?p->state->host_stereo_projection_shift:0.0);
         double dx=p->fx+p->rx*tanoff,dy=p->fy+p->ry*tanoff;
         PcRayHit portals[AVP_MAZE2_MAX_RAY_PORTALS];unsigned pc=0,k;
         PcRayHit hit=cast_ray_hit(p->state,p->logical_level,p->maze,
@@ -2514,18 +2529,29 @@ void avp_gpu_render_maze(AvpAvpGpuState*state,AvpJaguarFramebuffer*fb,const u8*m
                    (size_t)op_view.width*sizeof(u32));
     }else overlay_first_person_scaled(state,fb,vblank_counter,smooth_presentation);
     apply_game_clut(state,fb);
+    /* Presentation-only stereo camera rotation and offsets must not shift
+     * the scanner/automap: those belong to the authoritative player camera.
+     * Neither side can influence gameplay or exploration state. */
+    double hud_px=px,hud_py=py,hud_fx=fx,hud_fy=fy,hud_rx=rx,hud_ry=ry;
+    if(state && state->host_vr_hud_anchor_enabled){
+        double ha=avp_gpu_heading_radians(state->host_vr_hud_anchor_angle,
+                                         state->host_continuous_heading);
+        hud_px=(double)state->host_vr_hud_anchor_x/65536.0;
+        hud_py=(double)state->host_vr_hud_anchor_y/65536.0;
+        hud_fx=cos(ha);hud_fy=sin(ha);hud_rx=-hud_fy;hud_ry=hud_fx;
+    }
     if(op_view.pixels){
         for(unsigned row=0;row<fb->height;row++)
             memcpy(op_view.pixels+(size_t)row*op_view.width,
                    fb->pixels+(size_t)row*fb->width+op_left,
                    (size_t)op_view.width*sizeof(u32));
-        overlay_hud(state,&op_view,maze,mw,mh,px,py,fx,fy,rx,ry,logical_level);
+        overlay_hud(state,&op_view,maze,mw,mh,hud_px,hud_py,hud_fx,hud_fy,hud_rx,hud_ry,logical_level);
         for(unsigned row=0;row<fb->height;row++)
             memcpy(fb->pixels+(size_t)row*fb->width+op_left,
                    op_view.pixels+(size_t)row*op_view.width,
                    (size_t)op_view.width*sizeof(u32));
         free(op_view.pixels);
-    }else overlay_hud(state,fb,maze,mw,mh,px,py,fx,fy,rx,ry,logical_level);
+    }else overlay_hud(state,fb,maze,mw,mh,hud_px,hud_py,hud_fx,hud_fy,hud_rx,hud_ry,logical_level);
     present_predator_vmode(state,fb);
     /* The translated MAZESCRN fade is owned by the 68000, but the PC
      * renderer composites the HUD after the 3D CLUT pass.  At the completed

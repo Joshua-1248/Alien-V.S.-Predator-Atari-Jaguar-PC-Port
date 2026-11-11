@@ -240,7 +240,40 @@ int main(void)
     /* A known retail vocal descriptor with synthetic waveform data, kept
      * outside the ranges of all other synthetic RDB fixture descriptors. */
     memcpy(rdb+(AVP_FX_B1-0x20300u),rdb+0x200u,80u);
+    /* R97: JERRY compressed handler IMULT sees signed bit 15 of the
+     * sampler volume.  These synthetic type-32 and type-44 fixtures
+     * exercise the TITLE3-like $9000 note volume with no retail PCM. */
+    for(unsigned kind=0u;kind<2u;kind++)for(unsigned flavor=0u;flavor<3u;flavor++){
+        u8 *p=rdb+0x3700u+(kind*3u+flavor)*0x50u;
+        memset(p,0,80u);
+        write32(p,kind?44u:32u);
+        write32(p+4u,flavor==1u?0x80001000u:
+                    flavor==2u?0x80019000u:0x80009000u);
+        write32(p+8u,0x900000u);
+        write32(p+12u,0u); /* constant sample phase */
+        write32(p+16u,0x10000u);
+        write32(p+20u,0x10000u);
+        if(kind){
+            write32(p+44u,0x20000000u); /* envelope phase -> $4000 */
+            write32(p+48u,0u);
+            write32(p+52u,0x7fffu);
+        }
+        write32(p+76u,0x4000u);
+    }
     assert(avp_jaguar_fullsynth_init(&rom));
+    {
+        int16_t negative[2],positive[2],upper[2];
+        for(unsigned kind=0u;kind<2u;kind++){
+            fm_wave_case(0x23a00u+kind*0xf0u,negative,1u);
+            fm_wave_case(0x23a50u+kind*0xf0u,positive,1u);
+            fm_wave_case(0x23aa0u+kind*0xf0u,upper,1u);
+            assert(negative[0]<0&&negative[1]<0);
+            assert(positive[0]>0&&positive[1]>0);
+            /* IMULT ignores the upper 16 bits; the bit-15 sign survives. */
+            assert(memcmp(negative,upper,sizeof(negative))==0);
+            assert(abs(negative[0])>abs(positive[0])*5);
+        }
+    }
     /* The optional JERRY ROM loader must reject truncated and mismatched
      * files. Never ship or embed proprietary hardware wave tables in tests. */
     {
@@ -372,7 +405,10 @@ int main(void)
     {
         int16_t pcm[2]={0,0};
         fm_wave_case(0x23000u,pcm,1u);
-        assert(pcm[0]==0 && pcm[1]==3794);
+        /* R110 replaces a crude sine with the mathematically reconstructed
+         * JERRY SINE table; the same DSP volume/envelope order is tested,
+         * with a recomputed synthetic reference sample. */
+        assert(pcm[0]==0 && pcm[1]==4239);
     }
     /* R170: The original DSP loads the complete pan longword, computes
      * (0x7fff-pan) in a 32-bit register, then IMULT observes the signed
@@ -425,8 +461,10 @@ int main(void)
          * of the former full-scale value (former expectations 16252/16253
          * and 16233/16234 assumed the unshifted word).  The interpolation
          * arithmetic under test is unchanged. */
-        assert(at_peak[0]==4061&&at_peak[1]==4061);
-        assert(at_fraction[0]==4056&&at_fraction[1]==4057);
+        /* Procedural JERRY sine samples replace the previous rounded
+         * fallback.  Keep fixed-point interpolation checks intact. */
+        assert(at_peak[0]==4056&&at_peak[1]==4056);
+        assert(at_fraction[0]==4041&&at_fraction[1]==4042);
     }
     {
         int16_t sin_pcm[64],tri_pcm[64],noise_pcm[64];
@@ -687,6 +725,31 @@ int main(void)
         avp_jaguar_fullsynth_set_audio_mix(100u,100u,100u,100u,100u,1,1,1);
         avp_jaguar_fullsynth_stop_all();
         avp_jaguar_fullsynth_shutdown();
+    }
+    /* R109: optionally test a privately extracted *authentic* JERRY ROM.
+     * This test remains completely independent of proprietary waveform
+     * bytes in the distributable source tree: the user supplies the path.
+     * A real ROM must change the FM NOISE waveform, while an invalid load
+     * must not revert a previously installed authenticated table. */
+    {
+        const char *wave_path=getenv("AVP_TEST_JERRY_WAVE_ROM");
+        if(wave_path&&wave_path[0]){
+            int16_t generated[64],authentic[64],after_invalid[64];
+            const char *invalid="/tmp/avp-r109-no-such-wave-rom";
+            assert(avp_jaguar_fullsynth_init(&rom));
+            assert(!avp_jaguar_fullsynth_uses_exact_waves());
+            fm_wave_case(0x20700u,generated,32u); /* FM NOISE carrier fixture */
+            assert(avp_jaguar_fullsynth_load_wave_rom(wave_path));
+            assert(avp_jaguar_fullsynth_uses_exact_waves());
+            fm_wave_case(0x20700u,authentic,32u);
+            assert(memcmp(generated,authentic,sizeof(generated))!=0);
+            assert(!avp_jaguar_fullsynth_load_wave_rom(invalid));
+            assert(avp_jaguar_fullsynth_uses_exact_waves());
+            fm_wave_case(0x20700u,after_invalid,32u);
+            assert(memcmp(authentic,after_invalid,sizeof(authentic))==0);
+            avp_jaguar_fullsynth_shutdown();
+            puts("R109 authenticated JERRY NOISE waveform playback PASS.");
+        }
     }
     free(rom.data);
     return 0;

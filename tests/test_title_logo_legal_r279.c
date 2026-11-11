@@ -29,9 +29,9 @@ int main(void)
         st.frontend_img[AVP_MJP_TITLE][4].width=320;st.frontend_img[AVP_MJP_TITLE][4].height=40;
         st.frontend_img[AVP_MJP_TITLE][4].rgb=rgb;st.frontend_loaded[AVP_MJP_TITLE][4]=1u;
         assert(title_legal_bitmap(&st,&fb));
-        assert(px[(196u+5u)*320u+10u]!=0x123456u);  /* drawn at row 196+5 */
-        assert(px[(196u+5u)*320u+11u]==0x123456u);  /* black = transparent */
-        assert(px[(195u)*320u+10u]==0x123456u);
+        assert(px[(182u+5u)*320u+10u]!=0x123456u);  /* drawn at row 196+5 */
+        assert(px[(182u+5u)*320u+11u]==0x123456u);  /* black = transparent */
+        assert(px[(181u)*320u+10u]==0x123456u);
         free(rgb);
     }
     {   /* R280: MJP is RGB16 (VMODE $6C7): FILES 235/234 glyph words decode
@@ -87,10 +87,10 @@ int main(void)
         st.frontend_img[AVP_MJP_TITLE][6]=(AvpGpuRgbImage){160,40,p232,NULL};
         st.frontend_loaded[AVP_MJP_TITLE][5]=st.frontend_loaded[AVP_MJP_TITLE][6]=1u;
         assert(title_alien_stamp(&st,&fb) && title_predator_stamp(&st,&fb));
-        assert(px[(14u+33u)*320u+15u]!=0u && px[(14u+33u)*320u+14u]==0u);
-        assert(px[(14u+72u)*320u+110u]!=0u && px[(14u+73u)*320u+110u]==0u);
-        assert(px[(14u+33u)*320u+153u]!=0u && px[(14u+33u)*320u+312u]!=0u);
-        assert(px[(14u+33u)*320u+313u]==0u);
+        assert(px[(33u)*320u+15u]!=0u && px[(33u)*320u+14u]==0u);
+        assert(px[(72u)*320u+110u]!=0u && px[(73u)*320u+110u]==0u);
+        assert(px[(33u)*320u+153u]!=0u && px[(33u)*320u+312u]!=0u);
+        assert(px[(33u)*320u+313u]==0u);
         st.frontend_loaded[AVP_MJP_TITLE][5]=st.frontend_loaded[AVP_MJP_TITLE][6]=0u;
         assert(!title_alien_stamp(&st,&fb) && !title_predator_stamp(&st,&fb));
     }

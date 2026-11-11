@@ -114,6 +114,39 @@ static int nav_valid(const AvpMpBotMap *m)
            m->height>=1u && m->width<=64u && m->height<=64u;
 }
 static unsigned nav_index(unsigned x,unsigned y){return y*64u+x;}
+/* At most one bot sends Use for a particular original door byte in a
+ * cooldown window. The source door animation remains authoritative. */
+int avp_mp_bot_door_claim(AvpMpBotDoorClaims *claims,
+    const uint8_t *cells,uint32_t offset,uint64_t tick)
+{
+    unsigned choice=AVP_MP_BOT_DOOR_CLAIMS;
+    if(!claims||!cells)return 0;
+    for(unsigned i=0;i<AVP_MP_BOT_DOOR_CLAIMS;i++){
+        AvpMpBotDoorClaim *c=&claims->entries[i];
+        if(c->cells==cells && c->offset==offset){
+            if(tick<c->until)return 0;
+            c->until=tick+30u;return 1;
+        }
+        if(choice==AVP_MP_BOT_DOOR_CLAIMS && (!c->cells || tick>=c->until))choice=i;
+    }
+    if(choice==AVP_MP_BOT_DOOR_CLAIMS){
+        choice=claims->next_evict++%AVP_MP_BOT_DOOR_CLAIMS;
+    }
+    claims->entries[choice]=(AvpMpBotDoorClaim){cells,offset,tick+30u};
+    return 1;
+}
+/* Only the original game's active door slots can prove a door is
+ * currently moving.  The byte's 0 value is ambiguous immediately after
+ * start_normal_or_double() and just before its final native DoorStep().
+ * This guard affects bot input only; humans and source door physics are
+ * unchanged. */
+static int bot_door_animating(const AvpMpBotObservation *v,uint32_t offset)
+{
+    if(!v)return 0;
+    for(unsigned i=0;i<v->active_door_count && i<2u;i++)
+        if(v->active_door_offsets[i]==offset)return 1;
+    return 0;
+}
 static unsigned nav_x(unsigned n){return n%64u;}
 static unsigned nav_y(unsigned n){return n/64u;}
 static const uint8_t *nav_cell(const AvpMpBotMap *m,unsigned x,unsigned y)
@@ -217,17 +250,65 @@ unsigned avp_mp_bot_components(const AvpMpBotMap *m,
     return labels;
 }
 
-/* A narrow, two-ended original passage becomes blocked if we kill an
-   Alien in its center. Lure it into a room where possible. This is purely
-   a tactical preference; emergency close-range combat always takes priority. */
-static int bot_narrow_corridor(const AvpMpBotMap *m,unsigned x,unsigned y)
+/* A source Alien death creates an actual +/-30<<9 acid contact square.
+ * Instead of treating the entire 3x3 neighborhood as unsafe (which falsely
+ * rejects narrow Jaguar vents), inspect the original four wall/door edges
+ * and sample potential player-center lanes inside the target cell. The
+ * player must retain the original 40<<9 wall margin. No safe centre line
+ * means an acid splash can block a one-cell passage. All movement remains
+ * subject to the original SafePos check. This is a tactical prediction, not
+ * a change to the original acid geometry or death spawn. */
+int avp_mp_bot_alien_death_passable(const AvpMpBotMap *m,
+                                    uint32_t x,uint32_t y)
 {
-    unsigned side_mask=0u,nx,ny,door,open;
-    if(!nav_valid(m) || x>=m->width || y>=m->height)return 0;
+    const unsigned cx=x>>16,cy=y>>16;
+    unsigned connected=0u;
+    unsigned nx,ny,door,open;
+    const double hazard_x=(double)(int32_t)x/65536.0;
+    const double hazard_y=(double)(int32_t)y/65536.0;
+    const double margin=BOT_PLAYER_WALL_MARGIN+0.001;
+    if(!nav_valid(m)||cx>=m->width||cy>=m->height)return 1;
     for(unsigned side=0;side<4u;side++)
-        if(nav_edge(m,x,y,side,&nx,&ny,&door,&open))side_mask|=1u<<side;
-    return side_mask==((1u<<0)|(1u<<2)) ||
-           side_mask==((1u<<1)|(1u<<3));
+        if(nav_edge(m,cx,cy,side,&nx,&ny,&door,&open))
+            connected|=1u<<side;
+    if(!connected)return 1; /* No traversable exit is threatened. */
+    /* A genuinely open neighboring 2x2 square supplies a legal detour
+     * around the future puddle. Narrow ducts lack this extra space, so
+     * don't demand that the entire 3x3 neighborhood be open. */
+    for(int dx=-1;dx<=1;dx+=2)for(int dy=-1;dy<=1;dy+=2)
+        if(nav_diagonal(m,cx,cy,dx,dy,1))return 1;
+    /* Check each source-legal cardinal passage orientation. A one-way
+     * branch is still checked; no artificial 3x3 clear room is required. */
+    for(unsigned side=0;side<4u;side++)if(connected&(1u<<side)){
+        const int vertical=(side==1u || side==3u);
+        /* A through-passage requires both ends when available. A dead-end
+         * can instead use its single entry, but still needs a safe lane. */
+        unsigned other=vertical?(side==1u?3u:1u):(side==0u?2u:0u);
+        if((connected & (1u<<other)) ||
+           (connected & ~(1u<<side))==0u){
+            for(unsigned n=0;n<=8u;n++){
+                const double lateral=(double)(vertical?cx:cy)+
+                    margin+(1.0-2.0*margin)*(double)n/8.0;
+                const double offset=fabs(lateral-(vertical?hazard_x:hazard_y));
+                if(offset>BOT_ACID_CONTACT+0.001)return 1;
+            }
+        }
+    }
+    /* For a corner, evaluate a two-stage path within the same cell. It
+     * can make the turn only if its two intermediate center points and
+     * the corner point are outside the exact acid-contact square. */
+    if(connected && !(connected&(connected-1u)))return 0;
+    for(unsigned a=0;a<4u;a++)if(connected&(1u<<a))
+      for(unsigned b=a+1u;b<4u;b++)if((connected&(1u<<b)) && ((a+b)&1u)!=0u){
+        double px=(double)cx+0.5,py=(double)cy+0.5;
+        if(a==0u||b==0u)px=(double)cx+margin;
+        if(a==2u||b==2u)px=(double)cx+1.0-margin;
+        if(a==1u||b==1u)py=(double)cy+margin;
+        if(a==3u||b==3u)py=(double)cy+1.0-margin;
+        if(fabs(px-hazard_x)>BOT_ACID_CONTACT+0.001 ||
+           fabs(py-hazard_y)>BOT_ACID_CONTACT+0.001)return 1;
+      }
+    return 0;
 }
 /* Indexed min-heap with decrease-key: no dynamic allocation or unbounded
  * queue, at most 4096 cells. For 64x64 Jaguar maps this is inexpensive at
@@ -356,6 +437,13 @@ int avp_mp_bot_route(const AvpMpBotMap *m,unsigned sx,unsigned sy,
                nx==out->next_x && ny==out->next_y){
                 out->requires_door_use=door&&open<40u;
                 out->door_is_open=!door||open>=40u;
+                out->door_value=open;
+                if(door){
+                    if(dir==0u)out->door_offset=(sy*m->width+sx)*8u+6u;
+                    else if(dir==1u)out->door_offset=(sy*m->width+sx)*8u+7u;
+                    else if(dir==2u)out->door_offset=(ny*m->width+nx)*8u+6u;
+                    else out->door_offset=(ny*m->width+nx)*8u+7u;
+                }
                 break;
             }
         }
@@ -1147,14 +1235,12 @@ static int bot_melee_weapon(const AvpMpBotObservation *v)
            (v->player_species==2u &&
             (v->current_weapon==1u || v->current_weapon==4u));
 }
-/* Tactical movement for Guerilla never changes source motion speeds or
- * collision. Pick from the four NORMAL player movement commands, keep a
- * flank for several simulation ticks, and reverse when an authored wall,
- * door, acid square or solid prop blocks it. For melee-only species, flank
- * while assessing an enemy, but commit to approach regularly; if that
- * enemy has its back turned, approach immediately rather than retreating
- * endlessly. A corner with no safe retreat falls back to either free flank
- * or a forward breakthrough instead of choosing NO motion. */
+/* Guerilla distance management is independent of the fire decision.
+ * Choose ordinary player movement buttons, never synthetic velocity. Close
+ * when outside the desired band, BACKPEDAL when inside it, and flank only
+ * while inside the band or when the authored collision rejects a step.
+ * Melee range uses the original source weapon reach; ranged distance bands
+ * are movement preferences only, NEVER artificial maximum firing ranges. */
 static int bot_target_back_turned(const AvpMpBotObservation *v,
                                   double tx,double ty)
 {
@@ -1192,8 +1278,10 @@ static unsigned bot_guerilla_motion(AvpMpBotState *state,
 {
     const double dist2=tx*tx+ty*ty;
     const int melee=bot_melee_weapon(v);
-    const int commit=melee && (back_turned || dist2>9.0 ||
-                    (v->tick+v->player_index*11u)%46u<22u);
+    /* Movement preferences only. Even a distant visible target can be
+     * shot with a ranged weapon: only source collision/hit rules decide. */
+    const double near=melee?BOT_MELEE_HOLD_NEAR:3.0;
+    const double far=melee?BOT_MELEE_HOLD_FAR:5.0;
     unsigned side,other,motion;
     if(!state->guerilla_flank_ready){
         state->guerilla_flank_ready=1u;
@@ -1207,16 +1295,16 @@ static unsigned bot_guerilla_motion(AvpMpBotState *state,
          AVP_MP_STRAFE_LEFT:AVP_MP_STRAFE_RIGHT;
     other=side==AVP_MP_STRAFE_LEFT?
           AVP_MP_STRAFE_RIGHT:AVP_MP_STRAFE_LEFT;
-    /* An observed opening means an immediate melee approach, not another
-     * orbit. Periodic pushes also keep a frontal, melee-only fight from
-     * becoming an endless loop of backing away and strafing. */
-    if(melee && dist2>BOT_MELEE_HOLD_FAR*BOT_MELEE_HOLD_FAR && commit){
+    /* Do not orbit indefinitely outside melee reach (or far beyond a
+     * preferred ranged fighting distance). Keep closing with legal player
+     * controls; the aim and Fire decision is made independently below. */
+    if(dist2>far*far || (melee && back_turned && dist2>near*near)){
         motion=bot_guerilla_approach(v,tx,ty);
         if(motion<AVP_MP_INPUT_ACTIONS)return motion;
     }
-    if(!back_turned && (melee ? dist2<BOT_MELEE_HOLD_NEAR*BOT_MELEE_HOLD_NEAR :
-                        (dist2<9.0 ||
-                         (v->combat_enemies_nearby>1u && dist2<25.0)))){
+    /* Backpedal while looking at the opponent; another safe translation
+     * axis is chosen when the wall/acid/solid prop blocks backward movement. */
+    if(dist2<near*near){
         motion=bot_melee_retreat(v,tx,ty);
         if(motion<AVP_MP_INPUT_ACTIONS)return motion;
     }
@@ -1226,20 +1314,18 @@ static unsigned bot_guerilla_motion(AvpMpBotState *state,
         state->guerilla_flank_until=v->tick+28u;
         return other;
     }
-    /* Both flanks blocked in a hallway/corner: choose a viable opening.
-     * A melee-only Guerilla has nothing to gain by backing down a narrow
-     * passage forever while OUTSIDE strike reach. Move toward the target
-     * when that opening is legal; close-range retreat still happens above. */
-    if(melee && dist2>BOT_MELEE_HOLD_FAR*BOT_MELEE_HOLD_FAR){
+    /* Corridor fallback: select a safe opening without changing the
+     * original movement/collision code or inadvertently cancelling Fire. */
+    if(dist2>far*far){
         motion=bot_guerilla_approach(v,tx,ty);
         if(motion<AVP_MP_INPUT_ACTIONS)return motion;
     }
-    if(bot_safe_action(v,AVP_MP_BACKWARD,NULL) && !back_turned)
-        return AVP_MP_BACKWARD;
-    motion=bot_guerilla_approach(v,tx,ty);
-    if(motion<AVP_MP_INPUT_ACTIONS)return motion;
-    if(bot_safe_action(v,AVP_MP_FORWARD,NULL))return AVP_MP_FORWARD;
+    if(dist2<near*near){
+        motion=bot_melee_retreat(v,tx,ty);
+        if(motion<AVP_MP_INPUT_ACTIONS)return motion;
+    }
     if(bot_safe_action(v,AVP_MP_BACKWARD,NULL))return AVP_MP_BACKWARD;
+    if(bot_safe_action(v,AVP_MP_FORWARD,NULL))return AVP_MP_FORWARD;
     return AVP_MP_INPUT_ACTIONS;
 }
 static void emit_turn(double turn,AvpMpPlayerCommand *out)
@@ -1332,9 +1418,18 @@ int avp_mp_bot_patrol_pick(const AvpMpBotMap *map,unsigned x,unsigned y,
         if(comps[idx]!=component||dist<2u||visits[idx]>=60000u)continue;
         /* Rare visits dominate; distant cells encourage active exploration.
          * Seed ties differently per player/tick, with no foreign target data. */
-        merit=(uint64_t)(65535u-visits[idx])*1000u+
-               (uint64_t)(dist>24u?24u:dist)*64u+
-               ((uint32_t)(idx*2654435761u ^ seed*2246822519u)>>24);
+        /* Each bot's stable seed materially changes route selection; the
+         * old 8-bit tie breaker was swamped by the farthest-cell score and
+         * sent every new bot to the same map corner. Preserve its PRIVATE
+         * visit history as the primary avoid-repeat signal. */
+        {
+            uint32_t hash=(uint32_t)idx*2654435761u ^ seed*2246822519u;
+            hash^=hash>>16;hash*=0x7feb352du;hash^=hash>>15;
+            merit=(visits[idx]==0u?20000u:
+                   20000u/(1u+((unsigned)visits[idx]/4u)))+
+                  (uint64_t)(dist>24u?24u:dist)*128u+
+                  (uint64_t)(hash&0x3fffu);
+        }
         for(at=0;at<count && top[at].merit>=merit;at++);
         if(at>=12u)continue;
         if(count<12u)count++;
@@ -1603,10 +1698,14 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
        delivering the killing shot. Give up after three original seconds,
        or immediately when the Alien is inside the dangerous melee margin.
        No lure against other creatures or while the bot is badly wounded. */
-    if(v->behavior!=1u && v->hostile_target && v->target_is_alien && v->target_visible &&
-       v->player_species!=1u && v->goal==AVP_MP_BOT_HOSTILE &&
+    if(v->behavior==0u && v->hostile_target && v->target_is_alien && v->target_visible &&
+       v->player_species==0u && v->goal==AVP_MP_BOT_HOSTILE &&
+       /* A vent must remain fightable even if the acid hitbox takes its
+        * entire width: do not permanently refuse combat in duct maps. */
+       !(v->current_level>=6u && v->current_level<=13u) &&
        (!v->max_energy || v->player_energy*100>=v->max_energy*35) &&
-       bot_narrow_corridor(&v->map,v->target_x>>16,v->target_y>>16)){
+       nav_valid(&v->map) &&
+       !avp_mp_bot_alien_death_passable(&v->map,v->target_x,v->target_y)){
         double tx=(double)((int64_t)v->target_x-(int64_t)v->x)/65536.0;
         double ty=(double)((int64_t)v->target_y-(int64_t)v->y)/65536.0;
         if(tx*tx+ty*ty>2.3*2.3){
@@ -1615,8 +1714,8 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
                 state->lure_cooldown_tick=0u;
             }
             if(v->tick>=state->lure_cooldown_tick){
-                state->lure_end_tick=v->tick+30u;
-                state->lure_cooldown_tick=v->tick+150u;
+                state->lure_end_tick=v->tick+150u;
+                state->lure_cooldown_tick=v->tick+300u;
             }
             lure_alien=v->tick<state->lure_end_tick;
         }
@@ -1627,9 +1726,12 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
         double ty=(double)((int64_t)v->target_y-(int64_t)v->y)/65536.0;
         double rawturn=angle_diff(v->heading,tx,ty);
         int melee=bot_melee_weapon(v);
+        /* Guerilla ranged FIRE has no tactical distance/lure gate. LOS and
+         * aim still matter; actual damage, ammo, equip/cloak state and hit
+         * geometry remain the untouched original weapon implementation. */
         if(!lure_alien && v->target_visible &&
            (melee ? bot_melee_source_shot_box(v,tx,ty) :
-                    tx*tx+ty*ty<=6.0*6.0) &&
+                    (v->behavior==2u || tx*tx+ty*ty<=6.0*6.0)) &&
            fabs(rawturn)<(tx*tx+ty*ty<2.25 ? BOT_PI/6.0 : BOT_PI/11.0) &&
            (v->player_species!=2u ||
             (!v->invis_act&&!v->invis_stat&&!v->invisflag)))
@@ -1706,11 +1808,10 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
             else if(bot_safe_action(v,alternate,NULL))tactical_strafe=alternate+1u;
         }
     }
-    /* Guerilla does not stop when the shooting lane is far away.
-     * Circle continuously (or break out along a free corridor), and close
-     * decisively on a SIGHTED opponent whose back is turned. The melee
-     * controller still owns exact reach and Fire; any higher-priority
-     * life-saving evasion overrides these ordinary motion buttons. */
+    /* Guerilla closes when too far away, backpedals when too close, and
+     * flanks inside the preferred band. These movement decisions NEVER
+     * suppress Fire while a ranged target is visible and aimed at. Melee
+     * retains its exact reach gate; emergency movement still takes priority. */
     if(v->behavior==2u && v->hostile_target && v->target_visible &&
        v->goal==AVP_MP_BOT_HOSTILE && !lure_alien){
         double tx=(double)((int64_t)v->target_x-(int64_t)v->x)/65536.0;
@@ -1739,8 +1840,11 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
             state->door_cell=cell;state->door_next=next;state->door_attempts=0;
             state->door_cooldown=0;
         }
-        if(fabs(turn)<BOT_PI/9.0 &&
-           (!state->door_cooldown || v->tick>=state->door_cooldown)){
+        if(fabs(turn)<BOT_PI/9.0 && route.door_value==0u &&
+           !bot_door_animating(v,route.door_offset) &&
+           (!state->door_cooldown || v->tick>=state->door_cooldown) &&
+           (!v->door_claims || avp_mp_bot_door_claim(v->door_claims,
+                 v->map.cells,route.door_offset,v->tick))){
             out->actions|=1u<<AVP_MP_USE;
             state->last_door_use=v->tick;
             state->door_cooldown=(unsigned)(v->tick+26u);
@@ -1821,11 +1925,19 @@ void avp_mp_bot_step(AvpMpBotState *state,const AvpMpBotObservation *v,
         }else if(threat_movement){
             out->actions|=1u<<(threat_movement-1u);
         }else if(lure_alien){
-            /* Move backward to pull the chasing Alien away from the door,
-               otherwise hold position and let it approach. */
+            /* Do not freeze a shooter in the choke while the chasing Alien
+             * is still at normal ranged-combat distance. The old four-cell
+             * retreat cutoff left a five-cell target in sight but made no
+             * retreat command, so the Alien was killed in its doorway when
+             * the finite lure timeout expired. Backpedal throughout the
+             * existing six-cell engagement band, only while facing the
+             * Alien: otherwise BACKWARD would actually close the distance.
+             * bot_safe_action retains original wall/prop/acid restrictions;
+             * the 150-tick lure timeout and its fire suppression are intact. */
             double tx=(double)((int64_t)v->target_x-(int64_t)v->x)/65536.0;
             double ty=(double)((int64_t)v->target_y-(int64_t)v->y)/65536.0;
-            if(tx*tx+ty*ty<4.0*4.0 &&
+            if(tx*tx+ty*ty<6.0*6.0 &&
+               fabs(angle_diff(v->heading,tx,ty))<BOT_PI/4.0 &&
                bot_safe_action(v,AVP_MP_BACKWARD,NULL))
                 out->actions|=1u<<AVP_MP_BACKWARD;
         }else if(melee_movement){

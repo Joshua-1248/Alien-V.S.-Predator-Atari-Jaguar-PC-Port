@@ -56,6 +56,20 @@ typedef struct AvpMpBotMap {
     const uint8_t *prop_risk; /* same grid; source collmap occupancy, route cost */
 } AvpMpBotMap;
 
+/* Shared PC-only door arbitration across bots in a map, not original door state. */
+#define AVP_MP_BOT_DOOR_CLAIMS 64u
+typedef struct AvpMpBotDoorClaim {
+    const uint8_t *cells;
+    uint32_t offset;
+    uint64_t until;
+} AvpMpBotDoorClaim;
+typedef struct AvpMpBotDoorClaims {
+    AvpMpBotDoorClaim entries[AVP_MP_BOT_DOOR_CLAIMS];
+    unsigned next_evict;
+} AvpMpBotDoorClaims;
+int avp_mp_bot_door_claim(AvpMpBotDoorClaims *claims,
+    const uint8_t *cells,uint32_t offset,uint64_t tick);
+
 typedef struct AvpMpBotState {
     uint32_t previous_x,previous_y;
     unsigned immobile_ticks,evade_ticks,initialized;
@@ -119,10 +133,18 @@ typedef struct AvpMpBotObservation {
     unsigned prop_count;
     AvpMpBotProp props[AVP_MP_BOT_MAX_NEAR_PROPS];
     AvpMpBotMap map;
+    AvpMpBotDoorClaims *door_claims; /* Shared only among bots in current host. */
+    /* Read-only original DOORS.S active slots from this same world.  An
+     * in-flight door may still have opening byte 0 before its first native
+     * door tick; a second bot must not press Use and reverse it. */
+    unsigned active_door_count;
+    uint32_t active_door_offsets[2]; /* Relative to map.cells (header skipped). */
 } AvpMpBotObservation;
 
 typedef struct AvpMpBotRoute {
     unsigned valid,requires_door_use,door_is_open;
+    unsigned door_value; /* Raw source opening byte: nonzero = moving/open. */
+    uint32_t door_offset; /* Eight-byte original cell boundary offset. */
     unsigned next_x,next_y;
     /* A second authored path cell for optional forward-looking steering.
      * Immediate hops can be cardinal or fully open, verified diagonals;
@@ -131,6 +153,10 @@ typedef struct AvpMpBotRoute {
     uint32_t cost;
 } AvpMpBotRoute;
 
+/* Can the original acid contact square be bypassed on a legal
+ * single-cell-wide approach, including a vent? No fictional 3x3 clearance. */
+int avp_mp_bot_alien_death_passable(const AvpMpBotMap *map,
+                                   uint32_t x,uint32_t y);
 /* Pick an actual source-reachable patrol destination for no-contact bots.
  * Visit weights are bot-owned memory, not a privileged target lookup. */
 int avp_mp_bot_patrol_pick(const AvpMpBotMap *map,unsigned x,unsigned y,

@@ -295,7 +295,7 @@ const char *XKeysymToString(KeySym sym)
 {static char buf[3];switch(sym){case XK_BackSpace:return "BackSpace";case XK_Delete:return "Delete";case XK_Tab:return "Tab";case XK_Return:return "Return";case XK_KP_Enter:return "KP_Enter";
  case XK_Escape:return "Escape";case XK_Left:return "Left";case XK_Up:return "Up";case XK_Right:return "Right";
  case XK_Down:return "Down";case XK_Shift_L:return "Shift_L";case XK_Shift_R:return "Shift_R";
- case XK_F2:return "F2";case XK_F5:return "F5";case XK_F8:return "F8";case XK_F9:return "F9";case XK_F12:return "F12";
+ case XK_F2:return "F2";case XK_F5:return "F5";case XK_F6:return "F6";case XK_F7:return "F7";case XK_F8:return "F8";case XK_F9:return "F9";case XK_F10:return "F10";case XK_F12:return "F12";
  case XK_Page_Up:return "Page_Up";case XK_Page_Down:return "Page_Down";
  default:break;}
  if(sym>=32u&&sym<127u){buf[0]=(char)sym;buf[1]=0;return buf;}return "Unknown";}

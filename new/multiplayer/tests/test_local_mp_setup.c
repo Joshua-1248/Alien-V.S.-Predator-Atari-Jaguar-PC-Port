@@ -38,8 +38,9 @@ int main(void)
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_MODIFIERS,rows);
         assert(n==1u && rows[0]==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW);
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_OPTIONS,rows);
-        assert(n==2u && rows[0]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
-               rows[1]==AVP_LOCAL_MP_WHOLE_MAP_ROW);
+        assert(n==3u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
+               rows[1]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
+               rows[2]==AVP_LOCAL_MP_WHOLE_MAP_ROW);
         assert(!avp_local_mp_menu_rows(&s,999u,rows));
         s.game_mode=AVP_MP_DEATHMATCH;s.bot_count=12u;
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_BOTS,rows);
@@ -53,15 +54,21 @@ int main(void)
                rows[2]==AVP_LOCAL_MP_EQUIP_ROW &&
                rows[3]==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW);
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_OPTIONS,rows);
-        assert(n==4u && rows[0]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
-               rows[1]==AVP_LOCAL_MP_WHOLE_MAP_ROW &&
-               rows[2]==AVP_LOCAL_MP_TRAVEL_ROW &&
-               rows[3]==AVP_LOCAL_MP_ENEMIES_ROW);
+        assert(n==5u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
+               rows[1]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
+               rows[2]==AVP_LOCAL_MP_WHOLE_MAP_ROW &&
+               rows[3]==AVP_LOCAL_MP_TRAVEL_ROW &&
+               rows[4]==AVP_LOCAL_MP_ENEMIES_ROW);
         s.game_mode=AVP_MP_COOP;s.bot_count=0u;
     }
     assert(s.enabled == 0 && s.players == 2 && s.campaign == 0);
     assert(s.respawn_campaign_start==1);
     assert(s.show_other_players_on_automap==1u);
+    assert(s.player_collisions==1u);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW,+1));
+    assert(s.player_collisions==0u);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW,-1));
+    assert(s.player_collisions==1u);
     assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW));
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW,+1));
     assert(s.show_other_players_on_automap==0u);
@@ -114,8 +121,8 @@ int main(void)
     s.players=2u;
     assert(s.game_mode==AVP_MP_COOP);
     assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_FAST_ROW));
-    assert(avp_local_mp_next_row(&s,AVP_LOCAL_MP_MODE_ROW,+1)==AVP_LOCAL_MP_BOT_COUNT_ROW);
-    assert(avp_local_mp_next_row(&s,0u,-1)==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW);
+    assert(avp_local_mp_next_row(&s,AVP_LOCAL_MP_MODE_ROW,+1)==AVP_LOCAL_MP_LEVEL_ROW);
+    assert(avp_local_mp_next_row(&s,0u,-1)==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW);
     assert(!avp_local_mp_adjust(&s,AVP_LOCAL_MP_FAST_ROW,+1));
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_MODE_ROW,+1));
     assert(s.game_mode==AVP_MP_DEATHMATCH);
@@ -127,7 +134,7 @@ int main(void)
     assert(s.dm_enemies==0u && s.dm_fast_equip==0u && s.dm_level==3u);
     assert(!s.dm_level_travel);
     assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_TRAVEL_ROW));
-    assert(avp_local_mp_next_row(&s,0u,-1)==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW);
+    assert(avp_local_mp_next_row(&s,0u,-1)==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW);
     assert(avp_local_mp_next_row(&s,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW,+1)==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW,+1));
     assert(s.dm_cloak_damage==1u);
@@ -147,9 +154,16 @@ int main(void)
     assert(s.dm_fast_equip==0u);
     s.dm_level=1u;
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_LEVEL_ROW,-1));
-    assert(s.dm_level==15u);
+    assert(s.dm_level==AVP_MP_CUSTOM_LEVEL);
+    assert(s.level_explicit==1u);
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_CUSTOM_NAME_ROW));
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_CUSTOM_LOAD_ROW));
+    assert(!avp_local_mp_adjust(&s,AVP_LOCAL_MP_CUSTOM_NAME_ROW,+1));
+    assert(!avp_local_mp_adjust(&s,AVP_LOCAL_MP_CUSTOM_LOAD_ROW,-1));
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_LEVEL_ROW,+1));
     assert(s.dm_level==1u);
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_CUSTOM_NAME_ROW));
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_CUSTOM_LOAD_ROW));
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_LEVEL_ROW,+1));
     assert(s.dm_level==2u);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_FAST_ROW,+1));

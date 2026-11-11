@@ -2,6 +2,7 @@
 #include "pc/pc_original_cheat_input.h"
 #include "collectables.h"
 #include "pc/pc_video.h"
+#include "pc/pc_vr_preview.h"
 #include "pc/pc_audio_layout.h"
 #include "pc/pc_audio.h"
 #ifndef _WIN32
@@ -17,6 +18,8 @@
 #include "jaguar/avp_gpu/software_renderer.h"
 #include "jaguar/avp_gpu/host_widescreen.h"
 #include "jaguar/avp_gpu/frontend_renderer.h"
+#include "pc/pc_title_native.h"
+#include "pc/pc_title_reference.h"
 #include "jaguar/object_processor.h"
 #include "jaguar/framebuffer.h"
 #include "jaguar/cry.h"
@@ -73,6 +76,7 @@
 #ifdef AVP_LOCAL_MULTIPLAYER
 #include "local_mp.h"
 #include "local_mp_input.h"
+#include "local_mp_reveal_policy.h"
 #include "local_mp_mice.h"
 #include "local_mp_worlds.h"
 #include "local_mp_commands.h"
@@ -95,6 +99,7 @@
 extern char **environ;
 #endif
 
+static int map_maker_stem_valid(const char *stem);
 #define AVP_JS_MAX_AXES 16
 #define AVP_JS_MAX_BUTTONS 32
 #define AVP_JS_MAX_DEVICES 16
@@ -112,6 +117,7 @@ static const char *const mm_action_names[AVP_MM_ACTIONS]={
     "Rotate Panel Counter-Clockwise", "Rotate Panel Clockwise"};
 #include "game_micro_optimization.h"
 #include "map_maker.h"
+static int map_maker_file_valid(const AvpMapMaker *owner,const char *stem);
 #include "map_maker_overhead.h"
 #include "map_maker_texture_browser.h"
 #include "map_maker_objects.h"
@@ -124,11 +130,11 @@ static const char *const mm_action_names[AVP_MM_ACTIONS]={
 enum {MENU_ROOT, MENU_CONTROLS, MENU_GAMEPAD, MENU_KEYS, MENU_MOUSE, MENU_CHEATS, MENU_MISC,
       MENU_GAMEPAD_AXES, MENU_GAMEPAD_PC, MENU_GAMEPAD_JAGUAR, MENU_GAMEPAD_FRONTEND,
       MENU_KEYS_PC, MENU_KEYS_FRONTEND, MENU_MOUSE_SETTINGS, MENU_MOUSE_BINDINGS,
-      MENU_ENHANCEMENTS, MENU_VIDEO, MENU_AUDIO, MENU_MAP_MAKER, MENU_MM_BINDINGS, MENU_MM_KEYS, MENU_MM_MOUSE, MENU_MM_PAD,
+      MENU_ENHANCEMENTS, MENU_VIDEO, MENU_VR_HEADSET, MENU_AUDIO, MENU_MAP_MAKER, MENU_MM_BINDINGS, MENU_MM_KEYS, MENU_MM_MOUSE, MENU_MM_PAD,
       MENU_CHEATS_ORIGINAL, MENU_CHEATS_NEW, MENU_CHEATS_FUJI,
       MENU_CHEATS_BANANA, MENU_CHEATS_GPS, MENU_CHEATS_LEVEL, MENU_DEBUG
 #ifdef AVP_LOCAL_MULTIPLAYER
-      ,MENU_MP_CONTROLS
+      ,MENU_PLAYER_OPTIONS, MENU_MP_PREFERENCES, MENU_MP_CONTROLS
 #endif
 };
 
@@ -137,6 +143,10 @@ typedef struct AvpPcSettings {
     unsigned presentation_hz; /* PC rasterization only, validated against 21 host rates. */
     int show_fps; /* host presentation frame counter; off by default. */
     int video_vsync; /* host-only VBlank wait, off by default; requires backend support. */
+    int vr_sbs_preview; /* side-by-side stereo for compatible passive viewing devices and displays */
+    float vr_eye_separation; /* source world cell units; NOT calibrated physical IPD */
+    float vr_convergence; /* tiles to the zero-parallax plane; PC presentation only */
+    unsigned vr_eye_aspect; /* 0 fill (legacy), 1 4:3, 2 square, black outside */
     int disable_fog; /* PC-only rendering: no distance darkening. */
     unsigned audio_speaker_mode,audio_subwoofers;
     unsigned audio_music_volume,audio_sfx_volume,audio_ambience_volume,audio_voice_volume;
@@ -204,6 +214,10 @@ struct AvpPcVideo {
     int idle_window_mapped, idle_window_focused;
 #endif
     AvpJaguarFramebuffer fb,world_fb;
+    AvpJaguarFramebuffer vr_eye_fb; /* PC-only temporary, reused sequentially for both eyes */
+    int vr_preview_yaw_deg; /* temporary display-only desktop look test, not game aim */
+    float vr_preview_yaw_residual; /* fractional Ctrl+Mouse preview motion */
+    int vr_screenshot_requested;
     double local_mp_render_alpha;
 #ifdef AVP_LOCAL_MULTIPLAYER
     /* Modal terminal does not replace the four-player composed window. */
@@ -216,6 +230,8 @@ struct AvpPcVideo {
      * from VDB (title row 0); rows 0..13 keep the established +14 frontend
      * coordinate space.  Gameplay keeps the 320x228 fb. */
     AvpJaguarFramebuffer frontend_fb;
+    AvpPcTitleNative *title_native;
+    int title_native_started;
     int presenting_frontend;
     int presenting_world_hires;
     u32 *gameplay_fade_snapshot;
@@ -275,6 +291,9 @@ struct AvpPcVideo {
     unsigned pending_actions,quick_turn_pending; int infinite_health,infinite_ammo,freeze_enemies,tracker_cheat;
     /* Session-only retail cheat switches. None are persisted in settings.cfg. */
     unsigned cheat_target; /* 0=P1 (default), 1..3=P2..P4; F12-only. */
+    int cheat_level_is_new;
+    int custom_browser_mode; /* 0 none, 1 F2, 2 F12 level cheat. */
+    char cheat_custom_map_stem[96];
     int orig_fuji[4],orig_banana[4],orig_position[4],orig_god[4];
     AvpPcOriginalCheatInput orig_input[4];
     u32 orig_gps_x[4],orig_gps_y[4];
@@ -299,6 +318,7 @@ struct AvpPcVideo {
     int local_mp_hud_owner; /* -1: legacy renderer; 0..3: scoped actor HUD brush */
     unsigned local_mp_cursor;
     unsigned local_mp_page; /* R56 F2 root/Bots/Modifiers/Options */
+
     AvpMpCommandInput local_mp_commands;
     AvpMpMouseReader local_mp_readers[AVP_MP_INPUT_PLAYERS];
     AvpMpPadReader local_mp_pad_readers[AVP_MP_INPUT_PLAYERS];
@@ -443,7 +463,7 @@ static void settings_defaults(AvpPcSettings*c){memset(c,0,sizeof(*c));c->smooth_
     c->audio_music_volume=c->audio_sfx_volume=100u;
     c->audio_ambience_volume=c->audio_voice_volume=c->audio_hissing_volume=100u;
     c->audio_music_on=c->audio_ambience_on=c->audio_hissing_on=1;
-    c->tracker_sounds_enabled=1;c->player_pain_sounds_enabled=1;c->facehug_pain_sounds_enabled=1;c->facehug_shake_pain_sounds_enabled=1;c->high_resolution_world=0;c->video_window_width=640;c->video_window_height=456;c->analog_movement=0;c->enhanced_analog_controls=0;c->turn_sensitivity=1.0f;c->turn_speed=1.0f;c->mouse_sensitivity=1.0f;c->mouse_acceleration=0.0f;for(int i=0;i<AVP_MOUSE_ACTIONS;i++)c->mouse_button[i]=-1;c->mouse_button[0]=1;c->mouse_button[1]=3;for(int i=0;i<8;i++)c->action_button[i]=-1;for(int i=0;i<AVP_QUICK_TURN_SLOTS;i++)c->quick_turn_buttons[i]=-1;c->quick_turn_keys[0]=XK_r;
+    c->tracker_sounds_enabled=1;c->player_pain_sounds_enabled=1;c->facehug_pain_sounds_enabled=1;c->facehug_shake_pain_sounds_enabled=1;c->high_resolution_world=0;c->vr_eye_separation=0.064f;c->vr_convergence=4.0f;c->vr_eye_aspect=1u;c->video_window_width=640;c->video_window_height=456;c->analog_movement=0;c->enhanced_analog_controls=0;c->turn_sensitivity=1.0f;c->turn_speed=1.0f;c->mouse_sensitivity=1.0f;c->mouse_acceleration=0.0f;for(int i=0;i<AVP_MOUSE_ACTIONS;i++)c->mouse_button[i]=-1;c->mouse_button[0]=1;c->mouse_button[1]=3;for(int i=0;i<8;i++)c->action_button[i]=-1;for(int i=0;i<AVP_QUICK_TURN_SLOTS;i++)c->quick_turn_buttons[i]=-1;c->quick_turn_keys[0]=XK_r;
     c->action_key[0]=XK_comma;c->action_key[1]=XK_period;
     /* The Jaguar Alien always has three attack buttons (A=swipe,
        B=bite, C=tail).  Keep PC mode's separate movement bindings, but
@@ -494,12 +514,18 @@ static void load_settings(AvpPcVideo*v){FILE*f;char linebuf[256];settings_defaul
         else if(!strcmp(k,"local_multiplayer.dm_fast_equip"))v->local_mp.dm_fast_equip=(unsigned)parse_bool(val,(int)v->local_mp.dm_fast_equip);
         else if(!strcmp(k,"local_multiplayer.dm_enemies"))v->local_mp.dm_enemies=(unsigned)parse_bool(val,(int)v->local_mp.dm_enemies);
         else if(!strcmp(k,"local_multiplayer.dm_level"))v->local_mp.dm_level=(unsigned)atoi(val);
+        else if(!strcmp(k,"local_multiplayer.level_explicit"))v->local_mp.level_explicit=(unsigned)parse_bool(val,(int)v->local_mp.level_explicit);
+        else if(!strcmp(k,"local_multiplayer.custom_map")){
+            if(map_maker_stem_valid(val))snprintf(v->local_mp.custom_map_stem,
+                    sizeof v->local_mp.custom_map_stem,"%s",val);
+        }
         else if(!strcmp(k,"local_multiplayer.dm_level_travel"))v->local_mp.dm_level_travel=(unsigned)parse_bool(val,(int)v->local_mp.dm_level_travel);
         else if(!strcmp(k,"local_multiplayer.dm_cloak_damage"))v->local_mp.dm_cloak_damage=(unsigned)parse_bool(val,(int)v->local_mp.dm_cloak_damage);
         else if(!strcmp(k,"local_multiplayer.bot_count"))v->local_mp.bot_count=(unsigned)atoi(val);
         else if(!strcmp(k,"local_multiplayer.random_species_on_respawn"))v->local_mp.random_species_on_respawn=(unsigned)parse_bool(val,(int)v->local_mp.random_species_on_respawn);
         else if(!strcmp(k,"local_multiplayer.show_whole_map"))v->local_mp.show_whole_map=(unsigned)parse_bool(val,(int)v->local_mp.show_whole_map);
         else if(!strcmp(k,"local_multiplayer.show_other_players_on_automap"))v->local_mp.show_other_players_on_automap=(unsigned)parse_bool(val,(int)v->local_mp.show_other_players_on_automap);
+        else if(!strcmp(k,"local_multiplayer.player_collisions"))v->local_mp.player_collisions=(unsigned)parse_bool(val,(int)v->local_mp.player_collisions);
         else if(!strncmp(k,"local_multiplayer.bot_",22)){
             const char *end=NULL;char *stop=NULL;long i=strtol(k+22,&stop,10);
             end=stop;
@@ -564,6 +590,10 @@ static void load_settings(AvpPcVideo*v){FILE*f;char linebuf[256];settings_defaul
         else if(!strcmp(k,"video.show_fps"))v->cfg.show_fps=parse_bool(val,v->cfg.show_fps);
         else if(!strcmp(k,"video.vsync"))v->cfg.video_vsync=parse_bool(val,v->cfg.video_vsync);
         else if(!strcmp(k,"video.disable_fog"))v->cfg.disable_fog=parse_bool(val,v->cfg.disable_fog);
+        else if(!strcmp(k,"video.vr_sbs_preview"))v->cfg.vr_sbs_preview=parse_bool(val,v->cfg.vr_sbs_preview);
+        else if(!strcmp(k,"video.vr_eye_separation"))v->cfg.vr_eye_separation=(float)atof(val);
+        else if(!strcmp(k,"video.vr_convergence"))v->cfg.vr_convergence=(float)atof(val);
+        else if(!strcmp(k,"video.vr_eye_aspect"))v->cfg.vr_eye_aspect=(unsigned)strtoul(val,NULL,10);
         else if(!strcmp(k,"enhancement.game_micro_optimization"))v->cfg.game_micro_optimization=parse_bool(val,v->cfg.game_micro_optimization);
         else if(!strcmp(k,"controls.analog_movement"))v->cfg.analog_movement=parse_bool(val,v->cfg.analog_movement);else if(!strcmp(k,"enhancement.enhanced_analog_controls"))v->cfg.enhanced_analog_controls=parse_bool(val,v->cfg.enhanced_analog_controls);else if(!strcmp(k,"controls.turn_sensitivity"))v->cfg.turn_sensitivity=(float)atof(val);else if(!strcmp(k,"controls.turn_speed"))v->cfg.turn_speed=(float)atof(val);else if(!strcmp(k,"mouse.enabled"))v->cfg.mouse_enabled=parse_bool(val,v->cfg.mouse_enabled);else if(!strcmp(k,"mouse.sensitivity"))v->cfg.mouse_sensitivity=(float)atof(val);else if(!strcmp(k,"mouse.acceleration"))v->cfg.mouse_acceleration=(float)atof(val);else if(!strncmp(k,"mouse.button_",13)){int i=atoi(k+13);if(i>=0&&i<AVP_MOUSE_ACTIONS)v->cfg.mouse_button[i]=atoi(val);}else if(!strcmp(k,"audio.motion_tracker_sounds"))v->cfg.tracker_sounds_enabled=parse_bool(val,v->cfg.tracker_sounds_enabled);else if(!strcmp(k,"audio.player_pain_sounds"))v->cfg.player_pain_sounds_enabled=parse_bool(val,v->cfg.player_pain_sounds_enabled);else if(!strcmp(k,"audio.facehug_pain_sounds"))v->cfg.facehug_pain_sounds_enabled=parse_bool(val,v->cfg.facehug_pain_sounds_enabled);else if(!strcmp(k,"audio.facehug_shake_pain_sounds"))v->cfg.facehug_shake_pain_sounds_enabled=parse_bool(val,v->cfg.facehug_shake_pain_sounds_enabled);else if(!strcmp(k,"enhancement.high_resolution_world"))v->cfg.high_resolution_world=parse_bool(val,v->cfg.high_resolution_world);else if(!strcmp(k,"enhancement.extend_draw_distance"))v->cfg.extend_draw_distance=parse_distance_mode(val,v->cfg.extend_draw_distance,AVP_HOST_DRAW_DISTANCE_CHOICES);else if(!strcmp(k,"enhancement.unlimited_shooting_range"))v->cfg.unlimited_shooting_range=parse_bool(val,v->cfg.unlimited_shooting_range);else if(!strcmp(k,"enhancement.extend_fog_distance"))v->cfg.extend_fog_distance=parse_distance_mode(val,v->cfg.extend_fog_distance,AVP_HOST_FOG_DISTANCE_CHOICES);else if(!strcmp(k,"enhancement.prototype_texture_restoration"))v->cfg.prototype_texture_restoration=parse_bool(val,v->cfg.prototype_texture_restoration);else if(!strcmp(k,"enhancement.smooth_presentation"))v->cfg.smooth_presentation=parse_bool(val,v->cfg.smooth_presentation);else if(!strcmp(k,"gamepad.enabled"))v->cfg.gamepad_enabled=parse_bool(val,v->cfg.gamepad_enabled);else if(!strcmp(k,"gamepad.device_path"))snprintf(v->cfg.gamepad_device,sizeof(v->cfg.gamepad_device),"%s",val);else if(!strcmp(k,"gamepad.deadzone")){v->cfg.deadzone=(float)atof(val);if(!isfinite(v->cfg.deadzone))v->cfg.deadzone=0.20f;for(int i=0;i<AVP_JS_MAX_AXES;i++)v->cfg.axis_deadzone[i]=v->cfg.deadzone;}
 else if(!strncmp(k,"gamepad.axis_deadzone_",22)){int i=atoi(k+22);if(i>=0&&i<AVP_JS_MAX_AXES)v->cfg.axis_deadzone[i]=(float)atof(val);}
@@ -611,7 +641,14 @@ for(int i=0;i<AVP_JS_MAX_AXES;i++){
 #ifdef AVP_LOCAL_MULTIPLAYER
     avp_local_mp_validate(&v->local_mp);
     avp_mp_input_validate(&v->local_mp_controls);
+    /* Reveal Entire Map is a cheat, not a persistent preference. Ignore
+     * values from older settings.cfg files on every fresh process boot. */
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++)
+        v->local_mp_controls.player[p].cheat_reveal_map=0;
 #endif
+if(!isfinite(v->cfg.vr_eye_separation)||v->cfg.vr_eye_separation<0.0f||v->cfg.vr_eye_separation>0.20f)v->cfg.vr_eye_separation=0.064f;
+if(!isfinite(v->cfg.vr_convergence)||v->cfg.vr_convergence<0.5f||v->cfg.vr_convergence>64.0f)v->cfg.vr_convergence=4.0f;
+if(v->cfg.vr_eye_aspect>2u)v->cfg.vr_eye_aspect=1u;
 if(!isfinite(v->cfg.turn_sensitivity))v->cfg.turn_sensitivity=1.0f;
 if(v->cfg.turn_sensitivity<0.25f)v->cfg.turn_sensitivity=0.25f;
 if(v->cfg.turn_sensitivity>5.0f)v->cfg.turn_sensitivity=5.0f;
@@ -638,9 +675,14 @@ static void save_settings(const AvpPcVideo*v){
     fprintf(f,"local_multiplayer.dm_fast_equip=%s\nlocal_multiplayer.dm_enemies=%s\nlocal_multiplayer.dm_level=%u\nlocal_multiplayer.dm_level_travel=%s\n",
         v->local_mp.dm_fast_equip?"true":"false",v->local_mp.dm_enemies?"true":"false",v->local_mp.dm_level,
         v->local_mp.dm_level_travel?"true":"false");
+    fprintf(f,"local_multiplayer.level_explicit=%s\n",v->local_mp.level_explicit?"true":"false");
+    if(map_maker_stem_valid(v->local_mp.custom_map_stem))
+        fprintf(f,"local_multiplayer.custom_map=%s\n",v->local_mp.custom_map_stem);
     fprintf(f,"local_multiplayer.dm_cloak_damage=%s\n",v->local_mp.dm_cloak_damage?"true":"false");
     fprintf(f,"local_multiplayer.show_other_players_on_automap=%s\n",
         v->local_mp.show_other_players_on_automap?"true":"false");
+    fprintf(f,"local_multiplayer.player_collisions=%s\n",
+        v->local_mp.player_collisions?"true":"false");
     fprintf(f,"local_multiplayer.bot_count=%u\nlocal_multiplayer.random_species_on_respawn=%s\nlocal_multiplayer.show_whole_map=%s\n",
         v->local_mp.bot_count,v->local_mp.random_species_on_respawn?"true":"false",v->local_mp.show_whole_map?"true":"false");
     for(unsigned bi=0;bi<AVP_LOCAL_MP_MAX_BOTS;bi++)
@@ -663,6 +705,7 @@ static void save_settings(const AvpPcVideo*v){
             i,v->cfg.mm_key[i],i,v->cfg.mm_mouse[i],i,v->cfg.mm_button[i]);
     fprintf(f,"video.window_mode=%u\nvideo.window_width=%u\nvideo.window_height=%u\nvideo.refresh=%u\nvideo.presentation_hz=%u\n",v->cfg.video_window_mode,v->cfg.video_window_width,v->cfg.video_window_height,v->cfg.video_refresh,v->cfg.presentation_hz);
     fprintf(f,"video.show_fps=%s\nvideo.vsync=%s\nvideo.disable_fog=%s\n",v->cfg.show_fps?"true":"false",v->cfg.video_vsync?"true":"false",v->cfg.disable_fog?"true":"false");
+    fprintf(f,"video.vr_sbs_preview=%s\nvideo.vr_eye_separation=%.3f\nvideo.vr_convergence=%.2f\nvideo.vr_eye_aspect=%u\n",v->cfg.vr_sbs_preview?"true":"false",(double)v->cfg.vr_eye_separation,(double)v->cfg.vr_convergence,v->cfg.vr_eye_aspect);
     fprintf(f,"audio.speaker_mode=%u\naudio.subwoofer_channels=%u\n"
         "audio.music_volume=%u\naudio.sfx_volume=%u\naudio.ambience_volume=%u\n"
         "audio.voice_volume=%u\naudio.ambient_hissing_noise_volume=%u\n"
@@ -1086,6 +1129,8 @@ static void video_apply_display(AvpPcVideo *v)
 #endif
     v->video_switch_pending=1;
 }
+static void custom_browser_open(AvpPcVideo *v,int owner);
+static void custom_browser_key(AvpPcVideo *v,KeySym k);
 static void map_maker_key(AvpPcVideo *v,KeySym k);
 static int map_maker_paste(AvpMapMaker *m,unsigned x,unsigned y,unsigned field);
 static int map_maker_paste_target(AvpMapMaker *m);
@@ -1124,20 +1169,22 @@ static void menu_audio_adjust(AvpPcVideo *v,int row,int dir)
     save_settings(v);
 }
 static int menu_count(const AvpPcVideo*v){switch(v->menu_page){
-    case MENU_ROOT:return 8;case MENU_DEBUG:return 1;case MENU_AUDIO:return 11;case MENU_MAP_MAKER:return 0;
-    case MENU_MM_BINDINGS:return 3;
-    case MENU_MM_KEYS:case MENU_MM_MOUSE:case MENU_MM_PAD:return AVP_MM_ACTIONS;case MENU_VIDEO:return
+    case MENU_ROOT:return
 #ifdef AVP_LOCAL_MULTIPLAYER
-        11;
-#else
         9;
-#endif
-    case MENU_CONTROLS:return
-#ifdef AVP_LOCAL_MULTIPLAYER
-        v->local_mp.enabled?5:4;
 #else
-        4;
+        8;
 #endif
+    case MENU_DEBUG:return 1;case MENU_AUDIO:return 11;case MENU_MAP_MAKER:return 0;
+    case MENU_MM_BINDINGS:return 3;
+    case MENU_MM_KEYS:case MENU_MM_MOUSE:case MENU_MM_PAD:return AVP_MM_ACTIONS;
+    case MENU_VR_HEADSET:return 7;case MENU_VIDEO:return
+#ifdef AVP_LOCAL_MULTIPLAYER
+        12;
+#else
+        10;
+#endif
+    case MENU_CONTROLS:return 4;
     case MENU_GAMEPAD:return 3;case MENU_KEYS:return v->cfg.controller_mode_jaguar?1:2;
     case MENU_MOUSE:return 2;
     case MENU_GAMEPAD_AXES:return COUNT(axis_items);
@@ -1150,15 +1197,17 @@ static int menu_count(const AvpPcVideo*v){switch(v->menu_page){
     case MENU_MOUSE_BINDINGS:return AVP_MOUSE_ACTIONS;
     case MENU_CHEATS:return 3;
     case MENU_CHEATS_ORIGINAL:return 3;
-    case MENU_CHEATS_NEW:return COUNT(cheat_items);
+    case MENU_CHEATS_NEW:return COUNT(cheat_items)+1;
     case MENU_CHEATS_FUJI:return 9;
     case MENU_CHEATS_BANANA:return 11;
     case MENU_CHEATS_GPS:return 4;
-    case MENU_CHEATS_LEVEL:return 3;
+    case MENU_CHEATS_LEVEL:return 6;
     case MENU_MISC:return COUNT(misc_items);
     case MENU_ENHANCEMENTS:return COUNT(enhancement_items);
 #ifdef AVP_LOCAL_MULTIPLAYER
-    case MENU_MP_CONTROLS:return AVP_MP_CONTROL_BIND_ROW+(int)AVP_MP_INPUT_ACTIONS+5;
+    case MENU_PLAYER_OPTIONS:return 3;
+    case MENU_MP_PREFERENCES:return 5;
+    case MENU_MP_CONTROLS:return AVP_MP_CONTROL_BIND_ROW+(int)AVP_MP_INPUT_ACTIONS;
 #endif
     default:return 0;}}
 static int menu_id(const AvpPcVideo*v,int row){switch(v->menu_page){
@@ -1167,10 +1216,38 @@ static int menu_id(const AvpPcVideo*v,int row){switch(v->menu_page){
     case MENU_GAMEPAD_JAGUAR:return jag_gamepad_items[row];case MENU_GAMEPAD_FRONTEND:return frontend_gamepad_items[row];
     case MENU_KEYS_PC:return pc_keyboard_items[row];case MENU_KEYS_FRONTEND:return frontend_keyboard_items[row];
     case MENU_MOUSE_SETTINGS:return 95+row;case MENU_MOUSE_BINDINGS:return 98+row;
-    case MENU_CHEATS_NEW:return cheat_items[row];case MENU_MISC:return misc_items[row];
+    case MENU_CHEATS_NEW:return row<COUNT(cheat_items)?cheat_items[row]:-1;
+    case MENU_MISC:return misc_items[row];
     case MENU_ENHANCEMENTS:return enhancement_items[row];
     default:return -1;}}
 static int resize_surface(AvpPcVideo*v,unsigned win_w,unsigned win_h);
+static void menu_vr_adjust(AvpPcVideo *v,int row,int dir)
+{
+    int persist=1;
+    if(!v||!dir)return;
+    if(row==0)v->cfg.vr_sbs_preview=!v->cfg.vr_sbs_preview;
+    else if(row==1){
+        float sep=v->cfg.vr_eye_separation+(dir>0?0.008f:-0.008f);
+        if(sep<0.0f)sep=0.0f;
+        if(sep>0.20f)sep=0.20f;
+        v->cfg.vr_eye_separation=sep;
+    }else if(row==2){
+        float conv=v->cfg.vr_convergence+(dir>0?0.5f:-0.5f);
+        if(conv<0.5f)conv=0.5f;
+        if(conv>64.0f)conv=64.0f;
+        v->cfg.vr_convergence=conv;
+    }else if(row==3){
+        v->cfg.vr_eye_aspect=(v->cfg.vr_eye_aspect+(dir>0?1u:2u))%3u;
+    }else if(row==4){
+        int yaw=v->vr_preview_yaw_deg+(dir>0?5:-5);
+        if(yaw< -60)yaw= -60;
+        if(yaw>60)yaw=60;
+        v->vr_preview_yaw_deg=yaw;v->vr_preview_yaw_residual=0.0f;persist=0;
+    }else if(row==5){v->vr_preview_yaw_deg=0;v->vr_preview_yaw_residual=0.0f;persist=0;}
+    else if(row==6){if(v->cfg.vr_sbs_preview)v->vr_screenshot_requested=1;persist=0;}
+    else return;
+    if(persist)save_settings(v);
+}
 static void menu_video_adjust(AvpPcVideo *v,int row,int dir)
 {
     if(!v || !dir)return;
@@ -1269,7 +1346,17 @@ static void original_cheat_adjust(AvpPcVideo *v,int row,int dir)
         return;
     }
     if(v->menu_page==MENU_CHEATS_LEVEL){
-        if(v->orig_banana[p] && row>0){
+        if(row==4){if(dir>0)custom_browser_open(v,2);return;}
+        if(row==5){
+            if((v->cheat_level_is_new||v->orig_banana[p]) &&
+               map_maker_file_valid(&v->map_maker,v->cheat_custom_map_stem)){
+                v->menu_open=0;
+                v->pending_actions|=AVP_PC_ACTION_CUSTOM_MAP_START;
+            }
+            return;
+        }
+        if(row==3)return;
+        if((v->cheat_level_is_new||v->orig_banana[p]) && row>0){
             action=row==1?AVP_PC_ACTION_ORIG_LEVEL_NEXT:AVP_PC_ACTION_ORIG_LEVEL_PREVIOUS;
             v->menu_open=0; /* Original level transfer uses gameplay tick. */
         }
@@ -1350,10 +1437,46 @@ static void menu_cheats_target_adjust(AvpPcVideo *v,int dir)
     v->cheat_target=(v->cheat_target+
         (dir>0?1u:AVP_LOCAL_MP_MAX_PLAYERS-1u))%AVP_LOCAL_MP_MAX_PLAYERS;
 }
+#ifdef AVP_LOCAL_MULTIPLAYER
+/* The F12 Player Options selector is shared by the Preferences and Controls
+ * screens. It never creates separate Player 1..4 menu trees. */
+static void mp_preferences_adjust(AvpPcVideo *v,int row)
+{
+    AvpMpInputProfile *p;
+    int *values[5];
+    if(!v||row<0||row>=5)return;
+    p=&v->local_mp_controls.player[v->local_mp_control_player];
+    values[0]=&p->audio_motion_tracker;
+    values[1]=&p->audio_player_pain;
+    values[2]=&p->audio_facehug_pain;
+    values[3]=&p->audio_facehug_shake;
+    values[4]=&p->remember_automap;
+    if(v->local_mp_control_player==0u){
+        switch(row){
+        case 0:v->cfg.tracker_sounds_enabled=!v->cfg.tracker_sounds_enabled;break;
+        case 1:v->cfg.player_pain_sounds_enabled=!v->cfg.player_pain_sounds_enabled;
+            avp_player_set_pain_sounds(v->cfg.player_pain_sounds_enabled);break;
+        case 2:v->cfg.facehug_pain_sounds_enabled=!v->cfg.facehug_pain_sounds_enabled;
+            avp_player_set_facehug_pain_sounds(v->cfg.facehug_pain_sounds_enabled);break;
+        case 3:v->cfg.facehug_shake_pain_sounds_enabled=!v->cfg.facehug_shake_pain_sounds_enabled;
+            avp_mazescrn_set_facehug_shake_pain_sounds(v->cfg.facehug_shake_pain_sounds_enabled);break;
+        case 4:v->cfg.remember_automap=!v->cfg.remember_automap;break;
+        }
+    }else *values[row]=!*values[row];
+    save_settings(v);
+}
+#endif
+#ifdef AVP_LOCAL_MULTIPLAYER
+static void mp_controls_adjust(AvpPcVideo *v,int row,int dir,int accept);
+#endif
 static void menu_choose(AvpPcVideo*v){
     int id=menu_id(v,v->menu_cursor);v->menu_index=id;
     if(v->menu_page==MENU_ROOT){
-        static const int pages[]={MENU_CONTROLS,MENU_VIDEO,MENU_AUDIO,MENU_ENHANCEMENTS,MENU_CHEATS,MENU_DEBUG,MENU_MISC,MENU_MAP_MAKER};
+        static const int pages[]={MENU_CONTROLS,MENU_VIDEO,MENU_AUDIO,MENU_ENHANCEMENTS,MENU_CHEATS,MENU_DEBUG,MENU_MISC,MENU_MAP_MAKER
+#ifdef AVP_LOCAL_MULTIPLAYER
+            ,MENU_PLAYER_OPTIONS
+#endif
+        };
         v->menu_page=pages[v->menu_cursor];v->menu_cursor=0;
         if(v->menu_page==MENU_MAP_MAKER){
             unsigned level=(cur_level>=1&&cur_level<=15)?(unsigned)cur_level:1u;
@@ -1364,6 +1487,23 @@ static void menu_choose(AvpPcVideo*v){
             }
         }
         return;}
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(v->menu_page==MENU_PLAYER_OPTIONS){
+        if(v->menu_cursor==0)
+            v->local_mp_control_player=(v->local_mp_control_player+1u)%4u;
+        else{
+            v->menu_page=v->menu_cursor==1?MENU_MP_PREFERENCES:MENU_MP_CONTROLS;
+            v->menu_cursor=0;v->capture_mode=0;
+        }
+        return;
+    }
+    if(v->menu_page==MENU_MP_PREFERENCES){
+        mp_preferences_adjust(v,v->menu_cursor);return;
+    }
+    if(v->menu_page==MENU_MP_CONTROLS){
+        mp_controls_adjust(v,v->menu_cursor,1,1);return;
+    }
+#endif
     if(v->menu_page==MENU_DEBUG){
         if(v->menu_cursor==0 && !v->frontend_input)
             v->pending_actions|=AVP_PC_ACTION_REFRESH_LEVEL;
@@ -1380,9 +1520,14 @@ static void menu_choose(AvpPcVideo*v){
         static const int pages[]={MENU_CHEATS_FUJI,MENU_CHEATS_BANANA,MENU_CHEATS_GPS};
         v->menu_page=pages[v->menu_cursor];v->menu_cursor=0;return;
     }
+    if(v->menu_page==MENU_CHEATS_NEW && v->menu_cursor==COUNT(cheat_items)){
+        v->cheat_level_is_new=1;
+        v->menu_page=MENU_CHEATS_LEVEL;v->menu_cursor=0;return;
+    }
     if(v->menu_page==MENU_CHEATS_FUJI||v->menu_page==MENU_CHEATS_BANANA||
        v->menu_page==MENU_CHEATS_GPS){
         if(v->menu_page==MENU_CHEATS_BANANA && v->menu_cursor==10){
+            v->cheat_level_is_new=0;
             v->menu_page=MENU_CHEATS_LEVEL;v->menu_cursor=0;return;
         }
         original_cheat_adjust(v,v->menu_cursor,1);return;
@@ -1399,15 +1544,16 @@ static void menu_choose(AvpPcVideo*v){
         v->capture_target=v->menu_cursor;return;
     }
     if(v->menu_page==MENU_AUDIO){menu_audio_adjust(v,v->menu_cursor,1);return;}
+    if(v->menu_page==MENU_VR_HEADSET){
+        menu_vr_adjust(v,v->menu_cursor,1);return;
+    }
     if(v->menu_page==MENU_VIDEO){
+        if(v->menu_cursor==menu_count(v)-1){v->menu_page=MENU_VR_HEADSET;v->menu_cursor=0;return;}
         /* Same Video items are handled by the arrow keys; Enter cycles. */
         /* Forward-declared below to avoid changing the original menu items. */
         menu_video_adjust(v,v->menu_cursor,1);return;
     }
     if(v->menu_page==MENU_CONTROLS){if(v->menu_cursor==0){menu_adjust(v,1);return;}
-#ifdef AVP_LOCAL_MULTIPLAYER
-        if(v->menu_cursor==4 && v->local_mp.enabled){v->menu_page=MENU_MP_CONTROLS;v->menu_cursor=0;v->capture_mode=0;return;}
-#endif
         v->menu_page=v->menu_cursor==1?MENU_GAMEPAD:(v->menu_cursor==2?MENU_KEYS:MENU_MOUSE);v->menu_cursor=0;return;}
     if(v->menu_page==MENU_GAMEPAD){v->menu_page=v->menu_cursor==0?MENU_GAMEPAD_AXES:
         (v->menu_cursor==2?MENU_GAMEPAD_FRONTEND:(v->cfg.controller_mode_jaguar?MENU_GAMEPAD_JAGUAR:MENU_GAMEPAD_PC));v->menu_cursor=0;return;}
@@ -1425,7 +1571,8 @@ static void menu_back(AvpPcVideo*v){if(v->capture_mode){v->capture_mode=0;return
     case MENU_CHEATS_ORIGINAL:case MENU_CHEATS_NEW:v->menu_page=MENU_CHEATS;break;
     case MENU_CHEATS_FUJI:case MENU_CHEATS_BANANA:case MENU_CHEATS_GPS:
         v->menu_page=MENU_CHEATS_ORIGINAL;break;
-    case MENU_CHEATS_LEVEL:v->menu_page=MENU_CHEATS_BANANA;break;
+    case MENU_CHEATS_LEVEL:v->menu_page=v->cheat_level_is_new?MENU_CHEATS_NEW:MENU_CHEATS_BANANA;break;
+    case MENU_VR_HEADSET:v->menu_page=MENU_VIDEO;break;
     case MENU_MM_KEYS:case MENU_MM_MOUSE:case MENU_MM_PAD:v->menu_page=MENU_MM_BINDINGS;break;
     case MENU_MM_BINDINGS:v->menu_page=MENU_MAP_MAKER;break;
     case MENU_MAP_MAKER:if(v->map_maker.palette_open)v->map_maker.palette_open=0;
@@ -1436,7 +1583,8 @@ static void menu_back(AvpPcVideo*v){if(v->capture_mode){v->capture_mode=0;return
     case MENU_MOUSE_SETTINGS:case MENU_MOUSE_BINDINGS:v->menu_page=MENU_MOUSE;break;
     case MENU_GAMEPAD:case MENU_KEYS:case MENU_MOUSE:v->menu_page=MENU_CONTROLS;break;
 #ifdef AVP_LOCAL_MULTIPLAYER
-    case MENU_MP_CONTROLS:v->menu_page=MENU_CONTROLS;break;
+    case MENU_MP_PREFERENCES:case MENU_MP_CONTROLS:v->menu_page=MENU_PLAYER_OPTIONS;break;
+    case MENU_PLAYER_OPTIONS:v->menu_page=MENU_ROOT;break;
 #endif
     default:v->menu_page=MENU_ROOT;break;}
     v->menu_cursor=0;
@@ -1449,14 +1597,14 @@ static int f12_backspace(AvpPcVideo *v, KeySym k)
 {
     if(!v->menu_open || k!=XK_BackSpace)return 0;
     if(v->menu_page==MENU_MAP_MAKER &&
-       (v->map_maker.name_edit_open||v->map_maker.browser_open||v->map_maker.context_open)){
+       (v->map_maker.name_edit_open||v->map_maker.browser_open||v->map_maker.context_open||v->map_maker.new_confirm_open)){
         map_maker_key(v,k);return 1;
     }
     menu_back(v);
     return 1;
 }
 static const char *menu_caption(int page){switch(page){
-    case MENU_ROOT:return "AVP Options";case MENU_AUDIO:return "Audio";case MENU_VIDEO:return "Video";case MENU_CONTROLS:return "Controls";
+    case MENU_ROOT:return "AVP Options";case MENU_AUDIO:return "Audio";case MENU_VIDEO:return "Video";case MENU_VR_HEADSET:return "VR Headset";case MENU_CONTROLS:return "Controls";
     case MENU_MAP_MAKER:return "Map Maker";
     case MENU_GAMEPAD:return "Gamepad / Joystick Categories";case MENU_GAMEPAD_AXES:return "Axes and Per-Axis Deadzones";
     case MENU_GAMEPAD_PC:return "PC Action Joystick Bindings";case MENU_GAMEPAD_JAGUAR:return "Jaguar Virtual Pad Bindings";
@@ -1471,11 +1619,13 @@ static const char *menu_caption(int page){switch(page){
     case MENU_CHEATS_FUJI:return "Hold That Fuji";
     case MENU_CHEATS_BANANA:return "Banana Stops";
     case MENU_CHEATS_GPS:return "Global Positioning";
-    case MENU_CHEATS_LEVEL:return "Banana Stops: Level Select";
+    case MENU_CHEATS_LEVEL:return "Level Select";
     case MENU_ENHANCEMENTS:return "Enhancements";
     case MENU_DEBUG:return "Debug";
 #ifdef AVP_LOCAL_MULTIPLAYER
-    case MENU_MP_CONTROLS:return "Local Multiplayer: Player Controls";
+    case MENU_PLAYER_OPTIONS:return "Player Options";
+    case MENU_MP_PREFERENCES:return "Player Preferences";
+    case MENU_MP_CONTROLS:return "Player Controls and Bindings";
 #endif
     default:return "Miscellaneous";}}
 static int mouse_action_down(const AvpPcVideo*v,int action){int b=v->cfg.mouse_button[action];return v->mouse_grabbed&&b>0&&b<16&&v->mouse_down[b];}
@@ -1844,7 +1994,7 @@ int avp_pc_video_local_mp_automap_observe(AvpPcVideo *v,unsigned player,
         player==0?v->cfg.remember_automap:v->local_mp_controls.player[player].remember_automap);
     avp_gpu_automap_observe(v->local_mp_views[player].state,maze,width,height,
                             xpos,ypos,angle,level);
-    if(v->local_mp.show_whole_map || v->local_mp_controls.player[player].cheat_reveal_map)
+    if(avp_mp_reveal_for_player(&v->local_mp_controls,player,(int)v->local_mp.show_whole_map))
         avp_gpu_automap_reveal_all(v->local_mp_views[player].state,maze,width,height,level);
     return 1;
 }
@@ -1899,7 +2049,7 @@ static int map_editor_ensure(AvpPcVideo *v)
      if(!avp_jaguar_framebuffer_init(&v->map_editor_fb,width,456u)){free(s);return 0;}}
     v->map_editor_gpu=s;return 1;
 }
-void avp_pc_video_destroy(AvpPcVideo*v){if(!v)return;save_settings(v);
+void avp_pc_video_destroy(AvpPcVideo*v){if(!v)return;avp_pc_title_native_destroy(v->title_native);save_settings(v);
     map_editor_release(v);
     avp_mm_destroy(&v->map_maker);
     avp_gpu_automap_history_destroy(&v->automap_history);
@@ -1929,7 +2079,7 @@ if(v->mouse_grabbed&&v->dpy){XUngrabPointer(v->dpy,CurrentTime);v->mouse_grabbed
 #ifdef AVP_LOCAL_MULTIPLAYER
     free(v->local_mp_terminal_background);
 #endif
-    free(v->gameplay_fade_snapshot);avp_pc_prototype_textures_destroy(&v->prototype_textures);avp_gpu_state_destroy(&v->gpu);if(v->img){v->img->data=NULL;XDestroyImage(v->img);}avp_jaguar_framebuffer_destroy(&v->fb);avp_jaguar_framebuffer_destroy(&v->world_fb);avp_jaguar_framebuffer_destroy(&v->frontend_fb);present_destroy_image(v);
+    free(v->gameplay_fade_snapshot);avp_pc_prototype_textures_destroy(&v->prototype_textures);avp_gpu_state_destroy(&v->gpu);if(v->img){v->img->data=NULL;XDestroyImage(v->img);}avp_jaguar_framebuffer_destroy(&v->fb);avp_jaguar_framebuffer_destroy(&v->world_fb);avp_jaguar_framebuffer_destroy(&v->vr_eye_fb);avp_jaguar_framebuffer_destroy(&v->frontend_fb);present_destroy_image(v);
 #ifndef _WIN32
     avp_present_shutdown(v);
 #endif
@@ -2721,7 +2871,17 @@ static void mp_setup_accept(AvpPcVideo *v)
         mp_setup_open_page(v,v->local_mp_cursor-AVP_LOCAL_MP_MENU_BOTS_ROW+1u);
         return;
     }
+    if(v->local_mp_cursor==AVP_LOCAL_MP_CUSTOM_LOAD_ROW){
+        custom_browser_open(v,1);return;
+    }
+    if(v->local_mp_cursor==AVP_LOCAL_MP_CUSTOM_NAME_ROW)return;
     if(v->local_mp_cursor==AVP_LOCAL_MP_START_ROW){
+        /* Never silently launch a retail level in place of a missing file. */
+        if(v->local_mp.dm_level==AVP_MP_CUSTOM_LEVEL &&
+           (!map_maker_stem_valid(v->local_mp.custom_map_stem)||
+            !map_maker_file_valid(&v->map_maker,v->local_mp.custom_map_stem))){
+            custom_browser_open(v,1);return;
+        }
         v->local_mp_launch_pending=1;
         v->local_mp_open=0;
         v->local_mp_suppress_input=1;
@@ -3149,6 +3309,18 @@ int avp_pc_video_poll(AvpPcVideo*v,u32 *pad,int *quit){
         video_apply_display(v);save_settings(v);
         setkey(v,e.xkey.keycode,k,0);continue;
     }
+    if(v->custom_browser_mode && v->menu_open){
+        if(d&&!was)custom_browser_key(v,k);
+        setkey(v,e.xkey.keycode,k,d);
+        continue;
+    }
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(v->custom_browser_mode && v->local_mp_open){
+        if(d&&!was)custom_browser_key(v,k);
+        setkey(v,e.xkey.keycode,k,d);
+        continue;
+    }
+#endif
     if(d&&!was&&k==XK_Delete&&f12_delete_binding(v)){
         if(avp_jaguar_pause_op_active(&v->gpu.pause_op))avp_pc_video_present_pause(v);
         continue;}
@@ -3235,6 +3407,21 @@ int avp_pc_video_poll(AvpPcVideo*v,u32 *pad,int *quit){
         }
     }
 #endif
+    /* Presentation-only keyboard look test.  Never enqueue a gameplay turn,
+     * alter player input state, or change 10-Hz simulation. */
+    if(v->cfg.vr_sbs_preview && !v->menu_open && !v->frontend_input &&
+       !avp_computer_active() && (e.xkey.state&Mod1Mask) &&
+       (k==XK_F6||k==XK_F7||k==XK_F8)){
+        if(d&&!was){
+            if(k==XK_F8){v->vr_preview_yaw_deg=0;v->vr_preview_yaw_residual=0.0f;}
+            else {
+                int yaw=v->vr_preview_yaw_deg+(k==XK_F6?-5:5);
+                v->vr_preview_yaw_deg=yaw< -60?-60:yaw>60?60:yaw;
+                v->vr_preview_yaw_residual=0.0f;
+            }
+        }
+        setkey(v,e.xkey.keycode,k,0);continue;
+    }
     if(d&&!was&&quick_turn_key_matches(v,k))queue_quick_turn(v);
     if(d&&!was&&!avp_computer_active()&&(k==XK_F12 || (v->cfg.menu_key_open && k==(KeySym)v->cfg.menu_key_open))){
 #ifdef AVP_LOCAL_MULTIPLAYER
@@ -3255,6 +3442,8 @@ int avp_pc_video_poll(AvpPcVideo*v,u32 *pad,int *quit){
         if(avp_jaguar_pause_op_active(&v->gpu.pause_op))avp_pc_video_present_pause(v);
     }else if(!v->menu_open&&!v->frontend_input&&d&&!was&&!avp_computer_active()&&k==(KeySym)v->cfg.action_key[0])v->weapon_delta=-1;
     else if(!v->menu_open&&!v->frontend_input&&d&&!was&&!avp_computer_active()&&k==(KeySym)v->cfg.action_key[1])v->weapon_delta=1;
+    else if(d&&!was&&!v->menu_open&&!v->frontend_input&&v->cfg.vr_sbs_preview&&
+            k==XK_F10&&(e.xkey.state&ControlMask))v->vr_screenshot_requested=1;
     else if(d&&!was&&k==XK_F5)v->pending_actions|=AVP_PC_ACTION_QUICKSAVE;
     else if(d&&!was&&k==XK_F9)v->pending_actions|=AVP_PC_ACTION_QUICKLOAD;
     else if(!v->menu_open&&d&&!was&&k==XK_Page_Up)v->stage_delta=1;
@@ -3265,7 +3454,7 @@ int avp_pc_video_poll(AvpPcVideo*v,u32 *pad,int *quit){
     else if(v->menu_open && v->menu_page==MENU_MAP_MAKER &&
             !v->capture_mode &&
             !v->map_maker.context_open && !v->map_maker.browser_open &&
-            !v->map_maker.name_edit_open && !v->map_maker.palette_open &&
+            !v->map_maker.name_edit_open && !v->map_maker.new_confirm_open && !v->map_maker.palette_open &&
             k==XK_Return){
         if(d&&!was)map_maker_enter_start(v);
         else if(!d)map_maker_enter_finish(v);
@@ -3321,7 +3510,12 @@ int avp_pc_video_poll(AvpPcVideo*v,u32 *pad,int *quit){
 #endif
         else if(k==XK_Up)v->menu_cursor=(v->menu_cursor+menu_count(v)-1)%menu_count(v);
         else if(k==XK_Down)v->menu_cursor=(v->menu_cursor+1)%menu_count(v);
-        else if(k==XK_Left||k==XK_Right){if(v->menu_page==MENU_VIDEO)menu_video_adjust(v,v->menu_cursor,k==XK_Left?-1:1);else if(v->menu_page==MENU_AUDIO)menu_audio_adjust(v,v->menu_cursor,k==XK_Left?-1:1);
+        else if(k==XK_Left||k==XK_Right){if(v->menu_page==MENU_VIDEO)menu_video_adjust(v,v->menu_cursor,k==XK_Left?-1:1);else if(v->menu_page==MENU_VR_HEADSET)menu_vr_adjust(v,v->menu_cursor,k==XK_Left?-1:1);else if(v->menu_page==MENU_AUDIO)menu_audio_adjust(v,v->menu_cursor,k==XK_Left?-1:1);
+#ifdef AVP_LOCAL_MULTIPLAYER
+            else if(v->menu_page==MENU_PLAYER_OPTIONS && v->menu_cursor==0)
+                v->local_mp_control_player=(v->local_mp_control_player+(k==XK_Left?3u:1u))%4u;
+            else if(v->menu_page==MENU_MP_PREFERENCES)mp_preferences_adjust(v,v->menu_cursor);
+#endif
             else if(v->menu_page==MENU_CHEATS && v->menu_cursor==2)menu_cheats_target_adjust(v,k==XK_Left?-1:1);
             else if(v->menu_page==MENU_CHEATS_FUJI||v->menu_page==MENU_CHEATS_BANANA||v->menu_page==MENU_CHEATS_GPS||v->menu_page==MENU_CHEATS_LEVEL)
                 original_cheat_adjust(v,v->menu_cursor,k==XK_Left?-1:1);
@@ -3769,6 +3963,24 @@ unsigned avp_pc_video_take_quick_turn(AvpPcVideo *v)
     return quick_turn_allowed(v)?n:0;
 }
 int avp_pc_video_noclip(const AvpPcVideo*v){return v?v->noclip:0;}float avp_pc_video_modern_turn(AvpPcVideo*v){if(!v)return 0.0f;v->mouse_aim_active=0;
+    /* Hold Ctrl and move the captured mouse to look in the stereo view
+     * independently of player aiming/turning. No Jaguar input receives this
+     * mouse delta; the authoritative camera remains owned by the game.
+     * Regular (unmodified) mouse movement keeps its original R75 behavior. */
+    if(v->cfg.vr_sbs_preview&&v->cfg.mouse_enabled&&v->mouse_grabbed&&
+       !v->menu_open&&!v->frontend_input&&
+       (key(v,XK_Control_L)||key(v,XK_Control_R))){
+        double delta=(double)v->mouse_delta*(double)v->cfg.mouse_sensitivity*0.20;
+        if(isfinite(delta)){
+            double yaw=(double)v->vr_preview_yaw_deg+(double)v->vr_preview_yaw_residual+delta;
+            if(yaw< -60.0)yaw= -60.0;
+            if(yaw>60.0)yaw=60.0;
+            v->vr_preview_yaw_deg=(int)lround(yaw);
+            v->vr_preview_yaw_residual=(float)(yaw-(double)v->vr_preview_yaw_deg);
+        }
+        v->mouse_delta=0.0f;
+        return v->sim_turn;
+    }
     if(v->cfg.mouse_enabled&&v->mouse_grabbed&&!v->menu_open&&!v->frontend_input&&v->mouse_delta!=0.0f){
         float dx=v->mouse_delta;float motion=avp_pc_mouse_turn(dx,v->cfg.mouse_sensitivity,v->cfg.mouse_acceleration);
         v->mouse_delta=0.0f;v->mouse_aim_active=1;return motion;
@@ -3859,6 +4071,11 @@ int avp_pc_video_marine_fire_interrupt(const AvpPcVideo*v){return v?v->cfg.marin
 int avp_pc_video_normalize_diagonal_contact_range(const AvpPcVideo*v){return v?v->cfg.normalize_diagonal_contact_range:0;}
 unsigned avp_pc_video_enemy_activation_distance(const AvpPcVideo*v)
 {return v&&v->cfg.enemy_activation_distance>=0&&v->cfg.enemy_activation_distance<5?(unsigned)v->cfg.enemy_activation_distance:0u;}
+int avp_pc_video_cheat_custom_map(const AvpPcVideo *v,char *out,size_t cap)
+{
+    if(!v||!out||cap<2u||!map_maker_stem_valid(v->cheat_custom_map_stem))return 0;
+    return snprintf(out,cap,"%s",v->cheat_custom_map_stem)<(int)cap;
+}
 int avp_pc_video_facehug_attach_disabled(const AvpPcVideo*v){return v?v->facehug_attach_disabled:0;}
 int avp_pc_video_kill_selected_type(const AvpPcVideo*v){
     static const int kinds[8]={AC_ALIEN,AC_ACRAWL,AC_HUMAN,AC_PREDATOR,AC_FACEHUG,AC_EGG,AC_AQUEEN,AC_GEN};
@@ -3885,11 +4102,15 @@ void avp_pc_video_original_reset(AvpPcVideo *v)
         AVP_PC_ACTION_ORIG_WEAPON3|AVP_PC_ACTION_ORIG_WEAPON4|
         AVP_PC_ACTION_ORIG_LEVEL_NEXT|AVP_PC_ACTION_ORIG_LEVEL_PREVIOUS);
 #ifdef AVP_LOCAL_MULTIPLAYER
-    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++)
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++) {
+        /* Active cheats must not survive a fresh campaign or level reset.
+         * In particular Reveal Entire Map is opt-in on every new game. */
+        v->local_mp_controls.player[p].cheat_reveal_map=0;
         v->local_mp_cheat_actions[p] &= ~(AVP_PC_ACTION_ORIG_TRACKER_TOGGLE|
             AVP_PC_ACTION_ORIG_WEAPON1|AVP_PC_ACTION_ORIG_WEAPON2|
             AVP_PC_ACTION_ORIG_WEAPON3|AVP_PC_ACTION_ORIG_WEAPON4|
             AVP_PC_ACTION_ORIG_LEVEL_NEXT|AVP_PC_ACTION_ORIG_LEVEL_PREVIOUS);
+    }
 #endif
 }
 void avp_pc_video_original_gps_actor(AvpPcVideo *v,unsigned player,
@@ -3927,22 +4148,6 @@ static const char*key_name(unsigned long k){const char*n=XKeysymToString((KeySym
 static void mp_controls_adjust(AvpPcVideo *v,int row,int dir,int accept)
 {
     AvpMpInputProfile *p=&v->local_mp_controls.player[v->local_mp_control_player];
-    if(row>=AVP_MP_CONTROL_BIND_ROW+(int)AVP_MP_INPUT_ACTIONS){
-        int n=row-AVP_MP_CONTROL_BIND_ROW-(int)AVP_MP_INPUT_ACTIONS;
-        int *const vals[]={&p->audio_motion_tracker,&p->audio_player_pain,
-            &p->audio_facehug_pain,&p->audio_facehug_shake,&p->remember_automap};
-        if(n<0||n>=5)return;
-        if(v->local_mp_control_player==0){
-            switch(n){
-            case 0:v->cfg.tracker_sounds_enabled=!v->cfg.tracker_sounds_enabled;break;
-            case 1:v->cfg.player_pain_sounds_enabled=!v->cfg.player_pain_sounds_enabled;break;
-            case 2:v->cfg.facehug_pain_sounds_enabled=!v->cfg.facehug_pain_sounds_enabled;break;
-            case 3:v->cfg.facehug_shake_pain_sounds_enabled=!v->cfg.facehug_shake_pain_sounds_enabled;break;
-            case 4:v->cfg.remember_automap=!v->cfg.remember_automap;break;
-            }
-        }else *vals[n]=!*vals[n];
-        save_settings(v);return;
-    }
     if(row==0){v->local_mp_control_player=(v->local_mp_control_player+ (dir>0?1u:3u))%4u;return;}
     /* P1's key/action/joystick settings remain controlled by original F12.
      * This page may set only the dedicated P1 co-op physical-mouse ID. */
@@ -4052,12 +4257,8 @@ static void draw_mp_controls(AvpPcVideo *v,Drawable target)
         v->capture_mode==8?" - CLICK MOUSE BUTTON (Esc cancels)":"");
     XDrawString(v->dpy,target,v->gc,36,30,line,(int)strlen(line));
     for(row=first;row<first+visible;row++){
-        static const char *const extra[]={"Audio: Motion Tracker Sounds",
-            "Audio: Player Pain Sounds","Audio: Facehugged Pain Sounds",
-            "Audio: Facehug Shake Pain Sounds","Enhancement: Remember Explored Automap"};
-        int opt=row-AVP_MP_CONTROL_BIND_ROW-(int)AVP_MP_INPUT_ACTIONS;
         const char *label=row<AVP_MP_CONTROL_BIND_ROW?fixed[row]:
-            (opt>=0&&opt<5?extra[opt]:avp_mp_input_action_name((unsigned)(row-AVP_MP_CONTROL_BIND_ROW)));
+            avp_mp_input_action_name((unsigned)(row-AVP_MP_CONTROL_BIND_ROW));
         value[0]=0;
         if(row==0)snprintf(value,sizeof(value),"Player %u%s",v->local_mp_control_player+1,
             v->local_mp_control_player==0?" (legacy bindings)":"");
@@ -4079,15 +4280,6 @@ static void draw_mp_controls(AvpPcVideo *v,Drawable target)
             v->local_mp_control_player==0?v->cfg.turn_sensitivity:p->gamepad_turn_sensitivity);
         else if(row==AVP_MP_CONTROL_SPEED_ROW)snprintf(value,sizeof(value),"%.2fx",
             v->local_mp_control_player==0?v->cfg.turn_speed:p->gamepad_turn_speed);
-        else if(opt>=0 && opt<5){
-            const int vals[]={p->audio_motion_tracker,p->audio_player_pain,
-                p->audio_facehug_pain,p->audio_facehug_shake,p->remember_automap};
-            const int legacy[]={v->cfg.tracker_sounds_enabled,v->cfg.player_pain_sounds_enabled,
-                v->cfg.facehug_pain_sounds_enabled,v->cfg.facehug_shake_pain_sounds_enabled,
-                v->cfg.remember_automap};
-            snprintf(value,sizeof(value),"%s",
-                (v->local_mp_control_player==0?legacy[opt]:vals[opt])?"Enabled":"Disabled");
-        }
         else if(v->local_mp_control_kind==0){unsigned long k=p->key[row-AVP_MP_CONTROL_BIND_ROW];snprintf(value,sizeof(value),"%s",k?key_name(k):"Unbound");}
         else if(v->local_mp_control_kind==1){int b=p->mouse_button[row-AVP_MP_CONTROL_BIND_ROW];snprintf(value,sizeof(value),b<0?"Unbound":"Mouse %d",b);}
         else{int b=p->gamepad_button[row-AVP_MP_CONTROL_BIND_ROW];
@@ -4156,9 +4348,15 @@ static void mp_menu_navigation_step(AvpPcVideo *v,int direction)
 #ifdef AVP_LOCAL_MULTIPLAYER
         if(v->menu_page==MENU_MP_CONTROLS){
             mp_controls_adjust(v,v->menu_cursor,direction==3?-1:1,0);
+        }else if(v->menu_page==MENU_PLAYER_OPTIONS && v->menu_cursor==0){
+            v->local_mp_control_player=(v->local_mp_control_player+
+                (direction==3?3u:1u))%4u;
+        }else if(v->menu_page==MENU_MP_PREFERENCES){
+            mp_preferences_adjust(v,v->menu_cursor);
         }else
 #endif
         {if(v->menu_page==MENU_VIDEO)menu_video_adjust(v,v->menu_cursor,direction==3?-1:1);
+         else if(v->menu_page==MENU_VR_HEADSET)menu_vr_adjust(v,v->menu_cursor,direction==3?-1:1);
          else if(v->menu_page==MENU_AUDIO)menu_audio_adjust(v,v->menu_cursor,direction==3?-1:1);
          else if(v->menu_page==MENU_CHEATS && v->menu_cursor==2)menu_cheats_target_adjust(v,direction==3?-1:1);
          else if(v->menu_page==MENU_CHEATS_FUJI||v->menu_page==MENU_CHEATS_BANANA||v->menu_page==MENU_CHEATS_GPS||v->menu_page==MENU_CHEATS_LEVEL)
@@ -4190,6 +4388,30 @@ static void mp_menu_repeat_poll(AvpPcVideo *v)
     if(!v->menu_open){v->menu_repeat_direction=0;return;}
 #endif
     if(v->capture_mode){v->menu_repeat_direction=0;return;}
+    /* File browser is a modal layer. Gamepad keys must navigate its file
+     * list, never silently adjust the covered F2/F12 selectors. */
+    if(v->custom_browser_mode){
+        if(button_edge(v,v->cfg.menu_button_back)){
+            custom_browser_key(v,XK_Escape);v->menu_repeat_direction=0;return;
+        }
+        if(button_edge(v,v->cfg.menu_button_accept)){
+            custom_browser_key(v,XK_Return);v->menu_repeat_direction=0;return;
+        }
+        direction=mp_menu_held_direction(v,&is_key);
+        if(is_key || !direction){v->menu_repeat_direction=0;return;}
+        now=avp_pc_now_ns();
+        if(v->menu_repeat_direction!=direction){
+            v->menu_repeat_direction=direction;
+            v->menu_repeat_next_ns=now+UINT64_C(350000000);
+            if(direction==1||direction==2)
+                custom_browser_key(v,direction==1?XK_Up:XK_Down);
+        }else if(now>=v->menu_repeat_next_ns){
+            if(direction==1||direction==2)
+                custom_browser_key(v,direction==1?XK_Up:XK_Down);
+            v->menu_repeat_next_ns=now+UINT64_C(75000000);
+        }
+        return;
+    }
 #ifdef AVP_LOCAL_MULTIPLAYER
     if(v->local_mp_open && !v->menu_open){
         if(button_edge(v,v->cfg.menu_button_back)){
@@ -4279,12 +4501,34 @@ static int map_maker_named_path(const char *stem,const char *extension,
     if(!map_maker_stem_valid(stem)||!map_maker_directory(dir,sizeof dir,create))return 0;
     return snprintf(out,cap,"%s/%s.%s",dir,stem,extension)<(int)cap;
 }
+#ifdef AVP_LOCAL_MULTIPLAYER
+void avp_pc_video_local_mp_select_custom(AvpPcVideo *v,const char *stem)
+{
+    if(!v||!map_maker_stem_valid(stem))return;
+    v->local_mp.dm_level=AVP_MP_CUSTOM_LEVEL;
+    v->local_mp.level_explicit=1u;
+    snprintf(v->local_mp.custom_map_stem,
+        sizeof v->local_mp.custom_map_stem,"%s",stem);
+    save_settings(v);
+}
+#endif
+int avp_pc_video_custom_map_path(const char *stem,const char *extension,char *out,size_t cap)
+{
+    if(!extension || (strcmp(extension,"avpm") && strcmp(extension,"avpo")))return 0;
+    return map_maker_named_path(stem,extension,out,cap,0);
+}
 static int map_maker_save_named(AvpPcVideo *v,const char *stem)
 {
     AvpMapMaker *m=&v->map_maker;char map[1200],objects[1200];
     if(!map_maker_named_path(stem,"avpm",map,sizeof map,1)||
        !map_maker_named_path(stem,"avpo",objects,sizeof objects,1))return 0;
-    if(!avp_mm_save(m,map)||!avp_mm_objects_save(m,objects))return 0;
+    if(!avp_mm_save(m,map))return 0;
+    if(!avp_mm_objects_save(m,objects)){
+        /* The geometry might be on disk but its object sidecar is not.
+         * Do not conceal the unsaved state from the new-map warning. */
+        m->dirty=1;
+        return 0;
+    }
     snprintf(m->map_stem,sizeof m->map_stem,"%s",stem);
     snprintf(m->message,sizeof m->message,"Saved custom_maps/%s.avpm",stem);
     return 1;
@@ -4296,7 +4540,8 @@ static int map_maker_load_named(AvpPcVideo *v,const char *stem)
     if(!map_maker_named_path(stem,"avpm",map,sizeof map,0)||
        !map_maker_named_path(stem,"avpo",objects,sizeof objects,0))return 0;
     f=fopen(map,"rb");if(!f)return 0;
-    if(fread(header,1,sizeof header,f)!=sizeof header||memcmp(header,"AVPMAP01",8)){
+    if(fread(header,1,sizeof header,f)!=sizeof header||
+       (memcmp(header,"AVPMAP01",8)&&memcmp(header,"AVPMAP02",8))){
         fclose(f);return 0;
     }
     fclose(f);level=(unsigned)header[8]*256u+header[9];
@@ -4314,7 +4559,7 @@ static int map_maker_load_named(AvpPcVideo *v,const char *stem)
     snprintf(m->message,sizeof m->message,"Loaded custom_maps/%s.avpm",stem);
     return 1;
 }
-static int map_maker_file_valid(const char *stem)
+static int map_maker_file_valid(const AvpMapMaker *owner,const char *stem)
 {
     char path[1200];unsigned char hdr[20];unsigned level;FILE *f;
     if(!map_maker_named_path(stem,"avpm",path,sizeof path,0))return 0;
@@ -4326,7 +4571,12 @@ static int map_maker_file_valid(const char *stem)
     level=(unsigned)hdr[8]*256u+(unsigned)hdr[9];
     if(level<1u||level>15u)return 0;
     AvpMapMaker scratch;avp_mm_init(&scratch);scratch.level=level;
-    ok=avp_mm_load(&scratch,path);
+    if(owner && owner->source[level].original){
+        const AvpMapMakerSource *src=&owner->source[level];
+        ok=avp_mm_bind(&scratch,level,src->original,
+               8u+(size_t)src->w*src->h*8u);
+    }
+    if(ok)ok=avp_mm_load(&scratch,path);
     avp_mm_destroy(&scratch);
     return ok;
 }
@@ -4344,7 +4594,7 @@ static void map_maker_browser_scan(AvpMapMaker *m)
         if(len<=5u||strcmp(entry->d_name+len-5u,".avpm"))continue;
         char stem[96];if(len-5u>=sizeof stem)continue;
         memcpy(stem,entry->d_name,len-5u);stem[len-5u]=0;
-        if(map_maker_stem_valid(stem)&&map_maker_file_valid(stem)){
+        if(map_maker_stem_valid(stem)&&map_maker_file_valid(m,stem)){
             snprintf(m->browser_files[m->browser_count++],96,"%s",stem);
         }
     }
@@ -4358,12 +4608,40 @@ static void map_maker_browser_scan(AvpMapMaker *m)
             size_t len=strlen(found.cFileName);
             if(len<=5u||strcmp(found.cFileName+len-5u,".avpm")||len-5u>=96u)continue;
             char stem[96];memcpy(stem,found.cFileName,len-5u);stem[len-5u]=0;
-            if(map_maker_stem_valid(stem)&&map_maker_file_valid(stem))snprintf(m->browser_files[m->browser_count++],96,"%s",stem);
+            if(map_maker_stem_valid(stem)&&map_maker_file_valid(m,stem))snprintf(m->browser_files[m->browser_count++],96,"%s",stem);
         }while(m->browser_count<128u&&FindNextFileA(h,&found));
         FindClose(h);
     }
 #endif
     qsort(m->browser_files,m->browser_count,sizeof m->browser_files[0],map_maker_browser_cmp);
+}
+static void custom_browser_open(AvpPcVideo *v,int owner)
+{
+    if(!v)return;
+    map_maker_browser_scan(&v->map_maker);
+    v->custom_browser_mode=owner;
+    v->menu_repeat_direction=0;
+}
+static void custom_browser_key(AvpPcVideo *v,KeySym k)
+{
+    AvpMapMaker *m=&v->map_maker;
+    if(k==XK_Escape||k==XK_BackSpace){v->custom_browser_mode=0;return;}
+    if(k==XK_Up && m->browser_cursor>0u)m->browser_cursor--;
+    else if(k==XK_Down && m->browser_cursor+1u<m->browser_count)m->browser_cursor++;
+    else if(k==XK_Page_Up)m->browser_cursor=m->browser_cursor>10u?m->browser_cursor-10u:0u;
+    else if(k==XK_Page_Down){m->browser_cursor+=10u;
+        if(m->browser_count && m->browser_cursor>=m->browser_count)m->browser_cursor=m->browser_count-1u;}
+    else if((k==XK_Return||k==XK_space) && m->browser_count){
+        char *dest=v->cheat_custom_map_stem;
+#ifdef AVP_LOCAL_MULTIPLAYER
+        if(v->custom_browser_mode==1)dest=v->local_mp.custom_map_stem;
+#endif
+        snprintf(dest,96,"%s",m->browser_files[m->browser_cursor]);
+#ifdef AVP_LOCAL_MULTIPLAYER
+        if(v->custom_browser_mode==1)save_settings(v);
+#endif
+        v->custom_browser_mode=0;
+    }
 }
 /* Playtesting is a SEPARATE native game process, not a rebind of the
  * campaign/editor's live Jaguar globals. The temporary AVPMAP01 copy is
@@ -4488,9 +4766,30 @@ static int map_maker_paste_target(AvpMapMaker *m)
     }
     return map_maker_paste(m,m->target_x,m->target_y,m->target_field);
 }
+static void map_maker_start_new(AvpMapMaker *m)
+{
+    if(!m)return;
+    (void)avp_mm_blank(m);
+    snprintf(m->map_stem,sizeof m->map_stem,"new_map");
+    m->new_confirm_open=m->context_open=m->browser_open=m->name_edit_open=0;
+    m->editor_started=1;
+}
+static void map_maker_request_new(AvpMapMaker *m)
+{
+    if(!m)return;
+    if(m->dirty){m->new_confirm_open=1;m->context_open=0;}
+    else map_maker_start_new(m);
+}
 static void map_maker_key(AvpPcVideo *v,KeySym k)
 {
     AvpMapMaker *m=&v->map_maker;
+    if(m->new_confirm_open){
+        if(k==XK_Return||k=='y'||k=='Y')map_maker_start_new(m);
+        else if(k==XK_Escape||k==XK_BackSpace||k=='n'||k=='N'){
+            m->new_confirm_open=0;m->context_open=1;
+        }
+        return;
+    }
     if(m->name_edit_open){
         size_t len=strlen(m->edit_stem);
         if(k==XK_Escape){m->name_edit_open=0;m->context_open=1;return;}
@@ -4528,6 +4827,8 @@ static void map_maker_key(AvpPcVideo *v,KeySym k)
         }else if(k=='a'||k=='A'){
             m->name_edit_open=1;
             snprintf(m->edit_stem,sizeof m->edit_stem,"%s",m->map_stem);
+        }else if(k=='n'||k=='N'){
+            map_maker_request_new(m);
         }else if(k=='l'||k=='L'){
             map_maker_browser_scan(m);m->browser_open=1;m->context_open=0;
         }else if(k=='b'||k=='B'){
@@ -4727,7 +5028,7 @@ static void map_maker_key(AvpPcVideo *v,KeySym k)
     /* File commands are intentionally behind Escape, like BUILD/Mapster32. */
     case 's':case 'S':case 'l':case 'L':break;
     case 'r':case 'R':(void)avp_mm_select(m,m->level);break;
-    case 'n':case 'N':(void)avp_mm_blank(m);break;
+    case 'n':case 'N':map_maker_request_new(m);break;
     default:break;
     }
 }
@@ -4747,14 +5048,18 @@ static void draw_map_maker(AvpPcVideo *v,Drawable target)
     int left=20,top=49,step=17;char line[220];
     unsigned boxh=wh>16u?wh-16u:wh;
     unsigned max_text_w=510u;
-    if(m->context_open||m->browser_open||m->name_edit_open){
+    if(m->context_open||m->browser_open||m->name_edit_open||m->new_confirm_open){
         XSetForeground(v->dpy,v->gc,BlackPixel(v->dpy,v->screen));
         XFillRectangle(v->dpy,target,v->gc,8,8,ww>500u?490u:ww-16u,
                        wh>80u?wh-16u:wh);
         XSetForeground(v->dpy,v->gc,WhitePixel(v->dpy,v->screen));
 #define MM_MODAL(line,txt) XDrawString(v->dpy,target,v->gc,20,48+(line)*18,txt,(int)strlen(txt))
         MM_MODAL(0,"MAP MAKER - ESCAPE CONTEXT");
-        if(m->name_edit_open){
+        if(m->new_confirm_open){
+            MM_MODAL(2,"You have unsaved changes. Continue?");
+            MM_MODAL(4,"Y / Enter   Discard changes and create new map");
+            MM_MODAL(5,"N / Esc     Cancel and keep current map");
+        }else if(m->name_edit_open){
             MM_MODAL(2,"SAVE AS - NAME (without .avpm)");
             MM_MODAL(4,m->edit_stem);
             MM_MODAL(6,"Type letters/numbers/_/-; Enter: save");
@@ -4775,11 +5080,12 @@ static void draw_map_maker(AvpPcVideo *v,Drawable target)
             MM_MODAL(2,"S   Save      custom_maps/<name>.avpm");
             MM_MODAL(3,"A   Save As   choose a new map filename");
             MM_MODAL(4,"L   Load      browse saved .avpm maps");
-            MM_MODAL(5,"B   Bindings  keyboard / mouse / joystick");
-            MM_MODAL(6,"P   Play Test From Here");
-            MM_MODAL(7,m->playtest_no_enemies?
+            MM_MODAL(5,"N   New Map   blank canvas (warn if unsaved)");
+            MM_MODAL(6,"B   Bindings  keyboard / mouse / joystick");
+            MM_MODAL(7,"P   Play Test From Here");
+            MM_MODAL(8,m->playtest_no_enemies?
                      "E   Enemy-free Play Test: ON":"E   Enemy-free Play Test: OFF");
-            MM_MODAL(8,"Esc  Close context menu");
+            MM_MODAL(9,"Esc  Close context menu");
             MM_MODAL(10,m->message);
         }
 #undef MM_MODAL
@@ -4998,6 +5304,27 @@ static void draw_map_maker_palette(AvpPcVideo *v,Drawable target)
 static void draw_menu(AvpPcVideo*v,Drawable target){
     if(v->menu_page==MENU_MM_BINDINGS||v->menu_page==MENU_MM_KEYS||
        v->menu_page==MENU_MM_MOUSE||v->menu_page==MENU_MM_PAD){draw_map_maker_bindings(v,target);return;}
+    if(v->custom_browser_mode==2){
+        const AvpMapMaker *m=&v->map_maker;char entry[170];
+        unsigned ww=v->win_w?v->win_w:v->fb.width;
+        unsigned wh=v->win_h?v->win_h:v->fb.height;
+        unsigned boxw=ww>800u?760u:(ww>24u?ww-24u:0u);
+        XSetForeground(v->dpy,v->gc,BlackPixel(v->dpy,v->screen));
+        XFillRectangle(v->dpy,target,v->gc,12,12,boxw,wh>80u?wh-60u:wh);
+        XSetForeground(v->dpy,v->gc,WhitePixel(v->dpy,v->screen));
+        {const char *h="LEVEL SELECT - LOAD CUSTOM MAP";
+         XDrawString(v->dpy,target,v->gc,36,30,h,(int)strlen(h));}
+        if(!m->browser_count){const char *h="No .avpm maps found; Esc to return.";
+          XDrawString(v->dpy,target,v->gc,36,64,h,(int)strlen(h));}
+        else{unsigned begin=m->browser_cursor>10u?m->browser_cursor-10u:0u;
+            for(unsigned j=begin;j<m->browser_count&&j<begin+14u;j++){
+                snprintf(entry,sizeof entry,"%c %s.avpm",j==m->browser_cursor?'>':' ',m->browser_files[j]);
+                XDrawString(v->dpy,target,v->gc,36,55+(int)(j-begin)*18,entry,(int)strlen(entry));
+            }}
+        {const char *h="Arrows/PgUp/PgDn: browse; Enter: select; Esc: cancel";
+         XDrawString(v->dpy,target,v->gc,36,(int)wh-30,h,(int)strlen(h));}
+        return;
+    }
     if(v->menu_page==MENU_MAP_MAKER){
         draw_map_maker(v,target);
         if(v->map_maker.palette_open)draw_map_maker_palette(v,target);
@@ -5079,6 +5406,11 @@ static void draw_menu(AvpPcVideo*v,Drawable target){
     for(int row=first;row<first+visible;row++){const char*label;
         i=menu_id(v,row);value[0]=0;
         if(i<0){
+            if(v->menu_page==MENU_CHEATS_NEW){
+                const char *label="Level Select >";
+                snprintf(linebuf,sizeof(linebuf),"%c %s",row==v->menu_cursor?'>':' ',label);
+                XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,linebuf,(int)strlen(linebuf));continue;
+            }
             if(v->menu_page==MENU_CHEATS){
                 if(row==0)label="Original >";
                 else if(row==1)label="New >";
@@ -5110,9 +5442,14 @@ static void draw_menu(AvpPcVideo*v,Drawable target){
                 const int live_tracker=p==0u&& !v->orig_actor_valid[p]?(show_mt!=0):v->orig_tracker[p];
                 const int live_valid=p==0u||v->orig_actor_valid[p];
                 if(level){
-                    label=row==0?"Current Level":row==1?"Next Level":"Previous Level";
+                    label=row==0?"Current Level":row==1?"Next Level":row==2?"Previous Level":
+                          row==3?"Custom Map":row==4?"Load Map":"Start Custom Map";
                     if(row==0)snprintf(value,sizeof(value),"l(%02u)",v->orig_gps_level[p]);
-                    else snprintf(value,sizeof(value),"%s",v->orig_banana[p]?"PRESS ENTER":"Enable Banana Stops first");
+                    else if(row==3)snprintf(value,sizeof(value),"%s.avpm",
+                        v->cheat_custom_map_stem[0]?v->cheat_custom_map_stem:"<None>");
+                    else if(!v->cheat_level_is_new&&!v->orig_banana[p])
+                        snprintf(value,sizeof(value),"Enable Banana Stops first");
+                    else snprintf(value,sizeof(value),"PRESS ENTER");
                 }else if(gps){
                     label=row==0?"Enabled":row==1?"Course Position":row==2?"Fine Position":"Current Level";
                     if(row==0)snprintf(value,sizeof(value),"%s",v->orig_position[p]?"On":"Off");
@@ -5151,7 +5488,11 @@ static void draw_menu(AvpPcVideo*v,Drawable target){
                 XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,linebuf,(int)strlen(linebuf));continue;
             }
             else if(v->menu_page==MENU_ROOT){
-                static const char *labels[]={"Controls >","Video >","Audio >","Enhancements >","Cheats >","Debug >","Miscellaneous >","Map Maker"};
+                static const char *labels[]={"Controls >","Video >","Audio >","Enhancements >","Cheats >","Debug >","Miscellaneous >","Map Maker"
+#ifdef AVP_LOCAL_MULTIPLAYER
+                    ,"Player Options >"
+#endif
+                };
                 label=labels[row];
                 if(row==7){
                     snprintf(linebuf,sizeof linebuf,"%c %-34s : PRESS ENTER",row==v->menu_cursor?'>':' ',label);
@@ -5178,6 +5519,23 @@ static void draw_menu(AvpPcVideo*v,Drawable target){
                 snprintf(linebuf,sizeof(linebuf),"%c %s : %s",row==v->menu_cursor?'>':' ',label,value);
                 XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,linebuf,(int)strlen(linebuf));continue;
             }
+            else if(v->menu_page==MENU_VR_HEADSET){
+                if(row==0){label="Stereo Side-by-Side";
+                    snprintf(value,sizeof(value),"%s",v->cfg.vr_sbs_preview?"On":"Off");}
+                else if(row==1){label="Eye Separation";
+                    snprintf(value,sizeof(value),"%.3f world tiles",(double)v->cfg.vr_eye_separation);}
+                else if(row==2){label="Zero-Parallax Distance";
+                    snprintf(value,sizeof(value),"%.1f tiles (off-axis)",(double)v->cfg.vr_convergence);}
+                else if(row==3){static const char *aspects[]={"Fill (R75)","4:3","Square"};
+                    label="Eye Frame Aspect";
+                    snprintf(value,sizeof(value),"%s",aspects[v->cfg.vr_eye_aspect<3u?v->cfg.vr_eye_aspect:1u]);}
+                else if(row==4){label="Preview Look Yaw";
+                    snprintf(value,sizeof(value),"%d deg (Ctrl+Mouse)",v->vr_preview_yaw_deg);}
+                else if(row==5){label="Center Preview Look";snprintf(value,sizeof(value),"PRESS ENTER");}
+                else {label="Save Stereo Screenshot";snprintf(value,sizeof(value),"%s",v->cfg.vr_sbs_preview?"PRESS ENTER (PPM)":"Enable Stereo first");}
+                snprintf(linebuf,sizeof(linebuf),"%c %s : %s",row==v->menu_cursor?'>':' ',label,value);
+                XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,linebuf,(int)strlen(linebuf));continue;
+            }
             else if(v->menu_page==MENU_VIDEO){
                 static const char *aspect[]={"4:3","16:9","16:10","21:9","32:9"};
                 static const char *modes[]={"Windowed","Borderless","Fullscreen"};
@@ -5198,17 +5556,47 @@ static void draw_menu(AvpPcVideo*v,Drawable target){
                 else if(row==7){label="PC Presentation Rate";snprintf(value,sizeof(value),"%u Hz",v->cfg.presentation_hz);}
                 else if(row==8){label="Show FPS";snprintf(value,sizeof(value),"%s",v->cfg.show_fps?"On":"Off");}
                 else if(row==9){label="V-Sync";snprintf(value,sizeof(value),"%s",avp_present_available(v)?(v->cfg.video_vsync?"On":"Off"):"Unavailable");}
-                else {label="Disable Fog";snprintf(value,sizeof(value),"%s",v->cfg.disable_fog?"On":"Off");}
+                else if(row==10){label="Disable Fog";snprintf(value,sizeof(value),"%s",v->cfg.disable_fog?"On":"Off");}
+                else {label="VR Headset >";snprintf(value,sizeof(value),"PRESS ENTER");}
 #else
                 else if(row==5){label="PC Presentation Rate";snprintf(value,sizeof(value),"%u Hz",v->cfg.presentation_hz);}
                 else if(row==6){label="Show FPS";snprintf(value,sizeof(value),"%s",v->cfg.show_fps?"On":"Off");}
                 else if(row==7){label="V-Sync";snprintf(value,sizeof(value),"%s",avp_present_available(v)?(v->cfg.video_vsync?"On":"Off"):"Unavailable");}
-                else {label="Disable Fog";snprintf(value,sizeof(value),"%s",v->cfg.disable_fog?"On":"Off");}
+                else if(row==8){label="Disable Fog";snprintf(value,sizeof(value),"%s",v->cfg.disable_fog?"On":"Off");}
+                else {label="VR Headset >";snprintf(value,sizeof(value),"PRESS ENTER");}
 #endif
                 snprintf(linebuf,sizeof(linebuf),"%c %s : %s",row==v->menu_cursor?'>':' ',label,value);
                 XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,linebuf,(int)strlen(linebuf));continue;
             }
-            else if(v->menu_page==MENU_CONTROLS)label=row==1?"Gamepad / Joystick >":(row==2?"Keyboard >":(row==3?"Mouse >":"Local Players (2-4) >"));
+#ifdef AVP_LOCAL_MULTIPLAYER
+            else if(v->menu_page==MENU_PLAYER_OPTIONS){
+                label=row==0?"Configure Player":row==1?"Preferences >":"Controls & Bindings >";
+                snprintf(linebuf,sizeof linebuf,"%c %-28s : %s",
+                    row==v->menu_cursor?'>':' ',label,
+                    row==0?(v->local_mp_control_player==0?"Player 1":
+                        v->local_mp_control_player==1?"Player 2":
+                        v->local_mp_control_player==2?"Player 3":"Player 4"):
+                        "PRESS ENTER");
+                XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,
+                    linebuf,(int)strlen(linebuf));continue;
+            }
+            else if(v->menu_page==MENU_MP_PREFERENCES){
+                static const char *const prefs[]={"Motion Tracker Sounds","Player Pain Sounds",
+                    "Facehugged Pain Sounds","Facehug Shake Pain Sounds","Remember Explored Automap"};
+                const AvpMpInputProfile *pr=&v->local_mp_controls.player[v->local_mp_control_player];
+                const int vals[]={pr->audio_motion_tracker,pr->audio_player_pain,
+                    pr->audio_facehug_pain,pr->audio_facehug_shake,pr->remember_automap};
+                const int p1[]={v->cfg.tracker_sounds_enabled,v->cfg.player_pain_sounds_enabled,
+                    v->cfg.facehug_pain_sounds_enabled,v->cfg.facehug_shake_pain_sounds_enabled,
+                    v->cfg.remember_automap};
+                snprintf(linebuf,sizeof linebuf,"%c %-30s : %s",
+                    row==v->menu_cursor?'>':' ',prefs[row],
+                    (v->local_mp_control_player==0?p1[row]:vals[row])?"On":"Off");
+                XDrawString(v->dpy,target,v->gc,x,y+(row-first)*step,
+                    linebuf,(int)strlen(linebuf));continue;
+            }
+#endif
+            else if(v->menu_page==MENU_CONTROLS)label=row==1?"Gamepad / Joystick >":(row==2?"Keyboard >":"Mouse >");
             else if(v->menu_page==MENU_GAMEPAD)label=row==0?"Axes & Deadzones >":(row==2?"Frontend Buttons >":(v->cfg.controller_mode_jaguar?"Jaguar Virtual Pad Buttons >":"PC Action Buttons >"));
             else if(v->menu_page==MENU_KEYS)label=(v->cfg.controller_mode_jaguar||row==1)?"Frontend Keys >":"PC Action Keys >";
             else label=row==0?"Mouse Settings >":"Mouse Bindings >";
@@ -5381,6 +5769,25 @@ static void draw_local_mp_title(AvpPcVideo *v)
          XDrawString(v->dpy,v->backbuf,v->gc,x,(int)wh-26,label,(int)strlen(label));}
         return;
     }
+    if(v->custom_browser_mode==1){
+        const AvpMapMaker *m=&v->map_maker;
+        char entry[170];
+        XFillRectangle(v->dpy,v->backbuf,v->gc,12,12,boxw,
+                       wh>80u?wh-60u:wh);
+        XSetForeground(v->dpy,v->gc,WhitePixel(v->dpy,v->screen));
+        {const char *h="LOAD CUSTOM MAP - custom_maps/*.avpm";
+         XDrawString(v->dpy,v->backbuf,v->gc,x,30,h,(int)strlen(h));}
+        if(!m->browser_count){const char *h="No valid maps found. Esc to return.";
+          XDrawString(v->dpy,v->backbuf,v->gc,x,64,h,(int)strlen(h));}
+        else{unsigned begin=m->browser_cursor>10u?m->browser_cursor-10u:0u;
+            for(unsigned j=begin;j<m->browser_count&&j<begin+14u;j++){
+                snprintf(entry,sizeof entry,"%c %s.avpm",j==m->browser_cursor?'>':' ',m->browser_files[j]);
+                XDrawString(v->dpy,v->backbuf,v->gc,x,55+(int)(j-begin)*18,entry,(int)strlen(entry));
+            }}
+        {const char *h="Arrows/PgUp/PgDn: browse; Enter: select; Esc: cancel";
+         XDrawString(v->dpy,v->backbuf,v->gc,x,(int)wh-30,h,(int)strlen(h));}
+        return;
+    }
     count=(int)avp_local_mp_menu_rows(&v->local_mp,v->local_mp_page,visible_rows);
     for(int i=0;i<count;i++)if(visible_rows[i]==v->local_mp_cursor)selected_index=i;
     if(visible<1)visible=1;
@@ -5422,7 +5829,17 @@ static void draw_local_mp_title(AvpPcVideo *v)
                 else snprintf(value,sizeof(value),"None (Unlimited)");}
         else if(row==AVP_LOCAL_MP_FAST_ROW)snprintf(value,sizeof(value),"%s",
                 v->local_mp.dm_fast_movement?"Enabled (2x)":"Disabled");
-        else if(row==AVP_LOCAL_MP_LEVEL_ROW)snprintf(value,sizeof(value),"Level %02u / 15",v->local_mp.dm_level);
+        else if(row==AVP_LOCAL_MP_LEVEL_ROW){
+            if(v->local_mp.dm_level==AVP_MP_CUSTOM_LEVEL)
+                snprintf(value,sizeof(value),"<Custom Map>");
+            else snprintf(value,sizeof(value),"Level %02u / 15",v->local_mp.dm_level);
+        }
+        else if(row==AVP_LOCAL_MP_CUSTOM_NAME_ROW){
+            if(v->local_mp.custom_map_stem[0])
+                snprintf(value,sizeof(value),"%s.avpm",v->local_mp.custom_map_stem);
+            else snprintf(value,sizeof(value),"<None selected>");
+        }
+        else if(row==AVP_LOCAL_MP_CUSTOM_LOAD_ROW)snprintf(value,sizeof(value),"PRESS ENTER");
         else if(row==AVP_LOCAL_MP_ENEMIES_ROW)snprintf(value,sizeof(value),"%s",v->local_mp.dm_enemies?"On":"Off");
         else if(row==AVP_LOCAL_MP_EQUIP_ROW)snprintf(value,sizeof(value),"%s",v->local_mp.dm_fast_equip?"Enabled":"Disabled");
         else if(row==AVP_LOCAL_MP_BOT_COUNT_ROW)snprintf(value,sizeof(value),"%u",v->local_mp.bot_count);
@@ -5438,6 +5855,8 @@ static void draw_local_mp_title(AvpPcVideo *v)
             avp_local_mp_bot_behavior_name(v->local_mp.bot_behavior[row-AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+4u]));
         else if(row==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW)snprintf(value,sizeof(value),"%s",v->local_mp.random_species_on_respawn?"Enabled":"Disabled");
         else if(row==AVP_LOCAL_MP_WHOLE_MAP_ROW)snprintf(value,sizeof(value),"%s",v->local_mp.show_whole_map?"Enabled":"Disabled");
+        else if(row==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW)snprintf(value,sizeof(value),"%s",
+            v->local_mp.player_collisions?"Enabled":"Disabled");
         else if(row==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW)snprintf(value,sizeof(value),"%s",
             v->local_mp.show_other_players_on_automap?"Enabled":"Disabled");
         else if(row==AVP_LOCAL_MP_TRAVEL_ROW)snprintf(value,sizeof(value),"%s",v->local_mp.dm_level_travel?"Enabled":"Disabled");
@@ -5454,6 +5873,10 @@ static void draw_local_mp_title(AvpPcVideo *v)
          else if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW && row<AVP_LOCAL_MP_TRAVEL_ROW)
              snprintf(generated_label,sizeof(generated_label),"Bot %u Behavior",
                  (unsigned)(row-AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+5));
+         if(row==AVP_LOCAL_MP_CUSTOM_NAME_ROW)
+             snprintf(generated_label,sizeof(generated_label),"Loaded Map Filename");
+         if(row==AVP_LOCAL_MP_CUSTOM_LOAD_ROW)
+             snprintf(generated_label,sizeof(generated_label),"Load Map");
          if(row==AVP_LOCAL_MP_MENU_BOTS_ROW)
              snprintf(generated_label,sizeof(generated_label),"Bots");
          if(row==AVP_LOCAL_MP_MENU_MODIFIERS_ROW)
@@ -5466,6 +5889,8 @@ static void draw_local_mp_title(AvpPcVideo *v)
              snprintf(generated_label,sizeof(generated_label),"Cloaked Predator Takes 4x Damage");
          if(row==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW)
              snprintf(generated_label,sizeof(generated_label),"Show Other Players On Automap");
+         if(row==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW)
+             snprintf(generated_label,sizeof(generated_label),"Player Collisions");
          if(row==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW){
             snprintf(b,sizeof(b),"%c Modifier: Character Change on Death",
                 v->local_mp_cursor==row?'>':' ');
@@ -6246,7 +6671,7 @@ void avp_pc_video_automap_observe(AvpPcVideo *v,const u8 *maze,u16 mw,u16 mh,
         /* The same Cheats > New > Reveal Entire Map setting applies to P1
          * in both single-player and local multiplayer. The selected player
          * determines whose private automap gets revealed. */
-        if(v->local_mp_controls.player[0].cheat_reveal_map)
+        if(avp_mp_reveal_for_player(&v->local_mp_controls,0u,0))
             avp_gpu_automap_reveal_all(&v->gpu,maze,mw,mh,logical_level);
 #endif
     }
@@ -6267,11 +6692,105 @@ void avp_pc_video_reset_presentation(AvpPcVideo *v)
     v->gpu.render_alpha=1.0;
 }
 
+/* Save a lossless standard PPM triplet.  Unique numbered paths and an
+ * explicit folder protect the user's maps, screenshots, and source files.
+ * The pixels are the SAME pair presented to the SBS display. */
+static int vr_save_stereo_snapshot(const AvpPcVideo *v)
+{
+    char sbs[160],left[160],right[160];
+    unsigned index;
+    struct stat st;
+    unsigned leftw,rightw;
+    if(!v||!v->present_pixels||v->present_w<2u||!v->present_h)return 0;
+#ifdef _WIN32
+    if(_mkdir("vr_screenshots")!=0&&errno!=EEXIST)return 0;
+#else
+    if(mkdir("vr_screenshots",0755)!=0&&errno!=EEXIST)return 0;
+#endif
+    leftw=(v->present_w+1u)/2u;rightw=v->present_w-leftw;
+    if(!rightw)return 0;
+    for(index=1u;index<=9999u;index++){
+        snprintf(sbs,sizeof sbs,"vr_screenshots/vr_%04u_sbs.ppm",index);
+        snprintf(left,sizeof left,"vr_screenshots/vr_%04u_left.ppm",index);
+        snprintf(right,sizeof right,"vr_screenshots/vr_%04u_right.ppm",index);
+        if(stat(sbs,&st)!=0&&stat(left,&st)!=0&&stat(right,&st)!=0)break;
+    }
+    if(index>9999u)return 0;
+    if(!avp_pc_vr_preview_write_ppm(sbs,v->present_pixels,v->present_w,v->present_h,
+           0,0,v->present_w,v->present_h))return 0;
+    if(!avp_pc_vr_preview_write_ppm(left,v->present_pixels,v->present_w,v->present_h,
+           0,0,leftw,v->present_h))return 0;
+    return avp_pc_vr_preview_write_ppm(right,v->present_pixels,v->present_w,v->present_h,
+           leftw,0,rightw,v->present_h);
+}
+
+/* Basic software stereo for compatible SBS displays / passive VR viewers:
+ * two independent eyes presented side-by-side. External display connection,
+ * lens distortion, and head tracking are not implemented. Simulation unchanged. */
+static int vr_present_stereo_preview(AvpPcVideo *v,const u8 *maze,u16 mw,u16 mh,
+    u32 xpos,u32 ypos,u32 angle,int rom_ok,unsigned logical_level,u64 vbl)
+{
+    unsigned w,h;
+    AvpPcVrRect l,r;
+    if(!v||!v->cfg.vr_sbs_preview||!v->present_pixels||v->present_w<2u||!v->present_h||
+       !maze||!mw||!mh||v->gpu.computer_active)return 0;
+    l=avp_pc_vr_preview_rect(v->present_w,v->present_h,0u,v->cfg.vr_eye_aspect);
+    r=avp_pc_vr_preview_rect(v->present_w,v->present_h,1u,v->cfg.vr_eye_aspect);
+    w=l.w>r.w?l.w:r.w;h=l.h>r.h?l.h:r.h;
+    if(!w||!h)return 0;
+    if(v->vr_eye_fb.width!=w||v->vr_eye_fb.height!=h){
+        avp_jaguar_framebuffer_destroy(&v->vr_eye_fb);
+        if(!avp_jaguar_framebuffer_init(&v->vr_eye_fb,w,h))return 0;
+    }
+    /* Read the authoritative maze/clock once; the two render passes only
+     * displace camera sampling and the projection. No gameplay tick occurs. */
+    v->gpu.host_widescreen_fov=0;
+    v->gpu.host_extend_draw_distance=v->cfg.extend_draw_distance;
+    v->gpu.host_extend_fog_distance=v->cfg.extend_fog_distance;
+    v->gpu.host_disable_fog=v->cfg.disable_fog;
+    v->gpu.hud_fixed_hue=(unsigned char)!!v->cfg.hud_fixed_hue;
+    v->gpu.host_continuous_heading=v->cfg.smooth_presentation&&avp_pc_video_enhanced_analog_enabled(v);
+    v->gpu.host_vr_hud_anchor_enabled=1;
+    v->gpu.host_vr_hud_anchor_x=xpos;
+    v->gpu.host_vr_hud_anchor_y=ypos;
+    v->gpu.host_vr_hud_anchor_angle=angle;
+    memset(v->present_pixels,0,(size_t)v->present_w*v->present_h*sizeof(uint32_t));
+    for(unsigned eye=0;eye<2u;eye++){
+        u32 xx,yy;
+        u32 view_angle=avp_pc_vr_preview_look_angle(angle,v->vr_preview_yaw_deg);
+        avp_pc_vr_preview_eye(xpos,ypos,view_angle,v->gpu.host_continuous_heading,
+                              v->cfg.vr_eye_separation,eye,&xx,&yy);
+        v->gpu.host_stereo_projection_shift=avp_pc_vr_preview_projection_shift(
+            v->cfg.vr_eye_separation,v->cfg.vr_convergence,eye);
+        avp_gpu_render_maze(&v->gpu,&v->vr_eye_fb,maze,mw,mh,xx,yy,view_angle,
+            rom_ok,logical_level,vbl,v->cfg.smooth_presentation,v->cfg.debug_immediate_in_game);
+        avp_pc_vr_preview_blit_fit(v->vr_eye_fb.pixels,w,h,
+            v->present_pixels,v->present_w,v->present_h,eye,v->cfg.vr_eye_aspect);
+    }
+    /* The shared renderer also handles retail, frontend and Map Maker views.
+     * Do not leak VR camera/projection state into any of those paths. */
+    v->gpu.host_stereo_projection_shift=0.0;
+    v->gpu.host_vr_hud_anchor_enabled=0;
+    if(v->vr_screenshot_requested){
+        int ok=vr_save_stereo_snapshot(v);
+        fprintf(stderr,"VR stereo snapshot: %s\n",ok?"saved to vr_screenshots/":"write failed");
+        v->vr_screenshot_requested=0;
+    }
+    v->presenting_world_hires=0;
+    present_prepared_pixels(v,v->cfg.debug_immediate_in_game,1);
+    return 1;
+}
 void avp_pc_video_render_maze(AvpPcVideo*v,const u8*maze,u16 mw,u16 mh,u32 xpos,u32 ypos,u32 angle,int rom_ok,unsigned logical_level,u64 ticks,unsigned simulation_hz)
 {
     char title[280];
     if(!v)return;
     {u64 now=avp_pc_now_ns();u64 vbl=(now>=v->vblank_epoch_ns)?((now-v->vblank_epoch_ns)*60ull/1000000000ull):0ull;
+    if(vr_present_stereo_preview(v,maze,mw,mh,xpos,ypos,angle,rom_ok,logical_level,vbl)){
+        snprintf(title,sizeof(title),"AVP Jaguar PC port | VR Headset (Stereo SBS, no tracking) | Level %u | F12",logical_level);
+        XStoreName(v->dpy,v->win,title);XFlush(v->dpy);return;
+    }
+    v->gpu.host_stereo_projection_shift=0.0;
+    v->gpu.host_vr_hud_anchor_enabled=0;
     AvpJaguarFramebuffer *target=&v->fb;
     if(v->present_w&&v->present_h &&
        (v->cfg.high_resolution_world || v->cfg.video_aspect!=0u)){
@@ -6315,6 +6834,7 @@ int avp_pc_video_frontend_load(AvpPcVideo *v,const AvpRomImage *rom,unsigned mod
 void avp_pc_video_frontend_event(AvpPcVideo *v,unsigned event,s32 arg0,s32 arg1)
 {
     if(!v)return;
+    if(event==AVP_PC_TITLE_SKIP_EVENT)avp_pc_title_native_stop(v->title_native);
     avp_gpu_frontend_event(&v->gpu,event,arg0,arg1);
     avp_gpu_computer_event(&v->gpu,event,arg0,arg1);
 }
@@ -6365,9 +6885,48 @@ void avp_pc_video_frontend_tick(AvpPcVideo *v,unsigned mode,s32 choice)
     v->presenting_world_hires=0;
     if(!v->frontend_fb.pixels && !avp_jaguar_framebuffer_init(&v->frontend_fb,320u,254u))return;
     avp_gpu_frontend_present(&v->gpu,&v->frontend_fb,mode,choice);
+    if(mode==AVP_MJP_TITLE && v->gpu.frontend_title_splash){
+        if(v->title_native)v->title_native_started=1;
+        (void)avp_pc_title_native_present(v->title_native,&v->frontend_fb,
+              v->gpu.frontend_title_reveal_tick);
+    }else if(v->title_native && v->title_native_started){
+        /* Retain the reference machine's exact field-313 checkpoint for a
+         * later attract replay; only stop presenting its old title frames. */
+        avp_pc_title_native_stop(v->title_native);
+        v->title_native_started=0;
+    }
     v->presenting_frontend=1;
     present_framebuffer(v,0,1);
     v->presenting_frontend=0;
     XStoreName(v->dpy,v->win,"Alien vs Predator - Atari Jaguar retail frontend");
     XFlush(v->dpy);
+}
+
+/* First retail cartridge boot only: no host-authored frames are loaded into
+ * the reference machine. It executes the user's original .jag from memory. */
+void avp_pc_video_title_native_begin(AvpPcVideo *v,const AvpRomImage *rom)
+{
+    if(!v)return;
+    avp_pc_title_native_destroy(v->title_native);
+    v->title_native=avp_pc_title_native_create(rom);
+    v->title_native_started=0;
+}
+void avp_pc_video_title_native_boot_field(AvpPcVideo *v)
+{
+    if(v)avp_pc_title_native_advance_boot(v->title_native);
+}
+/* A NewTitle() entered after the attract is not a power-on reset. Its native
+ * logo pixels still come from the original Jaguar execution core, primed to
+ * the first title field without presenting the initial black boot fields. */
+void avp_pc_video_title_native_replay_begin(AvpPcVideo *v,const AvpRomImage *rom)
+{
+    if(!v)return;
+    if(v->title_native && avp_pc_title_native_rewind(v->title_native)){
+        v->title_native_started=0;
+        return;
+    }
+    /* No checkpoint: fail safely into the already-working host title art,
+     * rather than force a 20-second invisible cold boot mid-menu. */
+    avp_pc_video_title_native_begin(v,rom);
+    avp_pc_title_native_stop(v->title_native);
 }

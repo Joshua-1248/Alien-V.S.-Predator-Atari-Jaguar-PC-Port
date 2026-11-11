@@ -1,5 +1,0 @@
-# R229 — Verified original frontend fade word and callback endpoints
-
-Research-only successor to R228. The original retail 68000 program contains 13 aligned absolute references to JERRY DSP RAM `$F1BB40`. All are accounted for: six full-scale resets, two zero writes, one CLR, two reads and two callback writes. Original fade-down (`$009ACA`) and fade-up (`$009AF6`) run with `$FA` steps at all five direct 68000 call sites, reaching the zero/full endpoint after 132 callback executions under the verified start states. The previous VBlank callback remains chained (R228). ROM instruction evidence, verification boundaries and call sites are documented in `R229_RETAIL_DSP_RAM_FADE_WORD_AUDIT.md`.
-
-This is **not** a new production fade or a claim of DSP waveform / hardware video parity. No production source, renderer, audio, gameplay, input, save, tests, credits or licenses altered. Both native Linux compiler builds and complete cumulative history are retained. No retail ROM or extracted commercial asset is distributed.

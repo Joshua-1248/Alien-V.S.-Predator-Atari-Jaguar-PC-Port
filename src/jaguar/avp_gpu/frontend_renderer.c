@@ -1,4 +1,7 @@
 #include "jaguar/avp_gpu/frontend_renderer.h"
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+#include "pc/pc_title_reference.h"
+#endif
 #include "jaguar/avp_gpu/frontend_fade.h"
 #include "jaguar/cry.h"
 #include "mjp.h"
@@ -15,16 +18,42 @@ static void put(AvpJaguarFramebuffer *fb,int x,int y,uint32_t c)
 }
 
 static uint32_t frontend_rgb16_to_host(u16 p);
-/* NTSC InitVideo + SetScreen(320,240) in the retail ROM: VDB=$001c.
- * Make_New packs BITOBJ YPOS as 2 * Ob_Pos_Y (via Ob_Pos_Y << 4). */
+/* NTSC retail title uses VDB=$001c HALF-lines but the CPU's
+ * Zero_Line / High_Line are the corresponding whole-line coordinate $000e.
+ * Make_New packs OP YPOS as 2 * Ob_Pos_Y. The ROM-driven Jaguar reference
+ * machine confirms title-background YPOS=$1c and ALIEN YPOS=$5c at
+ * model field 330 (AVP.jag SHA-256 b31ca5c2...). Earlier host releases
+ * incorrectly used VDB itself for Zero_Line, displacing every title object
+ * down by 14 pixels. Keep this correction in the PC title presentation. */
 #define AVP_TITLE_NTSC_VDB_HALFLINES 0x1cu
 static int frontend_title_op_y(unsigned halfline_ypos);
 
-/* MJP title FILES 208 is an unscaled 320x280 BITOBJ, not a
- * fitted background. Make_TLi sets Ob_Pos_Y=Zero_Line ($1c on NTSC);
- * Make_New encodes that as YPOS=2*$1c=$38, and TOM starts objects at
- * VDB=$1c. Thus the first picture row appears at native screen Y=14.
- * The 320x228 gameplay framebuffer is a clipping aperture, NOT a scale. */
+/* PC frontend presentation uses a 320x254 staging framebuffer and displays
+ * exactly rows 14..253. The original Jaguar title OP raster is 320x240 with
+ * its first source line at active row zero. R82's cartridge-executed title
+ * scanout correctly copied native row 0 into staging row 14, but the hosted
+ * fallback/menu/credits artwork was still drawn at staging row zero. When
+ * the frontend handed off to its menu that cropped 14 artwork rows, making
+ * the entire title background and wordmarks visibly jump upwards.
+ *
+ * Move ONLY the completed title artwork layer to the PC's staging aperture,
+ * BEFORE placing source-authored menu/credits glyphs (which already include
+ * the 14-row staging offset). No original OP position, GPU phase, or game
+ * input/tick is changed. 240/228-line standalone render targets keep their
+ * original native-pixel coordinates. */
+static void frontend_title_to_pc_aperture(AvpJaguarFramebuffer *fb)
+{
+    const size_t row_pixels=320u;
+    const size_t top=14u;
+    if(!fb||!fb->pixels||fb->width!=320u||fb->height!=254u)return;
+    memmove(fb->pixels+top*row_pixels,fb->pixels,
+            (size_t)(fb->height-(unsigned)top)*row_pixels*sizeof(*fb->pixels));
+    memset(fb->pixels,0,top*row_pixels*sizeof(*fb->pixels));
+}
+
+/* MJP title FILES 208 is an unscaled 320x280 BITOBJ. Make_TLi sets
+ * Ob_Pos_Y=Zero_Line=$0e, encoded YPOS=$1c, exactly the NTSC VDB.
+ * Therefore the title starts at visible output row ZERO, not row 14. */
 /* Full-screen MJP pictures are unscaled 320x240 OP bitmaps whose first line
  * is the first displayed line (VDB), i.e. port frontend row 14.  Returns the
  * source row for port row y, or -1 outside the bitmap. */
@@ -42,12 +71,10 @@ static void frontend_blit_image(AvpJaguarFramebuffer *fb,const AvpGpuRgbImage *i
     for(y=0;y<fb->height;y++){
         int logical_h=im->height>240?240:im->height;
         const int native_title=(title_background && im->width==320 && im->height==280);
-        const int title_y=frontend_title_op_y(2u*AVP_TITLE_NTSC_VDB_HALFLINES);
+        const int title_y=frontend_title_op_y(AVP_TITLE_NTSC_VDB_HALFLINES);
         int crop_y=native_title?0:(im->height-logical_h)/2;
-        /* Reproduce the retail title object's *position* and 1:1 vertical
-         * BITOBJ sampling. The first 14 scanlines contain no title bitmap.
-         * Only the title/credits bitmap path changes; other frontends retain
-         * their existing host picture conversion and placement. */
+        /* Retail title OP starts on the first active scanline. Keep 1:1
+         * BITOBJ source sampling; other frontend picture paths unchanged. */
         if(native_title && (int)y<title_y)continue;
         const int full=frontend_native_full_row(im,y);
         if(full==-1){
@@ -112,7 +139,12 @@ static void frontend_blit_native_mjp_picture(AvpJaguarFramebuffer *fb,const AvpG
             const int dx=x0+x;
             if(dx<0||(unsigned)dx>=fb->width)continue;
             const u8 *q=im->rgb+((size_t)y*(size_t)im->width+(size_t)x)*3u;
-            fb->pixels[(size_t)dy*fb->width+(unsigned)dx]=rgb(q[0],q[1],q[2]);
+            /* The Jaguar OP scans out the stored RGB16 words, not the
+             * unquantized RGB888 values returned by the host JagPEG
+             * decoder. Keep the settled picture byte-for-byte continuous
+             * with CROSS GPU stage 16 (and with the retail RGB16 DAC). */
+            fb->pixels[(size_t)dy*fb->width+(unsigned)dx]=
+                frontend_rgb16_to_host(avp_gpu_rgb16_pack(q[0],q[1],q[2]));
         }
     }
 }
@@ -409,8 +441,9 @@ static AvpTitleOpPose frontend_title_alien_pose(unsigned phase)
     if(phase>35u)phase=35u;
     scale=44u-phase;
     pose.x=(int)(0x20-(int)phase)*8+0x2a;
-    /* Make_TLi slot 2: Ob_Pos_Y=Zero_Line+$20, with <<4 in Make_New. */
-    pose.y=frontend_title_op_y(2u*(AVP_TITLE_NTSC_VDB_HALFLINES+0x20u));
+    /* Retail slot 2 at model field 330: OP YPOS=$5c=2*($0e+$20).
+     * TOM VDB=$1c, hence active top row ($5c-$1c)/2 = 32. */
+    pose.y=frontend_title_op_y(2u*(AVP_TITLE_NTSC_VDB_HALFLINES/2u+0x20u));
     pose.width=(320u*scale)/32u;
     /* The initialized REMAINDER=VSCALE+0x20 adds two displayed lines
      * before HEIGHT source rows are exhausted, for retail title scales. */
@@ -433,13 +466,13 @@ static unsigned frontend_title_predator_phase(unsigned tick)
 /* Retail $01FD0A: after the Update2 loop ends, the blitter copies the
  * 160x40 FILES 232 wordmark opaquely into the title buffer at (153,33);
  * one VBL later ($01FBF6/$01FBFC) the scaled FILES 237 object is hidden.
- * Title buffer row 0 is port frontend row 14. */
+ * The original title buffer starts at active screen row 0. */
 static int title_predator_stamp(const AvpAvpGpuState *st,AvpJaguarFramebuffer *fb)
 {
     const AvpGpuRgbImage *im=&st->frontend_img[AVP_MJP_TITLE][6];
     if(!st->frontend_loaded[AVP_MJP_TITLE][6]||!im->rgb||im->width!=160||im->height!=40)return 0;
     for(unsigned y=0u;y<40u;y++){
-        const unsigned py=14u+33u+y;
+        const unsigned py=33u+y;
         if(py>=fb->height)break;
         for(unsigned x=0u;x<160u;x++){
             const u8 *q=im->rgb+((size_t)y*160u+x)*3u;
@@ -458,7 +491,7 @@ static int title_alien_stamp(const AvpAvpGpuState *st,AvpJaguarFramebuffer *fb)
     const AvpGpuRgbImage *im=&st->frontend_img[AVP_MJP_TITLE][5];
     if(!st->frontend_loaded[AVP_MJP_TITLE][5]||!im->rgb||im->width!=96||im->height!=40)return 0;
     for(unsigned y=0u;y<40u;y++){
-        const unsigned py=14u+33u+y;
+        const unsigned py=33u+y;
         if(py>=fb->height)break;
         for(unsigned x=0u;x<96u;x++){
             const u8 *q=im->rgb+((size_t)y*96u+x)*3u;
@@ -468,6 +501,17 @@ static int title_alien_stamp(const AvpAvpGpuState *st,AvpJaguarFramebuffer *fb)
     }
     return 1;
 }
+/* RE34 R77 provisional presentation timing. The canonical 4-MiB retail
+ * ROM (SHA256 b31ca5c2...) has now been checked directly: its 68000 title
+ * caller $01F118 invokes $01FA3A, which initializes the background OP and
+ * launches the 35-step ALIEN GPU progression; PREDATOR's two-tick Update2
+ * phase loop follows. The ROM does NOT establish a literal 32-VBlank hold
+ * before the logos. The PC-only interval below is a visual approximation of
+ * the background-first reveal reported in the reference recording, NOT an
+ * original hardware timer. Retain the original C gameplay and 141-VBL menu
+ * handoff unchanged. See tools/audit_retail_title_timing_r77.py. */
+#define AVP_TITLE_BACKGROUND_ONLY_VBLS 32u
+#define AVP_TITLE_ANIMATION_COMPLETE_VBLS (AVP_TITLE_BACKGROUND_ONLY_VBLS + 96u)
 #define AVP_TITLE_ALIEN_STAMP_TICK 36u /* first VBL after Update phase 35 */
 static AvpTitleOpPose frontend_title_predator_pose(unsigned phase)
 {
@@ -476,9 +520,10 @@ static AvpTitleOpPose frontend_title_predator_pose(unsigned phase)
     if(phase>33u)phase=33u;
     scale=32u-(phase>>1);
     pose.x=(int)(8u+phase*3u+((phase&1u)?0u:3u)+(phase>>1)*3u);
-    /* Update2 writes YPOS = (High_Line<<1)+$D8-(p*4+p/2).
-     * On NTSC High_Line==Zero_Line==VDB. */
-    pose.y=frontend_title_op_y(2u*AVP_TITLE_NTSC_VDB_HALFLINES+
+    /* Update2 writes YPOS = 2*High_Line+$D8-(p*4+p/2), with
+     * NTSC High_Line=$0e (not VDB=$1c). The OP model at field 506
+     * confirms YPOS=$69 at p=31, not the R80 host's extra 28. */
+    pose.y=frontend_title_op_y(AVP_TITLE_NTSC_VDB_HALFLINES+
                              0xd8u-(phase*4u+(phase>>1)));
     pose.width=(320u*scale)/32u;
     pose.height=(82u*scale)/32u+2u;
@@ -524,6 +569,34 @@ static unsigned title_reveal_phase(unsigned tick,unsigned start,unsigned ticks)
     if(tick>=start+ticks)return 16u;
     return (unsigned)((tick-start)*16u/ticks);
 }
+
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+/* RE34 R79: Extracted from the original-ROM Jaguar reference machine's
+ * composite title fields 396..468 (field zero of the PC title = 314).
+ * The normalized PREDATOR-area RGB change, relative to the field-396
+ * background and field-468 full logo, rises, falls and then rises again.
+ * R78's straight 44-field fade cannot match this two-wave behaviour.
+ *
+ * Fixed Q4 opacity samples (six model fields apart), with interpolation:
+ *  local  82  88  94 100 106 112 118 124 130 136 142 148 154
+ *  alpha   0   1   2   4   5   4   2   2   4   7  11  14  16
+ * No extracted image data or original RISC binary is embedded. This is a
+ * model-derived brightness envelope, NOT a substitute for instruction-
+ * exact GPU/Blitter composition, which remains open. */
+static unsigned frontend_title_predator_reveal(unsigned tick)
+{
+    static const unsigned char levels[13u]={
+        0u,1u,2u,4u,5u,4u,2u,2u,4u,7u,11u,14u,16u
+    };
+    unsigned delta,index,frac,a,b;
+    if(tick<=AVP_PC_TITLE_PREDATOR_VISIBLE)return 0u;
+    if(tick>=AVP_PC_TITLE_PREDATOR_FULL)return 16u;
+    delta=tick-AVP_PC_TITLE_PREDATOR_VISIBLE;
+    index=delta/6u;frac=delta%6u;
+    a=levels[index];b=levels[index+1u];
+    return (a*(6u-frac)+b*frac+3u)/6u;
+}
+#endif
 
 static void frontend_font_glyph(AvpJaguarFramebuffer *fb,const u8 *font,size_t font_size,
                                 int font_w,int font_h,int glyph_w,int glyph_h,
@@ -664,13 +737,13 @@ static void title_legal_text(AvpAvpGpuState *st,AvpJaguarFramebuffer *fb,
 }
 /* Retail MJP Clear_Bu ($1FC2A-$1FC8E): GPU blit of Legal_Pic (FILES 233,
  * 320x40 RGB16) to buffer row $A8+$4BE24, where $4BE24 = $2EE92 = VDB/2 = 14
- * on NTSC, i.e. picture row 182, shown through the same OP position as the
- * title picture (+14 screen lines).  Colour 0 is transparent in the overlay. */
+ * on NTSC: picture/output row 182 (the title OP itself starts at row zero).
+ * Colour 0 is transparent in the overlay. */
 static int title_legal_bitmap(AvpAvpGpuState *st,AvpJaguarFramebuffer *fb)
 {
     const AvpGpuRgbImage *im;
     const int top=0xa8+AVP_TITLE_NTSC_VDB_HALFLINES/2+
-                  frontend_title_op_y(2u*AVP_TITLE_NTSC_VDB_HALFLINES);
+                  frontend_title_op_y(AVP_TITLE_NTSC_VDB_HALFLINES);
     if(!st||!fb||!fb->pixels||!st->frontend_loaded[AVP_MJP_TITLE][4])return 0;
     im=&st->frontend_img[AVP_MJP_TITLE][4];
     if(!im->rgb||im->width!=320||im->height!=40)return 0;
@@ -809,6 +882,9 @@ void avp_gpu_frontend_enter_mode(AvpAvpGpuState *state,unsigned mode)
     memset(state->frontend_text,0,sizeof(state->frontend_text));
     memset(state->frontend_text_large,0,sizeof(state->frontend_text_large));
     memset(state->frontend_text_glyph_x,0,sizeof(state->frontend_text_glyph_x));
+    state->frontend_text_cursor_x=0u;
+    state->frontend_text_cursor_line=0u;
+    state->frontend_text_cursor_active=0u;
     memset(state->frontend_text_species,0,sizeof(state->frontend_text_species));
     memset(state->frontend_fame_score,0,sizeof(state->frontend_fame_score));
     memset(state->frontend_fame_prompt,0,sizeof(state->frontend_fame_prompt));
@@ -910,8 +986,15 @@ void avp_gpu_frontend_event(AvpAvpGpuState *state,unsigned event,s32 arg0,s32 ar
         if(state->frontend_mode==AVP_MJP_CREDITS && state->frontend_credits_scrolling && state->frontend_credits_tick<1600u)
             ++state->frontend_credits_tick;
         if(state->frontend_mode==AVP_MJP_TITLE){
-            if(state->frontend_title_reveal_active && state->frontend_title_reveal_tick<96u)
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+            if(state->frontend_title_reveal_active &&
+               state->frontend_title_reveal_tick<AVP_PC_TITLE_SEQUENCE_FIELDS)
                 ++state->frontend_title_reveal_tick;
+#else
+            if(state->frontend_title_reveal_active &&
+               state->frontend_title_reveal_tick<AVP_TITLE_ANIMATION_COMPLETE_VBLS)
+                ++state->frontend_title_reveal_tick;
+#endif
             if(!state->frontend_title_splash && state->frontend_title_menu_pending){
                 if(state->frontend_title_menu_dim_phase>6u)
                     --state->frontend_title_menu_dim_phase;
@@ -946,6 +1029,18 @@ void avp_gpu_frontend_event(AvpAvpGpuState *state,unsigned event,s32 arg0,s32 ar
         }
         return;
     }
+    if(event==0x4d4a505au){ /* MJPZ: Show_Tex finished/skipped; keep printed text */
+        state->frontend_text_cursor_active=0u;
+        return;
+    }
+    if(event==0x4d4a5043u){ /* MJPC: Show_Tex live cursor, original glyph advance */
+        if(arg0>=0&&arg0<320&&arg1>=0&&arg1<12){
+            state->frontend_text_cursor_x=(unsigned short)arg0;
+            state->frontend_text_cursor_line=(unsigned char)arg1;
+            state->frontend_text_cursor_active=1u;
+        }
+        return;
+    }
     if(event==0x4d4a5050u||event==0x4d4a5053u){(void)arg0;if(arg1>=0&&arg1<9)state->frontend_page=(unsigned)arg1;}
     if(event==0x4d4a5042u || event==0x434c5231u || event==0x434c5232u || event==0x43525047u){
         /* MJPB begins a scene; CLR1/CLR2 clear the old text surface when a
@@ -954,6 +1049,7 @@ void avp_gpu_frontend_event(AvpAvpGpuState *state,unsigned event,s32 arg0,s32 ar
         memset(state->frontend_text,0,sizeof(state->frontend_text));
         memset(state->frontend_text_large,0,sizeof(state->frontend_text_large));
         memset(state->frontend_text_glyph_x,0,sizeof(state->frontend_text_glyph_x));
+        state->frontend_text_cursor_active=0u;
         memset(state->frontend_text_species,0,sizeof(state->frontend_text_species));
         memset(state->frontend_text_x,0,sizeof(state->frontend_text_x));
         memset(state->frontend_fame_score,0,sizeof(state->frontend_fame_score));
@@ -1042,6 +1138,13 @@ void avp_gpu_frontend_event(AvpAvpGpuState *state,unsigned event,s32 arg0,s32 ar
     if(event==0x5449544cu){state->frontend_title_splash=1u;state->frontend_title_choice=0;state->frontend_title_save=0;
         state->frontend_title_reveal_tick=0u;state->frontend_title_reveal_active=1u;
         state->frontend_title_menu_dim_phase=16u;state->frontend_title_menu_pending=0u;}
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+    if(event==AVP_PC_TITLE_SKIP_EVENT && state->frontend_title_reveal_active){
+        const unsigned next=arg0<0?0u:(unsigned)arg0;
+        state->frontend_title_reveal_tick=next>AVP_PC_TITLE_SEQUENCE_FIELDS?
+            AVP_PC_TITLE_SEQUENCE_FIELDS:next;
+    }
+#endif
     if(event==0x544d454eu){state->frontend_title_splash=0u;state->frontend_title_reveal_active=0u;
         state->frontend_title_menu_dim_phase=16u;state->frontend_title_menu_pending=1u;}
         /* TMEN starts dimming the picture before the option lettering appears. */
@@ -1344,8 +1447,75 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
     }
 
     if(mode==AVP_MJP_TITLE){
-        const unsigned tick=state->frontend_title_splash?state->frontend_title_reveal_tick:96u;
-        const unsigned bg=state->frontend_title_splash?title_reveal_phase(tick,0u,32u):16u;
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+        /* The original GPU advances $7FB4 1..35 at one phase per ~2
+         * fields, on a black initial OP. A separate GPU fill reveals the
+         * backdrop after the ALIEN has started. The PREDATOR's first GPU
+         * job animates across the full title BEFORE the Update2 scale
+         * loop (odd phases 1..33) moves it into its final top-row slot.
+         * These VISUAL stages are aligned to the recovered retail ROM
+         * running in our Jaguar reference machine; shader/blitter pixels
+         * inside the GPU jobs are still an approximation, not native GPU
+         * execution. See docs/RE34_R78_TITLE_REFERENCE.md. */
+        const unsigned tick=state->frontend_title_splash?
+            state->frontend_title_reveal_tick:AVP_PC_TITLE_SEQUENCE_FIELDS;
+        const unsigned bg=state->frontend_title_splash?
+            title_reveal_phase(tick,AVP_PC_TITLE_BACKGROUND_START,
+                AVP_PC_TITLE_BACKGROUND_FULL-AVP_PC_TITLE_BACKGROUND_START):16u;
+        if(bg<16u)for(size_t i=0u,n=(size_t)fb->width*fb->height;i<n;i++){
+            const u32 c=fb->pixels[i];
+            const u16 packed=avp_gpu_rgb16_pack((u8)(c>>16),(u8)(c>>8),(u8)c);
+            fb->pixels[i]=frontend_rgb16_to_host(avp_gpu_rgb16_fraction(packed,bg));
+        }
+        /* The retail GPU writes the ALIEN permanent mark to three buffers
+         * before the independent PREDATOR job starts. */
+        if(tick>=AVP_PC_TITLE_ALIEN_STAMP)title_alien_stamp(state,fb);
+        else if(tick>=AVP_PC_TITLE_ALIEN_FIRST && state->frontend_loaded[0u][3u]){
+            unsigned phase=1u+(tick-AVP_PC_TITLE_ALIEN_FIRST)/2u;
+            if(phase>35u)phase=35u;
+            const AvpTitleOpPose p=frontend_title_alien_pose(phase);
+            frontend_blit_title_sprite(fb,&state->frontend_img[0u][3u],
+                p.x,p.y,p.width,p.height,110u,p.scale,16u);
+        }
+        if(tick>=AVP_PC_TITLE_PREDATOR_STAMP)title_predator_stamp(state,fb);
+        else if(tick>AVP_PC_TITLE_PREDATOR_VISIBLE &&
+                state->frontend_loaded[0u][2u]){
+            unsigned phase=1u;
+            unsigned reveal=16u;
+            if(tick<AVP_PC_TITLE_PREDATOR_MOVE){
+                /* Original ROM-driven GPU model: the large PREDATOR
+                 * initially appears, fades back, and returns at full
+                 * intensity. R79 models its measured temporal envelope;
+                 * per-pixel GPU/Blitter composition is still pending. */
+                reveal=frontend_title_predator_reveal(tick);
+            }else{
+                phase=1u+2u*(tick-AVP_PC_TITLE_PREDATOR_MOVE);
+                if(phase>33u)phase=33u;
+            }
+            if(reveal){
+                const AvpTitleOpPose p=frontend_title_predator_pose(phase);
+                frontend_blit_title_sprite(fb,&state->frontend_img[0u][2u],
+                    p.x,p.y,p.width,p.height,82u,p.scale,reveal);
+            }
+        }
+        if(state->frontend_title_splash){
+            if(tick>=AVP_PC_TITLE_LEGAL)title_legal_notice(state,fb);
+        }else{
+            const unsigned phase=state->frontend_title_menu_dim_phase;
+            const unsigned passes=avp_gpu_title_menu_dim_passes(phase<16u?16u-phase:0u);
+            if(passes)for(size_t i=0u,n=(size_t)fb->width*fb->height;i<n;i++){
+                const u32 c=fb->pixels[i];
+                const u16 packed=avp_gpu_rgb16_pack((u8)(c>>16),(u8)(c>>8),(u8)c);
+                fb->pixels[i]=frontend_rgb16_to_host(avp_gpu_rgb16_title_menu_dim(packed,passes));
+            }
+        }
+#else
+        const unsigned tick=state->frontend_title_splash?
+            state->frontend_title_reveal_tick:AVP_TITLE_ANIMATION_COMPLETE_VBLS;
+        const unsigned logo_tick=tick>AVP_TITLE_BACKGROUND_ONLY_VBLS?
+            tick-AVP_TITLE_BACKGROUND_ONLY_VBLS:0u;
+        const unsigned bg=state->frontend_title_splash?
+            title_reveal_phase(tick,0u,AVP_TITLE_BACKGROUND_ONLY_VBLS):16u;
         /* Render original background/independent logo objects before fade:
          * the menu continues to use precisely this completed title artwork. */
         if(bg<16u)for(size_t i=0u,n=(size_t)fb->width*fb->height;i<n;i++){
@@ -1354,27 +1524,27 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
                 (u8)(c>>8),(u8)c);
             fb->pixels[i]=frontend_rgb16_to_host(avp_gpu_rgb16_fraction(packed,bg));
         }
-        const int stamped=tick>=AVP_TITLE_PREDATOR_STAMP_TICK &&
+        const int stamped=logo_tick>=AVP_TITLE_PREDATOR_STAMP_TICK &&
                           title_predator_stamp(state,fb);
-        const int alien_stamped=tick>=AVP_TITLE_ALIEN_STAMP_TICK &&
+        const int alien_stamped=logo_tick>=AVP_TITLE_ALIEN_STAMP_TICK &&
                           title_alien_stamp(state,fb);
-        if(tick>=1u && state->frontend_loaded[0u][3u] &&
-           !(alien_stamped && tick>AVP_TITLE_ALIEN_STAMP_TICK)){
-            const AvpTitleOpPose pose=frontend_title_alien_pose(tick);
+        if(logo_tick>=1u && state->frontend_loaded[0u][3u] &&
+           !(alien_stamped && logo_tick>AVP_TITLE_ALIEN_STAMP_TICK)){
+            const AvpTitleOpPose pose=frontend_title_alien_pose(logo_tick);
             frontend_blit_title_sprite(fb,&state->frontend_img[0u][3u],
                                        pose.x,pose.y,pose.width,pose.height,110u,pose.scale,16u);
         }
-        if(tick>=33u && state->frontend_loaded[0u][2u] &&
-           !(stamped && tick>AVP_TITLE_PREDATOR_STAMP_TICK)){ /* hidden one VBL after the stamp */
+        if(logo_tick>=33u && state->frontend_loaded[0u][2u] &&
+           !(stamped && logo_tick>AVP_TITLE_PREDATOR_STAMP_TICK)){ /* hidden one VBL after the stamp */
             const AvpTitleOpPose pose=frontend_title_predator_pose(
-                frontend_title_predator_phase(tick));
+                frontend_title_predator_phase(logo_tick));
             frontend_blit_title_sprite(fb,&state->frontend_img[0u][2u],
                                        pose.x,pose.y,pose.width,pose.height,82u,pose.scale,16u);
         }
         if(state->frontend_title_splash){
             /* Copyright is a distinct final title phase, not part of
              * the SELECT/RESTORE/HIGH SCORES/CREDITS menu text. */
-            if(tick>=83u)title_legal_notice(state,fb);
+            if(logo_tick>=83u)title_legal_notice(state,fb);
         }else{
             /* Retail dim (RE24-S10, verified on the reference machine):
              * three cumulative in-place GPU passes 15/16, 13/16, 11/16.
@@ -1388,8 +1558,9 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
                 fb->pixels[i]=frontend_rgb16_to_host(avp_gpu_rgb16_title_menu_dim(packed,passes));
             }
         }
+#endif /* AVP_PC_REFERENCE_TITLE_TIMING */
+        frontend_title_to_pc_aperture(fb);
     }
-
     if(mode==AVP_MJP_CREDITS){
         /* The native credits appear over the finished, dim title composition;
          * they are not rendered by Do_Intro's story-text/typewriter plane. */
@@ -1413,6 +1584,7 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
             const u16 p=avp_gpu_rgb16_pack((u8)(c>>16),(u8)(c>>8),(u8)c);
             fb->pixels[i]=frontend_rgb16_to_host(avp_gpu_rgb16_title_menu_dim(p,3u));
         }
+        frontend_title_to_pc_aperture(fb);
         if(state->frontend_credits_scrolling && state->frontend_loaded[AVP_MJP_CREDITS][0] &&
            state->frontend_img[AVP_MJP_CREDITS][0].width==320 &&
            state->frontend_img[AVP_MJP_CREDITS][0].height==1373){
@@ -1528,7 +1700,12 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
          * the Show_Tex cursor at X=$18, Y=$A6 of the screen buffer, with
          * the $4BEA8=$E line step: the story text sits BELOW the 192x144
          * picture (screen row $A6+14=180; BigPEmu intro capture agrees). */
-        if(mode==AVP_MJP_INTRO||mode==AVP_MJP_ESCAPE)y=AVP_MJP_STORY_TEXT_Y+(int)l*14;
+        /* Original $01DAAE/$01DAB8 Do_Lose sets X=$18,Y=$A6 for the
+         * Marine timer-expiry report. The previous host drew that record
+         * at Y=14, placing its four lines over the picture instead of
+         * below it. Generic SIM_TERMINATED is a separate presentation. */
+        if(mode==AVP_MJP_INTRO||mode==AVP_MJP_ESCAPE||
+           mode==AVP_MJP_BASE_EXPLODES)y=AVP_MJP_STORY_TEXT_Y+(int)l*14;
         if(state->frontend_text_large[l]){
             unsigned code=state->frontend_text_species[l];
             unsigned band=(code==0u)?0u:((code==2u)?2u:4u);
@@ -1571,6 +1748,23 @@ void avp_gpu_frontend_present(AvpAvpGpuState *state,AvpJaguarFramebuffer *fb,uns
                     (unsigned char)state->frontend_text[l][i]);
             }
         }
+    }
+    /* A live Jaguar Show_Tex cursor is visible at the NEXT character cell,
+     * not solely at an authored line terminator. The renderer rebuilds each
+     * video field, so this overlay never leaves a stale block behind. */
+    if(state->frontend_text_cursor_active && state->mjp_font &&
+       state->mjp_font_size>=224u*39u*2u &&
+       (mode==AVP_MJP_INTRO || mode==AVP_MJP_ESCAPE ||
+        mode==AVP_MJP_SIM_TERMINATED || mode==AVP_MJP_BASE_EXPLODES)){
+        unsigned l=state->frontend_text_cursor_line;
+        int y=(mode==AVP_MJP_INTRO || mode==AVP_MJP_ESCAPE ||
+               mode==AVP_MJP_BASE_EXPLODES)?
+            AVP_MJP_STORY_TEXT_Y+(int)l*14:14+(int)l*14;
+        /* Retail FILES 235: ASCII '_' is a COMPLETELY BLANK glyph.  The
+         * moving green cursor is the 0x7F block cell (84 opaque pixels),
+         * not an underscore. Render the same RGB16 font asset as the ROM. */
+        frontend_font_glyph(fb,state->mjp_font,state->mjp_font_size,
+             224,39,7,13,(int)state->frontend_text_cursor_x,y,0x7fu);
     }
     /* Fade the entire finished title/menu frame using retail RGB16 fraction
      * arithmetic; this is PC-only rendering of the reference black handoff. */

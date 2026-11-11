@@ -1013,12 +1013,46 @@ int main(void)
     v.goal=AVP_MP_BOT_HOSTILE;v.tick=1u;
     avp_mp_bot_step(&s,&v,&c);
     assert(!(c.actions&(1u<<AVP_MP_FIRE)));
-    v.tick=40u;avp_mp_bot_step(&s,&v,&c);
+    v.tick=160u;avp_mp_bot_step(&s,&v,&c);
     assert(c.actions&(1u<<AVP_MP_FIRE));
     /* The same enemy inside striking distance overrides acid management. */
     v.tick=2u;v.target_x=(1u<<16)|0x8000u;
     avp_mp_bot_step(&s,&v,&c);
     assert(c.actions&(1u<<AVP_MP_FIRE));
+    /* R116: A Balanced Marine must actually retreat from a still-distant
+     * Alien in a narrow dead-end, so the Alien can leave the choke BEFORE
+     * the bot shoots it. R115 stopped completely beyond four cells, even
+     * with a safe rearward corridor and a visible pursuer. */
+    {
+        uint8_t long_hall[9u*3u*8u]={0};
+        for(unsigned x=0u;x<9u;x++)
+            long_hall[CELL(x,1u,9u)+5u]=1u;
+        map=(AvpMpBotMap){long_hall,9u,3u,wallflags,NULL,0u,risk,NULL};
+        memset(&v,0,sizeof v);memset(&s,0,sizeof s);
+        v.map=map;
+        v.x=(3u<<16)|0x8000u;v.y=(1u<<16)|0x8000u;
+        v.target_x=(8u<<16)|0x8000u;v.target_y=v.y;
+        v.heading=0u;v.player_species=AVP_MP_MARINE;
+        v.player_energy=v.max_energy=100;
+        v.has_target=v.hostile_target=v.target_visible=v.target_is_alien=1u;
+        v.goal=AVP_MP_BOT_HOSTILE;v.tick=1u;
+        assert(!avp_mp_bot_alien_death_passable(&map,v.target_x,v.target_y));
+        avp_mp_bot_step(&s,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_FIRE)));
+        assert(c.actions&(1u<<AVP_MP_BACKWARD));
+        assert(!(c.actions&(1u<<AVP_MP_FORWARD)));
+        /* If the bot has turned away, BACKWARD would walk toward the Alien.
+         * Reorient using ordinary turn commands before retreating again. */
+        v.tick=2u;v.heading=0x80000000u;
+        avp_mp_bot_step(&s,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_BACKWARD)));
+        assert(c.actions&((1u<<AVP_MP_TURN_LEFT)|(1u<<AVP_MP_TURN_RIGHT)));
+        v.heading=0u;
+        /* Once the original 150-tick lure interval ends, the bot resumes
+         * firing normally instead of retreating or waiting indefinitely. */
+        v.tick=160u;avp_mp_bot_step(&s,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_FIRE));
+    }
     /* Acid has a 30<<9 XY contact square rather than a full cell. Check
      * narrow-lane strafing while preserving a necessary hazardous route. */
     blank_map(5u,3u);
@@ -1608,8 +1642,8 @@ int main(void)
             assert(!(c.actions&fire_mask));
         }
     }
-    /* Guerilla must MOVE even with a clear target beyond the old 6-tile
-     * tactical-strafe radius; keep the flank stable across several ticks. */
+    /* Guerilla must advance AND fire at a visible target beyond the old
+     * six-tile artificial firing cap. Strafing alone would never close. */
     memset(&s,0,sizeof s);memset(&v,0,sizeof v);
     v.x=2u<<16;v.y=2u<<16;v.target_x=12u<<16;v.target_y=v.y;
     v.heading=0u;v.behavior=AVP_MP_BOT_GUERILLA;
@@ -1618,14 +1652,13 @@ int main(void)
     avp_mp_bot_step(&s,&v,&c);
     assert(c.actions&((1u<<AVP_MP_FORWARD)|(1u<<AVP_MP_BACKWARD)|
                       (1u<<AVP_MP_STRAFE_LEFT)|(1u<<AVP_MP_STRAFE_RIGHT)));
-    {unsigned flank=c.actions&((1u<<AVP_MP_STRAFE_LEFT)|
-                               (1u<<AVP_MP_STRAFE_RIGHT));
-     assert(flank!=0u);
-     for(unsigned i=31u;i<40u;i++){
-         v.tick=i;avp_mp_bot_step(&s,&v,&c);
-         assert((c.actions&((1u<<AVP_MP_STRAFE_LEFT)|
-                            (1u<<AVP_MP_STRAFE_RIGHT)))==flank);
-     }}
+    assert(c.actions&(1u<<AVP_MP_FORWARD));
+    assert(c.actions&(1u<<AVP_MP_FIRE));
+    for(unsigned i=31u;i<40u;i++){
+        v.tick=i;avp_mp_bot_step(&s,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_FORWARD));
+        assert(c.actions&(1u<<AVP_MP_FIRE));
+    }
     /* A blocked preferred flank switches to the other side; the side is
      * then held rather than oscillating each frame. */
     blank_map(5u,5u);
@@ -1672,9 +1705,8 @@ int main(void)
     avp_mp_bot_step(&s,&v,&c);
     assert(c.actions&(1u<<AVP_MP_FORWARD));
     assert(!(c.actions&(1u<<AVP_MP_BACKWARD)));
-    /* A melee Guerilla sees a TARGET'S BACK, not a remembered heading:
-     * commit forward immediately even outside the normal attack window.
-     * Turn the target around / invalidate sighted facing -> flank again. */
+    /* Melee Guerilla must approach outside strike reach regardless of
+     * target facing; seeing the target's back remains an approach cue. */
     memset(&s,0,sizeof s);memset(&v,0,sizeof v);
     v.x=10u<<16;v.y=10u<<16;v.target_x=12u<<16;v.target_y=v.y;
     v.heading=0u;v.behavior=AVP_MP_BOT_GUERILLA;v.player_species=1u;
@@ -1685,16 +1717,125 @@ int main(void)
     assert(c.actions&(1u<<AVP_MP_FORWARD));
     v.target_heading=0x80000000u; /* facing the bot (-X) */
     memset(&s,0,sizeof s);avp_mp_bot_step(&s,&v,&c);
-    assert(!(c.actions&(1u<<AVP_MP_FORWARD)));
-    assert(c.actions&((1u<<AVP_MP_STRAFE_LEFT)|(1u<<AVP_MP_STRAFE_RIGHT)));
-    v.target_heading_valid=0u; /* tracker/stale facing must not trigger rush */
+    assert(c.actions&(1u<<AVP_MP_FORWARD));
+    assert(!(c.actions&((1u<<AVP_MP_ALIEN_CLAW)|
+                       (1u<<AVP_MP_ALIEN_BITE)|(1u<<AVP_MP_ALIEN_TAIL))));
+    v.target_heading_valid=0u; /* stale facing must not influence aggression */
     memset(&s,0,sizeof s);avp_mp_bot_step(&s,&v,&c);
-    assert(!(c.actions&(1u<<AVP_MP_FORWARD)));
+    assert(c.actions&(1u<<AVP_MP_FORWARD));
     /* Melee attacks stay active while this aggressive motion is selected. */
     v.target_x=v.x+0x4000u;v.target_heading_valid=1u;v.target_heading=0u;
     memset(&s,0,sizeof s);avp_mp_bot_step(&s,&v,&c);
     assert(c.actions&((1u<<AVP_MP_ALIEN_BITE)|(1u<<AVP_MP_ALIEN_TAIL)|
                       (1u<<AVP_MP_ALIEN_CLAW)));
+    /* R85: use the ORIGINAL acid contact square and player-width margin.
+     * An open room has a 2x2 detour. A one-cell corridor with a centered
+     * corpse has no safe center-line; an off-edge corpse leaves one. */
+    {
+        AvpMpBotMap m;
+        blank_map(5,5);
+        m=(AvpMpBotMap){map_cells,5u,5u,wallflags,NULL,99u,NULL,NULL};
+        assert(avp_mp_bot_alien_death_passable(&m,(2u<<16)|0x8000u,
+                                                   (2u<<16)|0x8000u));
+        memset(map_cells,0,sizeof map_cells);
+        for(unsigned x=0;x<5u;x++)map_cells[CELL(x,2u,5u)+5u]=1u;
+        assert(!avp_mp_bot_alien_death_passable(&m,(3u<<16)|0x8000u,
+                                                    (2u<<16)|0x8000u));
+        assert(avp_mp_bot_alien_death_passable(&m,(3u<<16)|0x8000u,
+                                                   (2u<<16)|0x0400u));
+        /* A live Marine delays a distant shot at a blocking death point,
+         * but may still kill a close threat or an Alien in a vent. */
+        memset(&v,0,sizeof v);memset(&s,0,sizeof s);
+        v.map=m;v.player_species=0u;v.behavior=0u;
+        v.x=(0u<<16)|0x8000u;v.y=(2u<<16)|0x8000u;
+        v.target_x=(3u<<16)|0x8000u;v.target_y=v.y;
+        v.has_target=1;v.hostile_target=1;v.target_visible=1;
+        v.target_is_alien=1u;v.goal=AVP_MP_BOT_HOSTILE;
+        v.player_energy=100;v.max_energy=100;v.tick=1u;v.current_level=3u;
+        avp_mp_bot_step(&s,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_FIRE)));
+        v.current_level=7u;memset(&s,0,sizeof s);
+        avp_mp_bot_step(&s,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_FIRE));
+    }
+    /* R85: both approaches resolve the SAME original door byte, including
+     * reverse-facing bots. The first bot claims it; all others wait for
+     * the native door animation, and neither presses Use while moving. */
+    {
+        AvpMpBotMap m;
+        AvpMpBotDoorClaims claims={0};
+        AvpMpBotState one={0},two={0};
+        const unsigned off=CELL(2u,2u,5u)+6u;
+        blank_map(5,5);
+        memset(map_cells,0,sizeof map_cells);
+        for(unsigned x=1u;x<=3u;x++)map_cells[CELL(x,2u,5u)+5u]=1u;
+        wallflags[5u]=AVP_WB_DOOR;
+        map_cells[CELL(1u,2u,5u)+2u]=5u;
+        map_cells[CELL(2u,2u,5u)+0u]=5u;
+        m=(AvpMpBotMap){map_cells,5u,5u,wallflags,NULL,99u,NULL,NULL};
+        assert(avp_mp_bot_route(&m,1u,2u,3u,2u,&route));
+        assert(route.requires_door_use && route.door_offset==off &&
+               route.door_value==0u);
+        memset(&v,0,sizeof v);v.map=m;v.door_claims=&claims;
+        v.x=(1u<<16)|0x8000u;v.y=(2u<<16)|0x8000u;
+        v.target_x=(3u<<16)|0x8000u;v.target_y=v.y;
+        v.has_target=1;v.goal=AVP_MP_BOT_PATROL;v.tick=1u;
+        avp_mp_bot_step(&one,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_USE));
+        avp_mp_bot_step(&two,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_USE)));
+        /* Same door from opposite side also uses this cell's LEFT byte. */
+        assert(avp_mp_bot_route(&m,2u,2u,1u,2u,&route));
+        assert(route.requires_door_use && route.door_offset==off);
+        map_cells[off]=4u;v.tick=35u;
+        avp_mp_bot_step(&two,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_USE)));
+        map_cells[off]=48u;v.tick=36u;
+        avp_mp_bot_step(&two,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_USE)));
+        map_cells[off]=0u;v.tick=65u;
+        /* Native DOORS.S has already accepted another player/bot's Use,
+         * but the map byte is still zero before the first door tick.
+         * Do not reverse that opening door, even after a claim expires. */
+        v.active_door_count=1u;v.active_door_offsets[0]=off;
+        avp_mp_bot_step(&two,&v,&c);
+        assert(!(c.actions&(1u<<AVP_MP_USE)));
+        /* The OTHER active door must not suppress our own legitimate Use. */
+        v.active_door_offsets[0]=off+8u;
+        v.tick=66u;
+        avp_mp_bot_step(&two,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_USE));
+        /* Once the original door slot finishes, a closed door is usable. */
+        v.active_door_count=0u;
+        v.tick=99u;
+        avp_mp_bot_step(&one,&v,&c);
+        assert(c.actions&(1u<<AVP_MP_USE));
+    }
+    /* R85: separate seeds now materially influence the chosen patrol
+     * region, while a repeated seed remains deterministic. */
+    {
+        uint16_t visits[AVP_MP_BOT_MAP_CELLS]={0};
+        unsigned seen[4],xs[4],ys[4],unique=0u;
+        AvpMpBotMap m;
+        blank_map(5,5);
+        m=(AvpMpBotMap){map_cells,5u,5u,wallflags,NULL,99u,NULL,NULL};
+        for(unsigned i=0;i<4u;i++){
+            assert(avp_mp_bot_patrol_pick(&m,2u,2u,visits,
+                  (i+1u)*0x9e3779b9u,&xs[i],&ys[i]));
+            seen[i]=ys[i]*64u+xs[i];
+            for(unsigned j=0;j<i;j++)if(seen[j]==seen[i])break;
+        }
+        for(unsigned i=0;i<4u;i++){
+            unsigned duplicate=0u;
+            for(unsigned j=0;j<i;j++)duplicate|=seen[j]==seen[i];
+            if(!duplicate)unique++;
+        }
+        assert(unique>=2u);
+        {unsigned xx,yy;
+         assert(avp_mp_bot_patrol_pick(&m,2u,2u,visits,
+                 0x9e3779b9u,&xx,&yy));
+         assert(xx==xs[0]&&yy==ys[0]);}
+    }
     puts("local multiplayer source-aware bot routing/tactics (R51): PASS");
     return 0;
 }

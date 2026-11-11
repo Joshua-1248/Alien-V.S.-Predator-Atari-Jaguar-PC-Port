@@ -24,6 +24,15 @@ static ssize_t avp_test_readlink(const char *path,char *target,size_t cap)
 s16 cur_level=1;
 int avp_mm_select(AvpMapMaker *m,unsigned level){(void)m;(void)level;return 1;}
 int avp_mm_blank(AvpMapMaker *m){(void)m;return 1;}
+/* Host-map browser validator is dead-stripped by this menu-only test;
+ * supply stubs so new UI source references remain link-complete. */
+void avp_mm_init(AvpMapMaker *m){if(m)memset(m,0,sizeof(*m));}
+void avp_mm_destroy(AvpMapMaker *m){(void)m;}
+int avp_mm_bind(AvpMapMaker *m,unsigned level,const u8 *data,size_t n)
+{(void)m;(void)level;(void)data;(void)n;return 0;}
+int avp_mm_load(AvpMapMaker *m,const char *path)
+{(void)m;(void)path;return 0;}
+
 int avp_jaguar_framebuffer_init(AvpJaguarFramebuffer *fb,unsigned w,unsigned h)
 {(void)fb;(void)w;(void)h;return 1;}
 void avp_jaguar_framebuffer_destroy(AvpJaguarFramebuffer *fb){(void)fb;}
@@ -47,6 +56,19 @@ int avp_mp_input_parse_setting(AvpMpInputConfig *s,const char *a,const char *b)
 {(void)s;(void)a;(void)b;return 0;}
 void avp_mp_input_write_settings(const AvpMpInputConfig *s,FILE *f)
 {(void)s;(void)f;}
+/* Menu-only link: device enumeration/capture is not exercised here. */
+unsigned avp_mp_mice_discover(AvpMpPhysicalMouse out[AVP_MP_DISCOVER_MICE])
+{(void)out;return 0;}
+int avp_mp_input_assign_mouse(AvpMpInputConfig *cfg,unsigned p,const char *path)
+{(void)cfg;(void)p;(void)path;return 0;}
+int avp_mp_input_cycle_gamepad(AvpMpInputConfig *cfg,unsigned p,
+    const char *const *paths,unsigned count,const char *p1,int direction)
+{(void)cfg;(void)p;(void)paths;(void)count;(void)p1;(void)direction;return 0;}
+int avp_mp_pad_reader_open(AvpMpPadReader *r,const char *path)
+{(void)r;(void)path;return 0;}
+int avp_mp_pad_reader_poll(AvpMpPadReader *r,AvpMpControllerSample *out)
+{(void)r;(void)out;return 0;}
+void avp_mp_pad_reader_close(AvpMpPadReader *r){(void)r;}
 unsigned avp_pc_prototype_textures_apply_search(AvpPcPrototypeTextures *s,
     AvpAvpGpuState *g,const char *a,const char *b,const char *c,int d,
     char *e,size_t f)
@@ -57,7 +79,7 @@ int main(void)
     assert(v);
     v->menu_open=1;
     v->menu_page=MENU_ROOT;
-    assert(menu_count(v)==8);
+    assert(menu_count(v)==9);
     v->menu_cursor=5;  /* Debug appears on F12 root. */
     menu_choose(v);
     assert(v->menu_page==MENU_DEBUG);

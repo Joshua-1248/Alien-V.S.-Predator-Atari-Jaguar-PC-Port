@@ -8,6 +8,9 @@ void avp_pc_runtime_set_noclip(int enabled);
 void avp_pc_runtime_set_mp_bot_floor_guard(int enabled);
 void avp_pc_runtime_set_mp_player_floor_guard(int enabled);
 void avp_pc_runtime_set_mp_fast_sweep_guard(int enabled);
+struct AvpMpPeerCollisionView;
+void avp_pc_runtime_set_mp_peer_collision_view(
+    const struct AvpMpPeerCollisionView *view);
 #endif
 int avp_pc_runtime_get_noclip(void);
 void avp_pc_runtime_set_gameplay_vblank(int active);

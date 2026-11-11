@@ -1,5 +1,8 @@
 #include "avp_runtime.h"
 #include "pc/pc_platform.h"
+#include "pc/pc_title_reference.h"
+#include "pc/pc_attract_fields.h"
+#include "pc/pc_frontend_field_clock.h"
 #include "pc/pc_video.h"
 #ifdef AVP_LOCAL_MULTIPLAYER
 #include "local_mp_input.h"
@@ -17,6 +20,7 @@
 #include "computer.h"
 #include "avp_sfx_ids.h"
 #include "music.h"
+#include "jaguar.h"
 #include "levels.h"
 #include "hud_message.h"
 #include "collectables.h"
@@ -45,6 +49,8 @@ static void pcsfxp(void*u,unsigned id,s32 l,s32 r)
     else avp_pc_audio_play(id,l,r);
 }
 static void pcsfxh(void*u,unsigned id,u32 h,unsigned voice){(void)u;avp_pc_audio_play_handle(id,h,voice,0,0);}
+static void pcsfxhd1(void*u,unsigned id,u32 h,unsigned voice,s32 d1)
+{(void)u;avp_pc_audio_play_handle_d1(id,h,voice,0,0,d1);}
 static void pcstopsfx(void*u,u32 h){(void)u;avp_pc_audio_stop_handle(h);}
 static int pc_sfx_handle_active(void*u,u32 h){(void)u;return avp_pc_audio_handle_active(h);}
 static int pc_sfx_voice_active(void*u,unsigned voice){(void)u;return avp_pc_audio_voice_active(voice);}
@@ -107,6 +113,9 @@ static int pc_noclip;
 /* Only during the currently borrowed local-multiplayer actor movement tick.
  * Never active in original single-player or while a menu is open. */
 static int pc_mp_bot_floor_guard,pc_mp_player_floor_guard,pc_mp_fast_sweep_guard;
+static const AvpMpPeerCollisionView *pc_mp_peers;
+void avp_pc_runtime_set_mp_peer_collision_view(
+    const struct AvpMpPeerCollisionView *view){pc_mp_peers=view;}
 void avp_pc_runtime_set_mp_bot_floor_guard(int enabled)
 {pc_mp_bot_floor_guard=!!enabled;}
 void avp_pc_runtime_set_mp_player_floor_guard(int enabled)
@@ -117,6 +126,17 @@ void avp_pc_runtime_set_mp_fast_sweep_guard(int enabled)
 static const AvpRomImage *pc_rom;
 static unsigned pc_front_mode;
 static int pc_gameplay_vblank;
+static unsigned pc_computer_scans_this_field;
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+static int pc_title_pacing_active;
+static u64 pc_title_deadline_ns;
+/* Same stable 60 Hz field scheduler as the verified title, but independently
+ * anchored for the ROM-controlled INTRO/ESCAPE MJP video fields only. */
+static u64 pc_mjp_deadline_ns;
+/* COMPUTER.S/FONT.S VSync() drives a modal terminal at the Jaguar's VIDEO
+ * field cadence.  Keep this entirely separate from gameplay and the title. */
+static u64 pc_computer_deadline_ns;
+#endif
 #ifdef AVP_LOCAL_MULTIPLAYER
 static int pc_mp_terminal_owner=-1;
 static unsigned pc_mp_terminal_players;
@@ -146,7 +166,14 @@ static void pc_collect_notice(enum AvpCollectNotice notice,unsigned detail)
 }
 
 void avp_pc_runtime_set_rom(const AvpRomImage *rom){pc_rom=rom;}
-void avp_pc_runtime_set_gameplay_vblank(int active){pc_gameplay_vblank=active?1:0;}
+void avp_pc_runtime_set_gameplay_vblank(int active)
+{
+    pc_gameplay_vblank=active?1:0;
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+    pc_computer_deadline_ns=0u;
+#endif
+    pc_computer_scans_this_field=0u;
+}
 
 static void pc_hud_line(unsigned line,const char *text,unsigned x_pixels)
 {
@@ -223,17 +250,24 @@ static void pc_frontend_poll(AvpPcVideo *v)
  * This is host input plumbing only: COMPUTER.S and the pad state machine are
  * unchanged.  Temporarily route keyboard/gamepad as a native Jaguar pad so
  * A/B/C, arrows and Escape-as-C retain the original terminal semantics. */
+/* Raw COMPUTER.S xc_readpad() is not a VBlank wait. An unconditional
+ * 1 ms delay here used to charge every printed glyph (and every menu scan),
+ * changing the original terminal's pacing. Sleep only if a held-button
+ * release loop is scanning repeatedly without another video field. */
 static void pc_computer_poll_input(void)
 {
     AvpPcVideo *v=pc_video_for_hud;
     if(!v||!avp_computer_active())return;
     pc_terminal_poll(v);
-    avp_pc_sleep_ns(1000000ull); /* Avoid unbounded CPU spin on held buttons. */
+    if(pc_computer_scans_this_field<32u)++pc_computer_scans_this_field;
+    else avp_pc_sleep_ns(1000000ull); /* Bound held-key polling CPU use. */
 }
 
 static void wait_vblank(void *u)
 {
     AvpPcVideo *v=(AvpPcVideo*)u;
+    const int computer_field=pc_gameplay_vblank&&avp_computer_active();
+    if(computer_field)pc_computer_scans_this_field=0u;
     if(v){
         if(pc_gameplay_vblank){
             if(avp_computer_active()){
@@ -255,7 +289,37 @@ static void wait_vblank(void *u)
             else avp_pc_video_frontend_tick(v,pc_front_mode,Choice);
         }
     }
-    avp_pc_sleep_ns(16666667ull);
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+    if(computer_field){
+        /* The original FONT.S typewriter waits three Jaguar VBlanks per
+         * glyph while the CPU blitter draws between fields.  R98 slept a
+         * *new* 16.667 ms after each expensive host X11 composition,
+         * cumulatively stretching terminal text.  Like the separately
+         * restored title, schedule absolute video-field deadlines here. */
+        const u64 now=avp_pc_now_ns();
+        pc_computer_deadline_ns=avp_pc_computer_next_deadline(
+            pc_computer_deadline_ns,now,one_second_ticks);
+        if(now<pc_computer_deadline_ns)
+            avp_pc_sleep_ns(pc_computer_deadline_ns-now);
+    }else if(pc_title_pacing_active && !pc_gameplay_vblank){
+        const u64 now=avp_pc_now_ns();
+        pc_title_deadline_ns=avp_pc_title_next_deadline(pc_title_deadline_ns,now);
+        if(now<pc_title_deadline_ns)
+            avp_pc_sleep_ns(pc_title_deadline_ns-now);
+    }else if(!pc_gameplay_vblank && avp_pc_mjp_field_paced(pc_front_mode)){
+        /* MJP idle, typewriter and endings count Jaguar VIDEO fields.
+         * Previously each menu tick also paid for X11 drawing time, making
+         * the 800-field attract timeout too late in real seconds. Keep all
+         * original game tick counts and the protected native logo unchanged.
+         * Run 50-Hz cartridges at 50 rather than forcing NTSC timing. */
+        const u64 now=avp_pc_now_ns();
+        pc_mjp_deadline_ns=avp_pc_mjp_next_deadline(
+            pc_mjp_deadline_ns,now,one_second_ticks);
+        if(now<pc_mjp_deadline_ns)
+            avp_pc_sleep_ns(pc_mjp_deadline_ns-now);
+    }else
+#endif
+        avp_pc_sleep_ns(16666667ull);
 }
 /* The original SafePos remains the authority on wall/door clearance.
  * Multiplayer player/bot floor guards add only authored floor bounds, not
@@ -274,6 +338,10 @@ static int pc_mp_point_safe(s32 x,s32 y,s16 height,u16 width)
            avp_collision_maze_width(),avp_collision_maze_height(),
            x,y,(unsigned)width<<9))return AVP_COLL_WALL;
 #endif
+#ifdef AVP_LOCAL_MULTIPLAYER
+    if(original==AVP_COLL_SAFE && pc_mp_peers &&
+       !avp_mp_move_guard_peers(pc_mp_peers,x,y))return AVP_COLL_WALL;
+#endif
     return original;
 }
 #ifdef AVP_LOCAL_MULTIPLAYER
@@ -288,7 +356,7 @@ static int pc_safe_pos(void *u,s32 x,s32 y,s16 height,u16 width)
 {
     (void)u;
 #ifdef AVP_LOCAL_MULTIPLAYER
-    if(pc_mp_fast_sweep_guard){
+    if(pc_mp_fast_sweep_guard || pc_mp_peers){
         const PcMpMovementProbe probe={height,width};
         /* Original MovePlayer() checks its endpoint and possible slide
          * alternatives. Check the intermediate points of each SAME proposed
@@ -333,6 +401,23 @@ static u32 pc_select_brief_address(s32 choice)
 static void pc_front_event(void *u,unsigned e,s32 a,s32 b)
 {
     AvpPcVideo *v=(AvpPcVideo*)u;
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+    /* Every terminal entry/exit starts a new independent video-field clock;
+     * do not inherit a prior terminal's deadline or the gameplay tick. */
+    if(e==0x4350414cu){ /* CPAL: modal computer display */
+        pc_computer_deadline_ns=0u;
+        pc_computer_scans_this_field=0u;
+    }
+    /* Only the title GPU/OP presentation gets deadline-based VBlank pacing.
+     * Gameplay, Map Maker, MJP menu, co-op and VR clocks are not modified. */
+    if(e==0x5449544cu){ /* TITL */
+        pc_title_pacing_active=1;
+        pc_title_deadline_ns=0u;
+    }else if(e==0x544d454eu){ /* TMEN */
+        pc_title_pacing_active=0;
+        pc_title_deadline_ns=0u;
+    }
+#endif
     /* In the retail cartridge, the pre-game text renderer/loading work
      * completes before the SELECT sound and PRESS FIRE prompt. R172's PC
      * SELP resource callback was instantaneous, so End_Sele could accept a
@@ -403,7 +488,7 @@ static void pc_front_event(void *u,unsigned e,s32 a,s32 b)
                  * the original three-VBlank-per-character cadence, blip SFX,
                  * glyph positioning and A/B/C interruption.  The GPU event
                  * has already cleared only the affected CTEXT layer. */
-                pr_string(record);
+                pr_string_retail(record,menu);
             }
         }
         /* COMPUTER.S prints the original fixed B.SELECT/C.EXIT prompt after
@@ -414,19 +499,27 @@ static void pc_front_event(void *u,unsigned e,s32 a,s32 b)
                other terminals' B.SELECT/C.EXIT prompt. */
             u32 keys=e==0x504f444du?0x29396u:0x25972u;
             const char *record=pc_front_text(u,keys);
-            if(record)pr_string(record);
+            if(record)pr_string_retail(record,keys);
         }
         if(overlay){
             const char *record=pc_front_text(u,overlay);
-            if(record)pr_string(record);
+            if(record)pr_string_retail(record,overlay);
         }
     }
     /* The original MJP character-confirmation program emits SELS with the
      retail TYP1B descriptor ($221B8).  It is the same sound dispatch
      as MJPA/typewriter events; R140 only forwarded the latter and
      silently discarded the original confirmation cue. */
-    if((e==0x4d4a5041u || e==0x53454c53u) && a>=0x20300)
-        avp_pc_audio_play_priority((unsigned)a,b); /* event arg = TFX D1 priority word */
+    if((e==0x4d4a5041u || e==0x53454c53u) && a>=0x20300){
+        /* The cartridge invokes TFX at $009C6C. Do NOT start a new
+         * free-running host PCM voice here: that bypasses retail 8-voice
+         * priority arbitration, its completion/steal rules, and the
+         * handle lifecycle. Preserve D1: Marine Five..One use $2600 to
+         * override both the signed allocator comparator and the DSP low
+         * word volume. ZERO and ordinary TYP1B use D1=-1 and therefore
+         * retain their own module defaults ($6000 and $1000 respectively). */
+        (void)avp_music_tfx_d1((unsigned)a,b);
+    }
     if(e==0x5545564fu)avp_pc_audio_set_master_volume(a<0?0u:(u32)a);
     if(v&&pc_is_computer_event(e)){
         avp_pc_video_present_gameplay(v);
@@ -440,7 +533,8 @@ static void pc_front_event(void *u,unsigned e,s32 a,s32 b)
     if(e==0x534f424au && (((u32)a>>16)&0xffffu)!=4u)return;
     /* TICK is presented from wait_vblank, before this event arrives.  Present
        transition/state changes once more so the new resource is immediately visible. */
-    if(v&&e!=0x5449434bu)avp_pc_video_frontend_tick(v,pc_front_mode,Choice);
+    if(v&&avp_pc_frontend_present_on_event(pc_front_mode,e))
+        avp_pc_video_frontend_tick(v,pc_front_mode,Choice);
 }
 /* Captured BigPEmu visual cadence: title fade (~40 VBLs), then
  * approximately 188 VBLs until the first portrait. MJP mode 1 now runs
@@ -518,12 +612,22 @@ static void pc_front_fame_to_title(AvpPcVideo *v)
 static void pc_front_load(void *u,unsigned mode,unsigned file_index,unsigned role)
 {
     AvpPcVideo *v=(AvpPcVideo*)u;
+    if(v&&mode==AVP_MJP_TITLE&&pc_front_mode==AVP_MJP_INTRO&&pc_rom){
+        /* Intro returned to MAIN's restart_title. Recreate the exact
+         * ROM-executed logo presentation; the old JagMachine was freed on
+         * entering the menu, and without this the replay is host fallback.
+         * Pre-roll is headless (no SECOND 313-VBL cartridge power-on pause). */
+        avp_pc_video_title_native_replay_begin(v,pc_rom);
+    }
     if(v&&mode==AVP_MJP_SELECT&&pc_front_mode==AVP_MJP_TITLE)
         pc_front_title_to_select(v);
     if(v&&mode==AVP_MJP_FAME&&pc_front_mode==AVP_MJP_TITLE)
         pc_front_title_to_fame(v);
     if(v&&mode==AVP_MJP_TITLE&&pc_front_mode==AVP_MJP_FAME)
         pc_front_fame_to_title(v);
+#ifdef AVP_PC_REFERENCE_TITLE_TIMING
+    if(pc_front_mode!=mode)pc_mjp_deadline_ns=0u;
+#endif
     pc_front_mode=mode;
     if(v&&pc_rom){
         (void)avp_pc_video_frontend_load(v,pc_rom,mode,file_index,role);
@@ -570,7 +674,7 @@ void avp_pc_bind_runtime(void *user)
     AvpRuntimeOps o;pc_video_for_hud=(AvpPcVideo*)user;avp_hudmsg_set_draw_callback(pc_hud_line);avp_hudmsg_set_clear_callback(pc_hud_clear);avp_collect_set_callbacks(pc_collect_notice,NULL);avp_weapons_set_callbacks(pc_pred_weapon_notice,pc_pred_weapon_sfx);memset(&o,0,sizeof(o));o.user=user;
     o.wait_vblank=wait_vblank;o.wait_blitter=wait_blitter;o.screen_off=noop;o.set_message=pc_set_message;o.set_maze_list=noop;o.restore_maze_list=noop;o.swap_screens=noop;o.pre_frame=noop;o.post_frame=noop;o.pause=noop;
     o.gpu_draw_screen=noop;o.gpu_reset_maze=noop;o.gpu_init_overlays=noop;o.gpu_reset_overlays=noop;o.gpu_load_base=noop;o.gpu_load_overlay=noopu;o.gpu_fix_overlay=noopu;o.init_screen_overlays=noop;o.init_sprites=noop;o.reset_sprites=noop;o.init_computer=noop;o.reset_map=pc_reset_map;
-    o.ambient=pcambient;o.kill_ambient=pckillambient;o.kill_sounds=pckill;o.pause_sfx_save=pcpausefxsave;o.pause_sfx_restore=pcpausefxrestore;o.play_sfx=pcsfx;o.play_sfx_params=pcsfxp;o.play_sfx_handle=pcsfxh;o.sfx_handle_active=pc_sfx_handle_active;o.sfx_voice_active=pc_sfx_voice_active;o.stop_sfx=pcstopsfx;o.unloop_sfx=pcunloopsfx;o.mod_sfx=pcmodsfx;o.position_sfx=pcpossfx;o.start_music=pcstartmusic;o.stop_music=pcstopmusic;o.set_master_volume=pcsetmaster;
+    o.ambient=pcambient;o.kill_ambient=pckillambient;o.kill_sounds=pckill;o.pause_sfx_save=pcpausefxsave;o.pause_sfx_restore=pcpausefxrestore;o.play_sfx=pcsfx;o.play_sfx_params=pcsfxp;o.play_sfx_handle=pcsfxh;o.play_sfx_handle_d1=pcsfxhd1;o.sfx_handle_active=pc_sfx_handle_active;o.sfx_voice_active=pc_sfx_voice_active;o.stop_sfx=pcstopsfx;o.unloop_sfx=pcunloopsfx;o.mod_sfx=pcmodsfx;o.position_sfx=pcpossfx;o.start_music=pcstartmusic;o.stop_music=pcstopmusic;o.set_master_volume=pcsetmaster;
     o.frontend_event=pc_front_event;o.frontend_transition_done=pc_transition_done;o.frontend_text=pc_front_text;o.frontend_load_resource=pc_front_load;o.draw_text=pc_draw_text;o.draw_font_glyph=pc_draw_font_glyph;
 #ifdef AVP_LOCAL_MULTIPLAYER
     o.frontend_mp_launch_pending=pc_frontend_mp_launch_pending;

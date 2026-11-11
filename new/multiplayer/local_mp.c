@@ -9,6 +9,7 @@ void avp_local_mp_defaults(AvpLocalMpSetup *s)
     s->bot_count=0u;
     s->random_species_on_respawn=1u;
     s->show_other_players_on_automap=1u; /* Preserve R22 map markers by default. */
+    s->player_collisions=1u;
     s->game_mode=AVP_MP_COOP;
     s->dm_score_limit=20u;
     s->dm_time_limit=10u;
@@ -18,6 +19,37 @@ void avp_local_mp_defaults(AvpLocalMpSetup *s)
     s->species[1] = AVP_MP_PREDATOR;
     s->species[2] = AVP_MP_ALIEN;
     s->species[3] = AVP_MP_MARINE;
+}
+
+/* R114: F2 settings must survive construction of the native co-op/DM
+ * session. The menu and explicit launch request use the same mapping; in
+ * particular player collisions, map teammates and 3-player layout must not
+ * silently revert to avp_local_mp_defaults(). */
+void avp_local_mp_copy_session_options(AvpLocalMpSetup *dst,
+                                       const AvpLocalMpSetup *src)
+{
+    if(!dst||!src)return;
+    dst->layout=src->layout;
+    dst->three_layout=src->three_layout;
+    dst->respawn_campaign_start=src->respawn_campaign_start;
+    dst->game_mode=src->game_mode;
+    dst->dm_score_limit=src->dm_score_limit;
+    dst->dm_time_limit=src->dm_time_limit;
+    dst->dm_fast_movement=src->dm_fast_movement;
+    dst->dm_fast_equip=src->dm_fast_equip;
+    dst->dm_enemies=src->dm_enemies;
+    dst->dm_level=src->dm_level;
+    dst->level_explicit=src->level_explicit;
+    memcpy(dst->custom_map_stem,src->custom_map_stem,sizeof dst->custom_map_stem);
+    dst->dm_level_travel=src->dm_level_travel;
+    dst->dm_cloak_damage=src->dm_cloak_damage;
+    dst->bot_count=src->bot_count;
+    dst->show_whole_map=src->show_whole_map;
+    dst->show_other_players_on_automap=src->show_other_players_on_automap;
+    dst->player_collisions=src->player_collisions;
+    dst->random_species_on_respawn=src->random_species_on_respawn;
+    memcpy(dst->bot_species,src->bot_species,sizeof dst->bot_species);
+    memcpy(dst->bot_behavior,src->bot_behavior,sizeof dst->bot_behavior);
 }
 
 void avp_local_mp_validate(AvpLocalMpSetup *s)
@@ -34,10 +66,13 @@ void avp_local_mp_validate(AvpLocalMpSetup *s)
     s->dm_enemies=!!s->dm_enemies;
     s->dm_level_travel=!!s->dm_level_travel;
     s->dm_cloak_damage=!!s->dm_cloak_damage;
-    if(s->dm_level<1u||s->dm_level>15u)s->dm_level=3u;
+    if(s->dm_level<1u||s->dm_level>AVP_MP_CUSTOM_LEVEL)s->dm_level=3u;
+    s->level_explicit=!!s->level_explicit;
+    s->custom_session_id=s->custom_session_id==AVP_MP_CUSTOM_LEVEL?AVP_MP_CUSTOM_LEVEL:0u;
     s->respawn_campaign_start = !!s->respawn_campaign_start;
     s->show_whole_map=!!s->show_whole_map;
     s->show_other_players_on_automap=!!s->show_other_players_on_automap;
+    s->player_collisions=!!s->player_collisions;
     s->random_species_on_respawn=!!s->random_species_on_respawn;
     if(s->bot_count>AVP_LOCAL_MP_MAX_BOTS)s->bot_count=AVP_LOCAL_MP_MAX_BOTS;
     if (s->campaign > AVP_MP_PREDATOR) s->campaign = AVP_MP_MARINE;
@@ -62,6 +97,8 @@ int avp_local_mp_row_visible(const AvpLocalMpSetup *s,unsigned row)
     if(!s || row>=AVP_LOCAL_MP_ROWS)return 0;
     if(row>=2u && row<=5u && row-2u>=s->players)return 0;
     if(row==7u && s->game_mode==AVP_MP_DEATHMATCH)return 0;
+    if((row==AVP_LOCAL_MP_CUSTOM_NAME_ROW||row==AVP_LOCAL_MP_CUSTOM_LOAD_ROW) &&
+       s->dm_level!=AVP_MP_CUSTOM_LEVEL)return 0;
     if(row>=AVP_LOCAL_MP_BOT_SPECIES_ROW && row<AVP_LOCAL_MP_BOT_SPECIES_ROW+4u &&
        row-AVP_LOCAL_MP_BOT_SPECIES_ROW>=s->bot_count)return 0;
     if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_ROW && row<AVP_LOCAL_MP_BOT_BEHAVIOR_ROW+4u &&
@@ -75,6 +112,7 @@ int avp_local_mp_row_visible(const AvpLocalMpSetup *s,unsigned row)
     if((row==AVP_LOCAL_MP_TRAVEL_ROW || row==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW) &&
        s->game_mode!=AVP_MP_DEATHMATCH)return 0;
     if(row>=AVP_LOCAL_MP_SCORE_ROW && row<20u &&
+       row!=AVP_LOCAL_MP_LEVEL_ROW &&
        s->game_mode!=AVP_MP_DEATHMATCH)return 0;
     return 1;
 }
@@ -86,7 +124,8 @@ unsigned avp_local_mp_menu_rows(const AvpLocalMpSetup *s,unsigned page,
     static const unsigned root[]={
         0u,AVP_LOCAL_MP_BOT_COUNT_ROW,1u,2u,3u,4u,5u,6u,7u,
         AVP_LOCAL_MP_MODE_ROW,AVP_LOCAL_MP_SCORE_ROW,AVP_LOCAL_MP_TIME_ROW,
-        AVP_LOCAL_MP_LEVEL_ROW,AVP_LOCAL_MP_MENU_BOTS_ROW,
+        AVP_LOCAL_MP_LEVEL_ROW,AVP_LOCAL_MP_CUSTOM_NAME_ROW,
+        AVP_LOCAL_MP_CUSTOM_LOAD_ROW,AVP_LOCAL_MP_MENU_BOTS_ROW,
         AVP_LOCAL_MP_MENU_MODIFIERS_ROW,AVP_LOCAL_MP_MENU_OPTIONS_ROW,
         AVP_LOCAL_MP_START_ROW};
     static const unsigned bots[]={9u,10u,11u,12u,
@@ -94,7 +133,8 @@ unsigned avp_local_mp_menu_rows(const AvpLocalMpSetup *s,unsigned page,
         25u,26u,27u,28u,39u,40u,41u,42u,43u,44u,45u,46u};
     static const unsigned modifiers[]={AVP_LOCAL_MP_RANDOM_RESPAWN_ROW,
         AVP_LOCAL_MP_FAST_ROW,AVP_LOCAL_MP_EQUIP_ROW,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW};
-    static const unsigned options[]={AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW,
+    static const unsigned options[]={AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW,
+        AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW,
         AVP_LOCAL_MP_WHOLE_MAP_ROW,AVP_LOCAL_MP_TRAVEL_ROW,
         AVP_LOCAL_MP_ENEMIES_ROW};
     const unsigned *items=NULL;unsigned size=0,count=0,i;
@@ -167,6 +207,8 @@ int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction)
         s->show_whole_map=!s->show_whole_map;return 1;
     case AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW:
         s->show_other_players_on_automap=!s->show_other_players_on_automap;return 1;
+    case AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW:
+        s->player_collisions=!s->player_collisions;return 1;
     case AVP_LOCAL_MP_TRAVEL_ROW:
         s->dm_level_travel=!s->dm_level_travel;return 1;
     case AVP_LOCAL_MP_CLOAK_DAMAGE_ROW:
@@ -184,8 +226,11 @@ int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction)
         s->dm_fast_equip=!s->dm_fast_equip;return 1;
     case AVP_LOCAL_MP_ENEMIES_ROW:
         s->dm_enemies=!s->dm_enemies;return 1;
+    case AVP_LOCAL_MP_CUSTOM_NAME_ROW:
+    case AVP_LOCAL_MP_CUSTOM_LOAD_ROW:return 0; /* Host owns the file picker. */
     case AVP_LOCAL_MP_LEVEL_ROW:
-        s->dm_level=(s->dm_level+(direction>0?0u:13u))%15u+1u;
+        s->level_explicit=1u;
+        s->dm_level=(s->dm_level+(direction>0?0u:AVP_MP_CUSTOM_LEVEL-2u))%AVP_MP_CUSTOM_LEVEL+1u;
         /* selected 1..15, avoid accidentally skipping the first level */
         return 1;
     case 9: case 10: case 11: case 12:

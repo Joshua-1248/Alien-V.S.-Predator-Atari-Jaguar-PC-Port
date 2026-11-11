@@ -92,7 +92,7 @@ static void print_page(unsigned n)
     if(!base||n>=base->pages||!base->page_address||!o->frontend_text)return;
     encoded=o->frontend_text(o->user,base->page_address[n]);
     if(encoded){
-        pr_string(encoded);
+        pr_string_retail(encoded,base->page_address[n]);
         /* Retail COMPUTER.S's encoded A/NEXT B/PREVIOUS C/EXIT label.
          * Emit as an overlay rather than injecting PC-authored wording. */
         event(0x50474654u,0,0);
@@ -273,6 +273,11 @@ static void medical(void)
 }
 static void podcomp(void)
 {
+    /* Unlike the generic/armoury/medical menus, the capsule previously
+     * inherited both Object Processor artwork slots from the last computer
+     * used.  Clear them before either the inactive or armed capsule page.
+     * Computer() has already cleared the CTEXT plane on entry. */
+    set_obj1(-1);set_obj2(-1);
     if(!destruct_flag){event(0x504f444eu,0,0);for(;;){VSync();c_readpad();if(pressed(c_joy_edge,FIRE_C))return;}}
     cursorpos=0;menuopts=1;event(0x504f444du,0,0);
     for(;;){int r=menu_step(1);if(r<0)return;if(!r)continue;avp_computer_launch_pod();event(0x4c41554eu,1,0);

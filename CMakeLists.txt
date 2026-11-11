@@ -144,7 +144,8 @@ endif()
 
 # RE24-S10 verification instrument: the original cartridge executed on a
 # 68000 core (Musashi, MIT licence, third_party/musashi) with the TRM models.
-# It is a separate tool (jagref) and is never linked into avp_pc.
+# R82: the same model can now optionally supply the original title scanout
+# in avp_pc (first-boot presentation only; never gameplay simulation).
 option(AVP_BUILD_JAG_REFERENCE "Build the Jaguar reference-machine tool (jagref)" ON)
 if(AVP_BUILD_JAG_REFERENCE)
   add_library(avp_musashi STATIC
@@ -167,6 +168,33 @@ if(AVP_BUILD_JAG_REFERENCE)
   endif()
   add_executable(jagref tools/jagref/jagref_run.c)
   target_link_libraries(jagref PRIVATE avp_jag_refmachine)
+  # RE35 R88 read-only original-ROM frame/progress trace for attract parity.
+  add_executable(attract_field_trace_r88 tools/jagref/attract_field_trace_r88.c)
+  target_link_libraries(attract_field_trace_r88 PRIVATE avp_jag_refmachine)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(attract_field_trace_r88 PRIVATE -Wall -Wextra -Werror)
+  endif()
+  # RE36 R102: transaction-level original Jaguar GPU/68000 mailbox observer.
+  # Model scheduler coordinates are deliberately NOT hardware timestamps.
+  add_executable(attract_mailbox_events_r102 tools/jagref/attract_mailbox_events_r102.c)
+  target_link_libraries(attract_mailbox_events_r102 PRIVATE avp_jag_refmachine)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(attract_mailbox_events_r102 PRIVATE -Wall -Wextra -Werror)
+  endif()
+  # RE35 R90: observability-only CROSS/OP list and frame fingerprints.
+  add_executable(attract_op_field_trace_r90 tools/jagref/attract_op_field_trace_r90.c)
+  target_link_libraries(attract_op_field_trace_r90 PRIVATE avp_jag_refmachine)
+  # R95: verify Do_Lose/Do_Escap after the original cartridge bootstrap
+  # has inflated its RAM-resident 68000 code (never scan compressed ROM bytes).
+  add_executable(marine_endings_rom_audit_r95
+    tools/jagref/marine_endings_rom_audit_r95.c)
+  target_link_libraries(marine_endings_rom_audit_r95 PRIVATE avp_jag_refmachine)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(marine_endings_rom_audit_r95 PRIVATE -Wall -Wextra -Werror)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(attract_op_field_trace_r90 PRIVATE -Wall -Wextra -Werror)
+  endif()
   add_executable(files_jpeg_install_rom_check tools/jagref/files_jpeg_install_rom_check.c)
   target_link_libraries(files_jpeg_install_rom_check PRIVATE avp_jag_refmachine avp_gpu_original_native)
   add_executable(files_jpeg_quant_rom_check tools/jagref/files_jpeg_quant_rom_check.c)
@@ -395,6 +423,7 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
     ${AVP_NATIVE_QUICKSTATE}
     src/jaguar/avp_resources/retail_resources.c
     src/jaguar/host/fullsynth_host.c
+    src/jaguar/host/jerry_wave_procedural.c
     src/platform/pc/pc_main.c
     src/platform/pc/pc_original_cheats.c
     src/platform/pc/pc_original_cheat_input.c
@@ -405,6 +434,8 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
     src/platform/pc/pc_time.c
     src/platform/pc/pc_eeprom.c
     src/platform/pc/pc_video_x11.c
+    src/platform/pc/pc_title_native.c
+    src/platform/pc/pc_vr_preview.c
     new/map_maker/map_maker.c
     new/map_maker/map_maker_scripts.c
     new/map_maker/map_maker_overhead.c
@@ -441,7 +472,7 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
       new/audio/tests/test_audio_layout.c src/platform/pc/pc_audio_layout.c)
   target_include_directories(test_pc_audio_layout PRIVATE include)
   add_executable(test_pc_audio_mix
-      tests/test_host_audio.c src/jaguar/host/fullsynth_host.c)
+      tests/test_host_audio.c src/jaguar/host/fullsynth_host.c src/jaguar/host/jerry_wave_procedural.c)
   target_include_directories(test_pc_audio_mix PRIVATE include)
   if(NOT WIN32)
     target_link_libraries(test_pc_audio_mix PRIVATE m pthread)
@@ -449,6 +480,76 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
   if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(test_pc_audio_layout PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     target_compile_options(test_pc_audio_mix PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # R110: no external JERRY wave-ROM required for synthesized FM instruments.
+  add_executable(test_jerry_wave_procedural_r110
+      tests/test_jerry_wave_procedural_r110.c
+      src/jaguar/host/jerry_wave_procedural.c)
+  target_include_directories(test_jerry_wave_procedural_r110 PRIVATE include)
+  if(NOT WIN32)
+    target_link_libraries(test_jerry_wave_procedural_r110 PRIVATE m)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_jerry_wave_procedural_r110 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE36 R113: signed Jaguar FONT.S coordinates can describe brushes
+  # partially outside the 320x240 CTEXT viewport. Test the actual rasterizer
+  # without linking unrelated runtime code from this source-shaped unit.
+  if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(test_pc_computer_signed_glyph_clip_r113
+        tests/test_pc_computer_signed_glyph_clip_r113.c)
+    target_include_directories(test_pc_computer_signed_glyph_clip_r113 PRIVATE include)
+    target_compile_options(test_pc_computer_signed_glyph_clip_r113 PRIVATE
+        -D_GNU_SOURCE -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+    target_link_options(test_pc_computer_signed_glyph_clip_r113 PRIVATE -Wl,--gc-sections)
+    target_link_libraries(test_pc_computer_signed_glyph_clip_r113 PRIVATE m)
+  endif()
+  # R112: the capsule computer must discard prior terminal OP artwork,
+  # including its inactive (self-destruct not armed) screen.
+  add_executable(test_pc_pod_overlay_reset_r112
+      tests/test_pc_pod_overlay_reset_r112.c src/game/computer.c)
+  target_include_directories(test_pc_pod_overlay_reset_r112 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pc_pod_overlay_reset_r112 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE36 R114: per-target multiplayer cheat isolation, even on locked targets.
+  add_executable(test_local_mp_cheat_targets_r114
+      new/multiplayer/tests/test_local_mp_cheat_targets_r114.c)
+  target_include_directories(test_local_mp_cheat_targets_r114 PRIVATE new/multiplayer)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_local_mp_cheat_targets_r114 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # R114: multiplayer F2 options survive session creation and
+  # player-targeted Reveal Map remains isolated across viewports.
+  add_executable(test_local_mp_session_options_r114
+      new/multiplayer/tests/test_local_mp_session_options_r114.c
+      new/multiplayer/local_mp.c)
+  target_include_directories(test_local_mp_session_options_r114 PRIVATE new/multiplayer)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_local_mp_session_options_r114 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # R111: alarm FM feedback uses the generated NOISE phase-zero sample;
+  # verify the resulting carrier rate using an original-style synthetic module.
+  add_executable(test_jerry_alarm_phase_origin_r111
+      tests/test_jerry_alarm_phase_origin_r111.c
+      src/jaguar/host/jerry_wave_procedural.c)
+  target_include_directories(test_jerry_alarm_phase_origin_r111 PRIVATE include)
+  if(NOT WIN32)
+    target_link_libraries(test_jerry_alarm_phase_origin_r111 PRIVATE m pthread)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_jerry_alarm_phase_origin_r111 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # R114: verify alarm-specific host gain does not alter other sounds.
+  add_executable(test_jerry_alarm_volume_r114
+      tests/test_jerry_alarm_volume_r114.c
+      src/jaguar/host/jerry_wave_procedural.c)
+  target_include_directories(test_jerry_alarm_volume_r114 PRIVATE include)
+  if(NOT WIN32)
+    target_link_libraries(test_jerry_alarm_volume_r114 PRIVATE m pthread)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_jerry_alarm_volume_r114 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
   endif()
   # PC-only map-format staging/editor tests: no retail ROM required.
   add_executable(test_pc_map_maker new/map_maker/tests/test_map_maker.c new/map_maker/map_maker.c new/map_maker/map_maker_scripts.c new/map_maker/map_maker_overhead.c new/map_maker/map_maker_highlight.c new/map_maker/map_maker_texture_browser.c new/map_maker/map_maker_objects.c)
@@ -496,6 +597,20 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
       target_compile_options(test_pc_idle_inhibit PRIVATE -Wall -Wextra -Werror)
     endif()
   endif()
+  # Software stereo SBS output for compatible passive viewers and displays.
+  add_executable(test_pc_vr_preview tests/test_pc_vr_preview.c
+    src/platform/pc/pc_vr_preview.c)
+  target_include_directories(test_pc_vr_preview PRIVATE include)
+  if(NOT WIN32)
+    target_link_libraries(test_pc_vr_preview PRIVATE m)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pc_vr_preview PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # R78: only the native PC presentation uses measured ROM title fields.
+  # Standalone reconstructed Jaguar C and historical tests retain their prior
+  # 141-tick surrogate so no common game semantics are silently changed.
+  target_compile_definitions(avp_pc PRIVATE AVP_PC_REFERENCE_TITLE_TIMING=1)
   target_include_directories(avp_pc PRIVATE include)
   # Optional PC-only cooperative extension; runtime is OFF until F12 enables it.
   option(AVP_BUILD_LOCAL_MULTIPLAYER "Build the experimental local co-op setup module" ON)
@@ -518,6 +633,134 @@ target_compile_definitions(avp_pc_core PRIVATE AVP_PC_HOST=1)
     endif()
   endif()
   target_link_libraries(avp_pc PRIVATE avp_pc_core avp_jaguar_compat avp_gpu_original_native ZLIB::ZLIB)
+  if(AVP_BUILD_JAG_REFERENCE)
+    target_link_libraries(avp_pc PRIVATE avp_jag_refmachine)
+    target_compile_definitions(avp_pc PRIVATE AVP_PC_NATIVE_TITLE_JAGM=1)
+  endif()
+  # R91: actual MAIN attract exit must replay the native title before menu.
+  if(UNIX AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(test_title_attract_replay_r91 tests/test_title_attract_replay_r91.c)
+    target_include_directories(test_title_attract_replay_r91 PRIVATE include)
+    target_compile_options(test_title_attract_replay_r91 PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+    target_link_options(test_title_attract_replay_r91 PRIVATE -Wl,--gc-sections)
+    # RE36 R100: exact MUSIC.o TFX D1 module-volume override must reach
+    # FullSynth on the original selected voice, without changing other calls.
+    add_executable(test_mjp_tfx_d1_r100
+      tests/test_mjp_tfx_d1_r100.c
+      src/game/music.c src/game/runtime.c)
+    target_include_directories(test_mjp_tfx_d1_r100 PRIVATE include)
+    target_compile_definitions(test_mjp_tfx_d1_r100 PRIVATE AVP_PC_HOST=1)
+    target_compile_options(test_mjp_tfx_d1_r100 PRIVATE
+      -Wall -Wextra -Werror -UNDEBUG)
+    add_executable(test_attract_typ1b_voice_r98
+      tests/test_attract_typ1b_voice_r98.c
+      src/game/music.c src/game/runtime.c)
+    target_include_directories(test_attract_typ1b_voice_r98 PRIVATE include)
+    target_compile_definitions(test_attract_typ1b_voice_r98 PRIVATE AVP_PC_HOST=1)
+    target_compile_options(test_attract_typ1b_voice_r98 PRIVATE
+      -Wall -Wextra -Werror -UNDEBUG)
+    add_executable(test_mjp_text_sound_r91 tests/test_mjp_text_sound_r91.c)
+    target_include_directories(test_mjp_text_sound_r91 PRIVATE include)
+    target_compile_options(test_mjp_text_sound_r91 PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+    target_link_options(test_mjp_text_sound_r91 PRIVATE -Wl,--gc-sections)
+    # R95: instruction-backed countdown audio-before-text, $4BEC8 mute,
+    # source-derived per-message Y advances and independent Marine failure.
+    add_executable(test_mjp_marine_endings_r95 tests/test_mjp_marine_endings_r95.c)
+    target_include_directories(test_mjp_marine_endings_r95 PRIVATE include)
+    target_compile_options(test_mjp_marine_endings_r95 PRIVATE
+      -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+    target_link_options(test_mjp_marine_endings_r95 PRIVATE -Wl,--gc-sections)
+  endif()
+  add_executable(test_title_menu_aperture_r83 tests/test_title_menu_aperture_r83.c
+    src/platform/pc/pc_title_native.c
+    src/jaguar/avp_gpu/frontend_renderer.c
+    src/jaguar/avp_gpu/frontend_fade.c
+    src/jaguar/hw/cry.c
+    src/jaguar/hw/framebuffer.c)
+  target_include_directories(test_title_menu_aperture_r83 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_title_menu_aperture_r83 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE35 R89: stage each story glyph/transition on the video field, not
+  # as extra X11 repaints from intermediate MJP CPU/audio events.
+  add_executable(test_pc_attract_fields_r89 tests/test_pc_attract_fields_r89.c)
+  target_include_directories(test_pc_attract_fields_r89 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pc_attract_fields_r89 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE36 R101: source-model MJP CROSS field timeline versus extra host redraws.
+  # Regression only: no change to the two-field GPU stage approximation.
+  add_executable(test_mjp_cross_field_cadence_r101
+    tests/test_mjp_cross_field_cadence_r101.c)
+  target_include_directories(test_mjp_cross_field_cadence_r101 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_mjp_cross_field_cadence_r101 PRIVATE
+      -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+    target_link_options(test_mjp_cross_field_cadence_r101 PRIVATE
+      -Wl,--gc-sections)
+  endif()
+  # RE35 R99: terminal timing uses its own absolute Jaguar video-field
+  # deadline. The terminal text routine still waits three original VBlanks.
+  add_executable(test_pc_computer_field_clock_r99 tests/test_pc_computer_field_clock_r99.c)
+  target_include_directories(test_pc_computer_field_clock_r99 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pc_computer_field_clock_r99 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE35 R88: preserve RGB16 colour across the original MJP CROSS -> OP
+  # picture handoff. This tests only the intro/escape, not the title path.
+  add_executable(test_intro_rgb16_cross_continuity_r88
+    tests/test_intro_rgb16_cross_continuity_r88.c
+    src/jaguar/avp_gpu/frontend_renderer.c
+    src/jaguar/avp_gpu/frontend_fade.c
+    src/jaguar/hw/cry.c
+    src/jaguar/hw/framebuffer.c)
+  target_include_directories(test_intro_rgb16_cross_continuity_r88 PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_intro_rgb16_cross_continuity_r88 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  # RE35 R93: verify live green block against the actual user-owned ROM
+  # font 235, not the synthetic underscore from the R92 test.
+  # The test accepts the ROM on its command line; never bundle ROM bytes.
+  if(UNIX AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(test_mjp_live_cursor_rom_r93
+      tests/test_mjp_live_cursor_rom_r93.c
+      src/jaguar/avp_gpu/frontend_renderer.c
+      src/jaguar/avp_gpu/frontend_fade.c
+      src/jaguar/hw/cry.c
+      src/jaguar/hw/framebuffer.c
+      src/jaguar/avp_resources/retail_resources.c)
+    target_include_directories(test_mjp_live_cursor_rom_r93 PRIVATE include)
+    target_link_libraries(test_mjp_live_cursor_rom_r93 PRIVATE ZLIB::ZLIB)
+    target_compile_options(test_mjp_live_cursor_rom_r93 PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_mjp_live_cursor_rom_r93 PRIVATE -Wl,--gc-sections)
+    if(AVP_STRICT)
+      target_compile_options(test_mjp_live_cursor_rom_r93 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    endif()
+  endif()
+  add_executable(test_pc_title_native_rgb tests/test_pc_title_native_rgb.c
+    src/platform/pc/pc_title_native.c)
+  target_include_directories(test_pc_title_native_rgb PRIVATE include)
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pc_title_native_rgb PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+  if(AVP_BUILD_JAG_REFERENCE)
+    add_executable(test_pc_title_native_replay_r91 tests/test_pc_title_native_replay_r91.c
+      src/platform/pc/pc_title_native.c)
+    target_link_libraries(test_pc_title_native_replay_r91 PRIVATE avp_jag_refmachine)
+    target_include_directories(test_pc_title_native_replay_r91 PRIVATE include)
+    target_compile_definitions(test_pc_title_native_replay_r91 PRIVATE AVP_PC_NATIVE_TITLE_JAGM=1)
+    if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(test_pc_title_native_replay_r91 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    endif()
+    add_executable(test_pc_title_native_rom_r82 tests/test_pc_title_native_rom_r82.c
+      src/platform/pc/pc_title_native.c)
+    target_link_libraries(test_pc_title_native_rom_r82 PRIVATE avp_jag_refmachine)
+    target_include_directories(test_pc_title_native_rom_r82 PRIVATE include)
+    target_compile_definitions(test_pc_title_native_rom_r82 PRIVATE AVP_PC_NATIVE_TITLE_JAGM=1)
+    if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      target_compile_options(test_pc_title_native_rom_r82 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    endif()
+  endif()
   if(NOT WIN32)
     target_link_libraries(avp_pc PRIVATE OpenSSL::Crypto Threads::Threads)
   endif()
@@ -761,7 +1004,22 @@ if(UNIX AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_f12_debug_refresh_r68 PRIVATE
       -O2 -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
   target_link_options(test_f12_debug_refresh_r68 PRIVATE -Wl,--gc-sections)
-  target_link_libraries(test_f12_debug_refresh_r68 PRIVATE X11 m)
+  target_link_libraries(test_f12_debug_refresh_r68 PRIVATE X11 m ${CMAKE_DL_LIBS})
+endif()
+
+# RE35 R86: preserve the original R59 real-settings roundtrip regression.
+# This must remain a buildable test as enhancements are added to F12.
+if(UNIX AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  add_executable(test_normalize_diagonal_contact_menu_r59
+      tests/test_normalize_diagonal_contact_menu_r59.c)
+  target_include_directories(test_normalize_diagonal_contact_menu_r59 PRIVATE
+      include new/multiplayer new/map_maker new/game_micro_optimization)
+  target_compile_definitions(test_normalize_diagonal_contact_menu_r59 PRIVATE
+      AVP_LOCAL_MULTIPLAYER=1 AVP_LOCAL_MULTIPLAYER_AUDIO_BRIDGE=1)
+  target_compile_options(test_normalize_diagonal_contact_menu_r59 PRIVATE
+      -O2 -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+  target_link_options(test_normalize_diagonal_contact_menu_r59 PRIVATE -Wl,--gc-sections)
+  target_link_libraries(test_normalize_diagonal_contact_menu_r59 PRIVATE X11 m ${CMAKE_DL_LIBS})
 endif()
 
 # RE33 R71: test original enemy pursuit distance cutoff and 2x/3x/4x/unlimited.

@@ -37,6 +37,20 @@ void avp_mp_input_write_settings(const AvpMpInputConfig *cfg, FILE *f)
 int avp_jaguar_framebuffer_init(AvpJaguarFramebuffer *fb,unsigned w,unsigned h)
 {(void)fb;(void)w;(void)h;return 0;}
 void avp_jaguar_framebuffer_destroy(AvpJaguarFramebuffer *fb){(void)fb;}
+void avp_mp_input_validate(AvpMpInputConfig *cfg){(void)cfg;}
+/* Menu-only link: device enumeration/capture is not exercised here. */
+unsigned avp_mp_mice_discover(AvpMpPhysicalMouse out[AVP_MP_DISCOVER_MICE])
+{(void)out;return 0;}
+int avp_mp_input_assign_mouse(AvpMpInputConfig *cfg,unsigned p,const char *path)
+{(void)cfg;(void)p;(void)path;return 0;}
+int avp_mp_input_cycle_gamepad(AvpMpInputConfig *cfg,unsigned p,
+    const char *const *paths,unsigned count,const char *p1,int direction)
+{(void)cfg;(void)p;(void)paths;(void)count;(void)p1;(void)direction;return 0;}
+int avp_mp_pad_reader_open(AvpMpPadReader *r,const char *path)
+{(void)r;(void)path;return 0;}
+int avp_mp_pad_reader_poll(AvpMpPadReader *r,AvpMpControllerSample *out)
+{(void)r;(void)out;return 0;}
+void avp_mp_pad_reader_close(AvpMpPadReader *r){(void)r;}
 unsigned avp_pc_prototype_textures_apply_search(AvpPcPrototypeTextures *s,
     AvpAvpGpuState *g,const char *a,const char *b,const char *c,int d,
     char *e,size_t f)
@@ -91,14 +105,64 @@ int main(void)
     assert(!v->cfg.show_fps);
     v->menu_page=MENU_VIDEO;
 #ifdef AVP_LOCAL_MULTIPLAYER
-    assert(menu_count(v)==11);
+    assert(menu_count(v)==12);
     const int row=8;
 #else
-    assert(menu_count(v)==9);
+    assert(menu_count(v)==10);
     const int row=6;
 #endif
     snprintf(v->settings_path,sizeof v->settings_path,
         "/tmp/avp-re31-r8-showfps-%ld.cfg",(long)getpid());
+    /* R75: passive SBS display/viewer support; menu exposes actual stereo controls. */
+    v->menu_cursor=menu_count(v)-1;
+    menu_choose(v);
+    assert(v->menu_page==MENU_VR_HEADSET && menu_count(v)==7);
+    assert(fabs(v->cfg.vr_convergence-4.0f)<0.001f);
+    assert(v->cfg.vr_eye_aspect==1u);
+    assert(!v->cfg.vr_sbs_preview);
+    assert(fabs(v->cfg.vr_eye_separation-0.064f)<0.001f);
+    v->menu_cursor=0;menu_choose(v);
+    assert(v->cfg.vr_sbs_preview);
+    v->menu_cursor=1;menu_vr_adjust(v,1,1);
+    assert(fabs(v->cfg.vr_eye_separation-0.072f)<0.001f);
+    /* No runtime probing, tracking, or unavailable-headset rows remain. */
+    v->menu_cursor=2;menu_vr_adjust(v,2,1);
+    assert(fabs(v->cfg.vr_convergence-4.5f)<0.001f);
+    v->menu_cursor=3;menu_vr_adjust(v,3,1);
+    assert(v->cfg.vr_eye_aspect==2u);
+    v->menu_cursor=4;menu_vr_adjust(v,4,1);
+    assert(v->vr_preview_yaw_deg==5);
+    v->menu_cursor=5;menu_choose(v);
+    assert(v->vr_preview_yaw_deg==0);
+    v->menu_cursor=6;menu_choose(v);
+    assert(v->vr_screenshot_requested==1);
+    assert(menu_count(v)==7);
+    assert(v->menu_page==MENU_VR_HEADSET);
+    assert(v->cfg.vr_sbs_preview);
+    {char line[256];int saw_preview=0,saw_separation=0,saw_convergence=0,saw_aspect=0;FILE *f=fopen(v->settings_path,"r");
+     assert(f);
+     while(fgets(line,sizeof(line),f)){
+         if(strstr(line,"video.vr_sbs_preview=true"))saw_preview=1;
+         if(strstr(line,"video.vr_eye_separation=0.072"))saw_separation=1;
+         if(strstr(line,"video.vr_convergence=4.50"))saw_convergence=1;
+         if(strstr(line,"video.vr_eye_aspect=2"))saw_aspect=1;
+     }
+     fclose(f);assert(saw_preview&&saw_separation&&saw_convergence&&saw_aspect);
+    }
+    /* Ctrl+Mouse is presentation-only. No aim/turn impulse enters the game. */
+    v->menu_open=0;v->cfg.mouse_enabled=1;v->mouse_grabbed=1;
+    v->key[42]=1;v->pressed_sym[42]=XK_Control_L;
+    v->mouse_delta=30.0f;v->sim_turn=0.0f;
+    assert(avp_pc_video_modern_turn(v)==0.0f);
+    assert(v->vr_preview_yaw_deg==6);
+    assert(v->mouse_delta==0.0f&&!v->mouse_aim_active);
+    v->mouse_delta=10.0f;v->pressed_sym[42]=NoSymbol;v->key[42]=0;
+    assert(avp_pc_video_modern_turn(v)>0.0f);
+    assert(v->vr_preview_yaw_deg==6); /* regular mouse unchanged */
+    v->menu_open=1;v->mouse_grabbed=0;
+    v->menu_cursor=0;menu_choose(v); /* restore preview OFF */
+    assert(!v->cfg.vr_sbs_preview);
+    menu_back(v);assert(v->menu_page==MENU_VIDEO);
     /* Arrow and Enter are both handled by the same Video adjust logic. */
     v->menu_cursor=row;
     menu_video_adjust(v,row,1);
@@ -160,8 +224,8 @@ int main(void)
     /* Map Maker lives on F12 root, with real Enter navigation. The editor
      * always stages a private copy; here the no-ROM case is a blank draft. */
     v->menu_page=MENU_ROOT;
-    assert(menu_count(v)==7);
-    v->menu_cursor=6;
+    assert(menu_count(v)==9);
+    v->menu_cursor=7;
     menu_choose(v);
     assert(v->menu_page==MENU_MAP_MAKER);
     assert(v->map_maker.level==1u && v->map_maker.w==64u);
@@ -190,6 +254,23 @@ int main(void)
     map_maker_key(v,XK_Return);
     assert(!v->map_maker.palette_open);
     assert(avp_mm_value(&v->map_maker)==7u);
+    /* RE34: Escape, N requests a new blank draft, warns before discarding
+     * edits, and permits cancellation without losing the dirty map. */
+    assert(v->map_maker.dirty);
+    map_maker_key(v,XK_Escape);
+    assert(v->map_maker.context_open);
+    map_maker_key(v,XK_n);
+    assert(v->map_maker.new_confirm_open);
+    map_maker_key(v,XK_n); /* No: retain edits */
+    assert(!v->map_maker.new_confirm_open && v->map_maker.context_open);
+    assert(avp_mm_value(&v->map_maker)==7u && v->map_maker.dirty);
+    map_maker_key(v,XK_n);
+    assert(v->map_maker.new_confirm_open);
+    map_maker_key(v,XK_Return); /* Yes: clear */
+    assert(!v->map_maker.new_confirm_open && !v->map_maker.context_open);
+    assert(v->map_maker.custom_map && !v->map_maker.dirty);
+    assert(v->map_maker.cells[(32u*64u+32u)*8u+5u]==0u);
+    assert(!strcmp(v->map_maker.map_stem,"new_map"));
     map_maker_key(v,XK_b);
     assert(v->menu_page==MENU_MM_BINDINGS && menu_count(v)==3);
     v->menu_cursor=0;menu_choose(v);
@@ -299,13 +380,42 @@ int main(void)
 #ifndef _WIN32
     assert(!pc_x11_direct_window_allowed(v,0));
 #endif
+    /* Every fresh campaign clears Reveal Entire Map independently for P1-P4. */
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++)
+        v->local_mp_controls.player[p].cheat_reveal_map=1;
     avp_pc_video_original_reset(v);
     assert(!avp_pc_video_original_god_player(v,3u));
     assert(!avp_pc_video_original_positioning_player(v,3u));
-    v->menu_page=MENU_MP_CONTROLS;
-    assert(menu_count(v)==AVP_MP_CONTROL_BIND_ROW+(int)AVP_MP_INPUT_ACTIONS+5);
-    /* Audio and automap preferences retain their controls-page rows. */
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++)
+        assert(!v->local_mp_controls.player[p].cheat_reveal_map);
+    /* RE35: one shared Configure Player selector, no four separate menus;
+     * preferences and binding pages operate on the selected profile. */
     v->menu_page=MENU_ROOT;
+    assert(menu_count(v)==9);
+    v->menu_cursor=8;menu_choose(v);
+    assert(v->menu_page==MENU_PLAYER_OPTIONS && menu_count(v)==3);
+    assert(v->local_mp_control_player==0);
+    v->menu_cursor=0;menu_choose(v);
+    assert(v->local_mp_control_player==1);
+    v->menu_cursor=1;menu_choose(v);
+    assert(v->menu_page==MENU_MP_PREFERENCES && menu_count(v)==5);
+    {
+        int old=v->local_mp_controls.player[1].audio_motion_tracker;
+        int first_player=v->cfg.tracker_sounds_enabled;
+        v->menu_cursor=0;menu_choose(v);
+        assert(v->local_mp_controls.player[1].audio_motion_tracker==!old);
+        assert(v->cfg.tracker_sounds_enabled==first_player);
+        v->menu_cursor=4;menu_choose(v);
+        assert(v->local_mp_controls.player[1].remember_automap==1);
+        v->menu_cursor=0;menu_choose(v); /* restore initial value */
+        assert(v->local_mp_controls.player[1].audio_motion_tracker==old);
+    }
+    menu_back(v);assert(v->menu_page==MENU_PLAYER_OPTIONS);
+    v->menu_cursor=2;menu_choose(v);
+    assert(v->menu_page==MENU_MP_CONTROLS);
+    assert(menu_count(v)==AVP_MP_CONTROL_BIND_ROW+(int)AVP_MP_INPUT_ACTIONS);
+    menu_back(v);assert(v->menu_page==MENU_PLAYER_OPTIONS);
+    menu_back(v);assert(v->menu_page==MENU_ROOT);
     unlink(v->settings_path);
     avp_mm_destroy(&v->map_maker);
     free(v);

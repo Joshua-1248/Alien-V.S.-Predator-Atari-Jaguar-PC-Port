@@ -3,6 +3,7 @@
 #include "avp_resources.h"
 #include "avp_sfx_ids.h"
 #include "jaguar/host/dsp_arithmetic.h"
+#include "jaguar/host/jerry_wave_procedural.h"
 #ifdef AVP_LOCAL_MULTIPLAYER
 #include "jaguar/host/mp_waveform_proximity.h"
 #include "jaguar/host/mp_spatial_audio.h"
@@ -146,12 +147,12 @@ static int dsp_table_long(u32 addr,s32 *out)
     return 1;
 }
 
-/* The original JERRY DSP contains eight 128-entry signed-16-bit waveforms.
- * They are hardware data, not AVP cartridge content.  Only mathematical,
- * deterministic wave approximations are generated here: no separate ROM is
- * loaded, manufactured, cached, or distributed.  The original FM modules'
- * p[1] and p[2] addresses independently select their oscillator tables.
- * Hardware-exact table values and DSP interpolation remain unverified. */
+/* JERRY has eight independent 128-sample signed-16-bit waveforms.
+ * The cartridge does not contain its 4 KiB on-chip ROM. By default we
+ * reconstruct their mathematical shapes procedurally (and noise statistically).
+ * A separately supplied optional reference ROM can still be loaded for
+ * research; ordinary play requires only AVP.jag. Original FM modules' two
+ * wavetable pointers continue to select independent oscillator tables. */
 static s16 host_wave_table[8][128];
 /* JERRY's 4 KiB wave-table ROM is NOT stored in AVP.jag.  If the user
  * supplies their own verified Jaguar wave-ROM dump, use its actual 16-bit
@@ -195,30 +196,9 @@ int avp_jaguar_fullsynth_uses_exact_waves(void){return host_wave_rom_exact;}
 
 static void init_host_wave_tables(void)
 {
-    u32 noise_state=0x5a17c309u;
-    unsigned i;
-    for(i=0;i<128u;i++){
-        double t=(double)i/128.0, angle=2.0*M_PI*t;
-        double sine=sin(angle);
-        double tri=(2.0/M_PI)*asin(sine);
-        double am=sine*(0.5+0.5*sin(2.0*angle));
-        double harmonic=(sine+0.5*sin(2.0*angle))/1.5;
-        double chirp=sin(2.0*M_PI*8.0*t*t);
-        double n, noisytri;
-        noise_state^=noise_state<<13;
-        noise_state^=noise_state>>17;
-        noise_state^=noise_state<<5;
-        n=(double)((noise_state>>16)&0xffffu)/32767.5-1.0;
-        noisytri=tri*0.75+n*0.25;
-        host_wave_table[0][i]=(s16)lrint(tri*32767.0); /* F1D000 TRI */
-        host_wave_table[1][i]=(s16)lrint(sine*32767.0); /* F1D200 SINE */
-        host_wave_table[2][i]=(s16)lrint(am*32767.0); /* F1D400 AMSINE */
-        host_wave_table[3][i]=(s16)lrint(harmonic*32767.0); /* F1D600 SINE12W */
-        host_wave_table[4][i]=(s16)lrint(chirp*32767.0); /* F1D800 CHIRP16 */
-        host_wave_table[5][i]=(s16)lrint(noisytri*32767.0); /* F1DA00 NTRI */
-        host_wave_table[6][i]=(s16)(i==0u?32767:0); /* F1DC00 DELTA */
-        host_wave_table[7][i]=(s16)lrint(n*32767.0); /* F1DE00 NOISE */
-    }
+    /* No external wave ROM is required.  See the independent mathematical
+     * reconstruction and its noise-energy calibration. */
+    avp_jerry_generate_waves(host_wave_table);
 }
 
 static s32 host_wave_sample(u32 wavetable,u32 phase)
@@ -346,7 +326,13 @@ static void music_note_on(unsigned v,u32 ev)
     AvpMusicVoice *m;
     unsigned i,patch=(ev>>21)&31u;
     u32 freq=(ev>>7)&0x1fffu;
-    u32 amp=(ev&0x7fu)<<6;
+    /* Original TITLE3 Timer-1 ISR $F1B686-$F1B692 shifts the score's
+     * 7-bit velocity left six, then multiplies by the original DSP-local
+     * global level $F1B030=$7FFF with signed IMULT/SHARQ #15.  Omitting
+     * that final normalization changes the actual 16-bit sampler word,
+     * most visibly when an instrument crosses $8000. */
+    u32 velocity=(ev&0x7fu)<<6;
+    u32 amp=(u32)(((uint64_t)velocity*0x7fffu)>>15);
     if(v>=8u||(p=music_patch(patch))==NULL)return;
     m=&F.music.voice[v];memset(m,0,sizeof(*m));
     for(i=0;i<20u;i++)m->p[i]=be32(p+i*4u);
@@ -503,7 +489,14 @@ static s32 synth_sample_compressed(AvpSynthVoice *m,int envelope)
     }
     /* Both compressed handlers use IMULT for the final volume stage as
      * well (F1B2CC/F1B2CE and F1B446/F1B448). */
-    vol=m->p[1]&0x7fffu;
+    /* Retail JERRY's type-32 handler F1B2CC and type-44 handler F1B446
+     * use IMULT on the signed low 16 bits of the FULL sampler volume
+     * word. Bit 31 is the loop flag, but bit 15 is the SIGN of the
+     * multiplier, not another flag to strip.  TITLE3's original patches
+     * 6/8 can legitimately exceed $7FFF after note velocity scaling;
+     * masking bit 15 makes those sampled voices quiet and flips their
+     * polarity relative to the original DSP. */
+    vol=m->p[1];
     s=avp_jerry_asr64((int64_t)dsp_low16_signed((u32)s)*dsp_low16_signed(vol),15u);
     /* Caller applies the retail pan field after module synthesis. */
     return (s32)s;
@@ -771,6 +764,17 @@ void avp_jaguar_fullsynth_mix(int16_t *buf,unsigned frames)
              * while adjusted gains retain their previous integer behavior. */
             if(v->gain_l!=0x7fff)l=avp_jerry_asr64(l*v->gain_l,15u);
             if(v->gain_r!=0x7fff)r=avp_jerry_asr64(r*v->gain_r,15u);
+            /* RE36 R114: FX_newal's reconstructed NOISE is now the right
+             * pitch/character (R111), but its host PCM level is much lower
+             * than the audible Jaguar reference. Apply a PC-only +15.6 dB
+             * playback lift AFTER the original FM oscillator and stereo pan.
+             * The DSP module volume, feedback, phase, voice reservation,
+             * and all non-alarm SFX remain bit-for-bit unchanged. This is
+             * intentionally a host-mixer adjustment, not a ROM data edit. */
+            if(i==3u && v->game_voice==2u && v->sound_id==AVP_FX_NEWAL){
+                l*=6;
+                r*=6;
+            }
 #ifdef AVP_LOCAL_MULTIPLAYER
             /* Predator's per-player waveform already filters the source
              * by listener distance. Save the ORIGINAL voice sample before
@@ -1135,7 +1139,7 @@ void avp_jaguar_fullsynth_mp_set_weapon_owner(unsigned player)
 
 #endif
 
-void avp_jaguar_fullsynth_play_handle(unsigned id,u32 handle,unsigned voice,s32 left,s32 right)
+void avp_jaguar_fullsynth_play_handle_d1(unsigned id,u32 handle,unsigned voice,s32 left,s32 right,s32 d1)
 {
     unsigned slot=1u+(voice&7u);
     /* Keep Jaguar CPU voice arbitration original; only the hosted waveform
@@ -1150,7 +1154,12 @@ void avp_jaguar_fullsynth_play_handle(unsigned id,u32 handle,unsigned voice,s32 
         synth_lock_leave(&F.lock);
     }
 #endif
-    start_voice(slot,id,left,right,-1,handle,voice&7u,-1);
+    start_voice(slot,id,left,right,-1,handle,voice&7u,d1);
+}
+
+void avp_jaguar_fullsynth_play_handle(unsigned id,u32 handle,unsigned voice,s32 left,s32 right)
+{
+    avp_jaguar_fullsynth_play_handle_d1(id,handle,voice,left,right,-1);
 }
 
 int avp_jaguar_fullsynth_handle_active(u32 handle)

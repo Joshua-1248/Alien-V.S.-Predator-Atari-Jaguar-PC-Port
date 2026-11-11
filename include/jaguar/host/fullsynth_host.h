@@ -46,6 +46,7 @@ void avp_jaguar_fullsynth_mp_meter_near(unsigned listener,unsigned level,s32 x,s
 uint64_t avp_jaguar_fullsynth_mp_weapon_start_count(unsigned player);
 #endif
 void avp_jaguar_fullsynth_play_handle(unsigned descriptor_address,u32 handle,unsigned voice,s32 left,s32 right);
+void avp_jaguar_fullsynth_play_handle_d1(unsigned descriptor_address,u32 handle,unsigned voice,s32 left,s32 right,s32 d1);
 void avp_jaguar_fullsynth_stop_handle(u32 handle);
 int avp_jaguar_fullsynth_handle_active(u32 handle);
 int avp_jaguar_fullsynth_voice_active(unsigned voice);

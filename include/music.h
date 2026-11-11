@@ -38,6 +38,11 @@ void InitTnF(void);
 
 void StartMus(unsigned id);
 void ProtectV(unsigned count);
+#ifdef AVP_PC_HOST
+/* Host-only attract TYP1B voice-contention bridge. Original CPU protection
+ * count is unchanged; only the sound's effective hosted lane is restricted. */
+void avp_music_set_intro_typ1b_single_lane(int enabled);
+#endif
 void FXFadeDo(s32 step);
 void FXFadeUp(s32 step);
 void WaitFXFa(void);
@@ -48,6 +53,9 @@ void Ambient(void);
 u32 PlacedEf(unsigned id,s32 x,s32 y);
 u32 DoEffect(unsigned id);
 u32 TFX(unsigned id);
+/* Preserve original TFX/D1 explicit volume/priority word (>=0) when supplied
+ * by source MJP $01DC28...; negative selects the module's own control. */
+u32 avp_music_tfx_d1(unsigned id,s32 d1);
 /* Retail PlacedEf ($9C3A): effect into reserved voice v (wep_sfx=1, pause_sfx=0). */
 u32 avp_music_placed_voice(unsigned id,unsigned v);
 void KillAll(void);

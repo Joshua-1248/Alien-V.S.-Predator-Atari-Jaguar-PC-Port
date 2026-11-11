@@ -15,6 +15,9 @@
 #include "joypad.h"
 #include "avp_runtime.h"
 #include <stdint.h>
+#ifdef AVP_PC_HOST
+#include "pc/pc_title_reference.h"
+#endif
 
 u8 in_title,in_select,allow_reset;
 static u8 stopped;
@@ -48,6 +51,22 @@ void Title(void)
     fevent(0x5449544cu,0,0);
 }
 
+#ifdef AVP_PC_HOST
+/* One-shot exception for the PC's emulated cold-black fields. On the retail
+ * 68000 the title score is started in cartridge boot before $01F118 Title;
+ * the hosted entry calls NewTitle only AFTER its black startup interval.
+ * Restarting there would discard notes already advanced in the preroll. */
+static unsigned pc_title_music_prestarted;
+/* INTRO returns to the title animation with its score still running.
+ * It is not a fresh music selection: do not rewind the live score stream. */
+static unsigned pc_title_music_continues_after_attract;
+void avp_pc_title_music_prestart(void)
+{
+    StartMus(AVP_MUSIC_TITLE3);
+    pc_title_music_prestarted=1u;
+}
+#endif
+
 void NewTitle(void)
 {
     in_title=0xffu;
@@ -74,12 +93,39 @@ restart_title:
     /* MAIN.S passes #title3_music through ram_music here.  Keep that
      * CPU-owned descriptor selection in the translated game layer; the
      * Jaguar/host audio backend owns score/patch synthesis. */
-    StartMus(AVP_MUSIC_TITLE3);
-    /* Retail MAIN advances directly to its MJP menu after the 141-VBL title
-     * presentation. No additional Fire press is required for that handoff. */
+#ifdef AVP_PC_HOST
+    if(pc_title_music_prestarted)pc_title_music_prestarted=0u;
+    else if(pc_title_music_continues_after_attract)
+        pc_title_music_continues_after_attract=0u;
+    else
+#endif
+        StartMus(AVP_MUSIC_TITLE3);
+    /* The original port's 141-VBL placeholder omitted the retail title GPU
+     * jobs and its two interruptible Pause() waits (30 and 260 VBLs).  The
+     * standalone original-C library preserves that historical contract.
+     * Only the PC host uses the ROM/reference-machine-derived presentation
+     * sequence; no other gameplay or MJP menu logic is changed. */
     avp_mjp_prepare_title();
     Title();
+#ifdef AVP_PC_HOST
+    for(unsigned i=0u;i<AVP_PC_TITLE_SEQUENCE_FIELDS;i++){
+        /* Retail $01FC08 and $01FC98 call Pause() with 30 and 260 ticks.
+         * A/B/C input can interrupt EACH wait; it does not interrupt the
+         * GPU logo animations. Forward only a presentation clock jump, not
+         * thousands of game/sound ticks or a synthetic menu Fire press. */
+        if(i>=AVP_PC_TITLE_WAIT30_START && i<AVP_PC_TITLE_WAIT_END){
+            readpad();
+            if((~joy_cur&0x22002000u)!=0u){
+                i=i<AVP_PC_TITLE_WAIT260_START?
+                    AVP_PC_TITLE_WAIT260_START:AVP_PC_TITLE_WAIT_END;
+                fevent(AVP_PC_TITLE_SKIP_EVENT,(s32)i,0);
+            }
+        }
+        VSync();fevent(0x5449434bu,0,0);
+    }
+#else
     for(unsigned i=0;i<141u;i++){VSync();fevent(0x5449434bu,0,0);}
+#endif
 
 main_menu:
     /* 50 Hz video uses the authored 320x280 menu framing; 60 Hz remains at
@@ -134,7 +180,21 @@ main_menu:
         grunke=0;Choice=0;MTEST(AVP_MJP_FAME);
         goto main_menu;
     }
-    if(Choice==4){MTEST(AVP_MJP_INTRO);goto main_menu;} /* idle attract */
+    if(Choice==4){
+        /* Retail MAIN.S restarts the title presentation after Do_Intro,
+         * including the logo GPU jobs and the two Pause() intervals.
+         * Returning straight to main_menu skipped all of that on PC.
+         * On the next title resource load, the host also resets the separate
+         * Jaguar ROM reference renderer, without a second cold boot delay. */
+        MTEST(AVP_MJP_INTRO);
+#ifdef AVP_PC_HOST
+        /* R92: the Jaguar title-music score continues through the attract
+         * and its following native title-logo replay. Replaying the title
+         * animation must not stop/restart the ongoing FullSynth sequence. */
+        pc_title_music_continues_after_attract=1u;
+#endif
+        goto restart_title;
+    }
     goto main_menu;
 }
 

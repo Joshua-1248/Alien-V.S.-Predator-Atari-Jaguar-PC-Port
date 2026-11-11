@@ -207,13 +207,14 @@ int avp_pc_audio_init(const AvpRomImage *rom)
 {
     if(!avp_jaguar_fullsynth_init(rom))return 0;
     {const char *wave=getenv("AVP_JERRY_WAVE_ROM");
-     if(wave&&wave[0]) (void)avp_jaguar_fullsynth_load_wave_rom(wave);
-     else {
+     int loaded=(wave&&wave[0])?avp_jaguar_fullsynth_load_wave_rom(wave):0;
+     if(!loaded){
+         /* Even an invalid environment override must not hide a valid,
+          * user-provided original JERRY wave-ROM beside the executable. */
          /* The normal Linux Mint double-click path need not set cwd to
           * the executable folder. Look there before the cwd fallback. */
          char path[1024];
          ssize_t n=readlink("/proc/self/exe",path,sizeof(path)-1u);
-         int loaded=0;
          if(n>0&&(size_t)n<sizeof(path)){
              char *slash;
              path[n]=0;slash=strrchr(path,'/');
@@ -264,6 +265,8 @@ void avp_pc_audio_update_generator_alarm(s32 volume,s32 pitch)
 {avp_jaguar_fullsynth_update_generator_alarm(volume,pitch);}
 void avp_pc_audio_play_tracker(unsigned id,u32 volume,u32 pitch,u32 env_rate,u32 mod_depth){avp_jaguar_fullsynth_play_tracker(id,volume,pitch,env_rate,mod_depth);}
 void avp_pc_audio_play_handle(unsigned id,u32 handle,unsigned voice,s32 left,s32 right){avp_jaguar_fullsynth_play_handle(id,handle,voice,left,right);}
+void avp_pc_audio_play_handle_d1(unsigned id,u32 handle,unsigned voice,s32 left,s32 right,s32 d1)
+{avp_jaguar_fullsynth_play_handle_d1(id,handle,voice,left,right,d1);}
 void avp_pc_audio_stop_handle(u32 handle){avp_jaguar_fullsynth_stop_handle(handle);}
 int avp_pc_audio_handle_active(u32 handle){return avp_jaguar_fullsynth_handle_active(handle);}
 int avp_pc_audio_voice_active(unsigned voice){return avp_jaguar_fullsynth_voice_active(voice);}
