@@ -13,7 +13,12 @@ volatile u16 min_frame_ticks, video_mul_a, video_mul_b;
 extern void InitPal(void), InitObjL(void), InitInts(void), BuildPre(void);
 static void VideoHelper_91A2(void){ /* byte-exact Jaguar helper is platform-specific; SetScreen ordering remains here. */ }
 
-#if defined(__GNUC__) || defined(__clang__)
+/* Keep the Jaguar low-memory store out of host constant propagation.
+ * GCC can otherwise specialize the address-zero call and reject it under
+ * -Werror=array-bounds, although this is reference Jaguar MMIO code. */
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((noipa))
+#elif defined(__clang__)
 __attribute__((noinline))
 #endif
 void avp_jaguar_write_lowmem32(uintptr_t address, u32 value) {
