@@ -1,0 +1,189 @@
+name: AVP PC Port - Windows, Linux and macOS checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 (MSYS2 UCRT64)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-winpthreads
+      - name: Configure the original Jaguar reference backend
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B build-win -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON \
+            -DAVP_BUILD_JAG_REFERENCE=ON
+      - name: Build, startup-check and package Windows executable
+        shell: msys2 {0}
+        run: bash tools/package_windows_ucrt64.sh build-win dist/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avp-windows
+          path: dist/windows/
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    name: Linux x64 (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+            binary: avp_pc
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+            binary: avp_pc_clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang cmake ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libssl-dev zlib1g-dev
+      - name: Configure with native Jaguar title and Musashi
+        run: |
+          CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON \
+            -DAVP_BUILD_LOCAL_MULTIPLAYER=ON \
+            -DAVP_BUILD_JAG_REFERENCE=ON
+      - name: Build game and ROM-free regression tests
+        run: |
+          cmake --build build --parallel 4 --target \
+            avp_pc test_local_mp_bot test_local_mp_cheat_targets_r114 \
+            test_local_mp_session_options_r114 test_jerry_alarm_volume_r114
+      - name: Verify native title, Musashi and regression tests
+        run: |
+          set -euo pipefail
+          nm build/avp_pc > build/avp_symbols.txt
+          grep -q ' m68k_execute$' build/avp_symbols.txt
+          grep -q ' avp_pc_title_native_create$' build/avp_symbols.txt
+          ./build/avp_pc --help > /dev/null
+          ./build/new/multiplayer/test_local_mp_bot
+          ./build/test_local_mp_cheat_targets_r114
+          ./build/test_local_mp_session_options_r114
+          ./build/test_jerry_alarm_volume_r114
+      - name: Stage binary
+        run: |
+          mkdir -p dist/linux
+          install -m 755 build/avp_pc dist/linux/${{ matrix.binary }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avp-linux-${{ matrix.compiler }}
+          path: dist/linux/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-package:
+    name: Combined Linux GCC and Clang release
+    needs: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: avp-linux-*
+          path: dist/LINUX
+          merge-multiple: true
+      - name: Verify and package both Linux executables
+        run: |
+          set -euo pipefail
+          test -s dist/LINUX/avp_pc
+          test -s dist/LINUX/avp_pc_clang
+          chmod 755 dist/LINUX/avp_pc dist/LINUX/avp_pc_clang
+          cat > dist/README.txt <<'TXT'
+          Alien vs Predator (Atari Jaguar) - Linux GCC and Clang
+          Place your own original AVP.jag next to either executable or pass --rom /path/to/AVP.jag.
+          Neither the retail cartridge ROM nor a separate JERRY hardware ROM is included.
+          Run LINUX/avp_pc (GCC) or LINUX/avp_pc_clang (Clang).
+          TXT
+          if [ -d prototype_texture_restoration ]; then
+            cp -a prototype_texture_restoration dist/prototype_texture_restoration
+          fi
+          (cd dist && zip -qr ../AVP-Linux-GCC-Clang.zip .)
+          unzip -t AVP-Linux-GCC-Clang.zip > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Linux-GCC-Clang
+          path: AVP-Linux-GCC-Clang.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-linux-package:
+    name: Combined Windows and Linux release
+    needs: [windows, linux-package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: avp-windows
+          path: staging/WINDOWS
+      - uses: actions/download-artifact@v4
+        with:
+          name: AVP-Linux-GCC-Clang
+          path: staging/linux-archive
+      - name: Package the original three executable variants together
+        run: |
+          set -euo pipefail
+          test -s staging/linux-archive/AVP-Linux-GCC-Clang.zip
+          mkdir -p staging/linux-unpacked
+          unzip -q staging/linux-archive/AVP-Linux-GCC-Clang.zip -d staging/linux-unpacked
+          test -s staging/linux-unpacked/LINUX/avp_pc
+          test -s staging/linux-unpacked/LINUX/avp_pc_clang
+          test -s staging/WINDOWS/AVP_Jaguar_PC.exe
+          mkdir -p release
+          cp -a staging/WINDOWS staging/linux-unpacked/LINUX release/
+          cp staging/linux-unpacked/README.txt release/README.txt
+          if [ -d staging/linux-unpacked/prototype_texture_restoration ]; then
+            cp -a staging/linux-unpacked/prototype_texture_restoration release/
+          fi
+          (cd release && zip -qr ../AVP-Windows-and-Linux.zip .)
+          unzip -t AVP-Windows-and-Linux.zip > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Windows-and-Linux
+          path: AVP-Windows-and-Linux.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-portability:
+    name: macOS portability tests (NOT a playable build)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable targets with Jaguar reference backend
+        run: |
+          cmake -S . -B build-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON \
+            -DAVP_BUILD_PC=OFF -DAVP_BUILD_JAG_REFERENCE=ON
+      - name: Build and run ROM-free portability tests
+        run: |
+          cmake --build build-macos --parallel 4 --target \
+            avp_jaguar_compat avp_static_recomp test_static_rom_loader test_host_distance
+          ./build-macos/test_static_rom_loader
+          ./build-macos/test_host_distance
