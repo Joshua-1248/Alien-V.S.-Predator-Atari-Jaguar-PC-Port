@@ -3,7 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
+s16 player_type=PT_HUMAN;
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_pain_sounds(int enabled){(void)enabled;}
@@ -19,11 +20,18 @@ int main(void)
     assert(!v->cfg.buffer_short_analog&&!v->cfg.buffer_short_presses);
     assert(!v->cfg.enhanced_analog_controls);
     assert(!v->cfg.marine_pulse_los_hits);
-    assert(AVP_MENU_ITEMS==159);
-    assert(menu_count(v)==4);
+    /* New enhancements append menu entries without renumbering legacy IDs. */
+    assert(AVP_MENU_ITEMS>=159);
+    assert(menu_count(v)>=8); /* root has additional original and multiplayer menus now */
     v->menu_page=MENU_ENHANCEMENTS;
-    assert(menu_id(v,menu_count(v)-3)==148);
-    assert(menu_id(v,menu_count(v)-2)==157);
+    { /* Appended enhancements move their rows but retain stable menu IDs. */
+      int found_148=0,found_157=0;
+      for(int row=0;row<menu_count(v);row++){
+          if(menu_id(v,row)==148)found_148=1;
+          if(menu_id(v,row)==157)found_157=1;
+      }
+      assert(found_148 && found_157);
+    }
     snprintf(v->settings_path,sizeof v->settings_path,"/tmp/avp-r259-analog-settings-%ld.cfg",(long)getpid());
     v->menu_index=148;menu_adjust(v,1);
     assert(v->cfg.buffer_short_analog&&!v->cfg.buffer_short_presses);

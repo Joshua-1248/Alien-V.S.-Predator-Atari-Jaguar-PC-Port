@@ -1,6 +1,6 @@
 /* R131: exact R129/R130 terminal output vs. finished-row reuse.
  * Synthetic indexed artwork, palette and text; no proprietary ROM assets. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

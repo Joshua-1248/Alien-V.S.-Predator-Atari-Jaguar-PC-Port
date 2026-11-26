@@ -23,9 +23,9 @@ from audit_retail_cross_gpu_publication import GPU as GPU_SITES
 
 
 def make_c_helper(root: Path, directory: Path, cc: str):
-    src = root/'src/jaguar/avp_gpu/frontend_fade.c'
-    header = root/'include/jaguar/avp_gpu/frontend_fade.h'
-    renderer = (root/'src/jaguar/avp_gpu/frontend_renderer.c').read_text()
+    src = root/'new/jaguar/avp_gpu/frontend_fade.c'
+    header = root/'new/jaguar/avp_gpu/frontend_fade.h'
+    renderer = (root/'new/jaguar/avp_gpu/frontend_renderer.c').read_text()
     text=src.read_text()
     assert 'u16 avp_gpu_rgb16_cross(u16 from,u16 to,unsigned phase)' in text
     assert 'avp_gpu_rgb16_fraction(from,phase)' in text

@@ -79,7 +79,7 @@ def audit(romfile, source):
         assert (result&0x7fff)!=result
         found[idx].append((when/tempo,patch_volume,velocity,result,signed))
     assert len(found[6])==len(found[8])==1,found
-    host=(source/'src/jaguar/host/fullsynth_host.c').read_text()
+    host=(source/'new/jaguar/host/fullsynth_host.c').read_text()
     assert 'u32 amp=(u32)(((uint64_t)velocity*0x7fffu)>>15);' in host
     assert 'vol=m->p[1];' in host
     assert 'vol=m->p[1]&0x7fffu' not in host

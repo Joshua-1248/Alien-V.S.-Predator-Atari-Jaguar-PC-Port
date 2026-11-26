@@ -1,6 +1,6 @@
 /* RE32 R43: Exercise the actual PC floor/ceiling raster (not only menu mode
  * values) with a synthetic 64x64 maze and flat texture. ROM-free. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <stdio.h>
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x);return 1;} ++checks;}while(0)
 
@@ -13,7 +13,7 @@ static int test_view(unsigned w,unsigned h,int *checks)
     AvpFloorPass p={0};
     AvpJaguarFramebuffer fb={0};
     unsigned char rgb[3]={0x12,0x93,0xd8};
-    AvpGpuRgbImage img={1,1,rgb,NULL};
+    AvpGpuRgbImage img={1,1,rgb,NULL,NULL};
     u8 *maze=(u8*)calloc(64u*64u,8u);
     uint32_t *pixels=(uint32_t*)calloc((size_t)w*h,sizeof(uint32_t));
     unsigned previous=0;

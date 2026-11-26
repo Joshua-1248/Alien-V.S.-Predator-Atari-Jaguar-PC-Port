@@ -931,6 +931,18 @@ int main(void)
         assert(st.frontend_select_visible_chars==9u);
         assert(st.frontend_select_loading_ticks==0u);
         assert(!avp_gpu_frontend_select_loading_ready(&st));
+        /* A skip immediately reveals the remaining text and ends the
+         * hosted loading wait without mutating the regular presentation. */
+        {
+            AvpAvpGpuState *copy=(AvpAvpGpuState*)malloc(sizeof *copy);
+            assert(copy);
+            *copy=st;
+            avp_gpu_frontend_select_skip_briefing(copy);
+            assert(copy->frontend_select_visible_chars==9u);
+            assert(avp_gpu_frontend_select_loading_ready(copy));
+            assert(!avp_gpu_frontend_select_loading_ready(&st));
+            free(copy);
+        }
         /* The cartridge video shows a distinct loading interval after the
          * entire description appears; repaint must not advance this clock. */
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_SELECT,4);
@@ -1236,7 +1248,7 @@ int main(void)
         st.mjp_font=(u8*)calloc(224u*39u*2u,1u);assert(st.mjp_font);
         st.mjp_font_size=224u*39u*2u;
         set_mjp_cell(st.mjp_font,'S',0x11c0u);
-        set_mjp_cell(st.mjp_font,'_',0x11c0u);
+        set_mjp_cell(st.mjp_font,0x7fu,0x11c0u); /* Retail cursor is DEL block, not blank '_'. */
         avp_gpu_frontend_enter_mode(&st,AVP_MJP_SIM_TERMINATED);
         avp_gpu_frontend_draw_text(&st,1u,"S",63u);
         avp_gpu_frontend_present(&st,&fb,AVP_MJP_SIM_TERMINATED,0);

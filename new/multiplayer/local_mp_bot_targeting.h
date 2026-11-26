@@ -20,6 +20,14 @@ static inline int avp_mp_bot_immediate_contact_prefer(unsigned species,
     if((!!sight)!=(!!selected_sight))return !!sight;
     return distance_sq<selected_distance_sq;
 }
+/* An unseen scanner contact is information, not a combat emergency.
+ * It must not interrupt an otherwise valid supply or health objective. */
+static inline int avp_mp_bot_contact_interrupts_supply(unsigned sight,
+    uint64_t distance_sq)
+{
+    (void)distance_sq;
+    return !!sight;
+}
 /* Deathmatch-only arbitration. This preserves native AMP hostiles as valid
  * opponents: a PvP opponent can replace them only when acquired and the
  * opponent is currently visible over a stale AMP, or is closer at equal

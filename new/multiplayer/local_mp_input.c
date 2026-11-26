@@ -14,7 +14,8 @@ static const char *const action_names[AVP_MP_INPUT_ACTIONS] = {
     "Fire", "Use", "Map", "Previous Weapon", "Next Weapon", "Alien Claw",
     "Alien Bite", "Alien Tail", "Predator Medkit", "Predator Cloak", "Predator Vision",
     "Quick Turn", "Pause", "Option", "Terminal Next", "Terminal Previous",
-    "Map Zoom In", "Map Zoom Out", "Terminal Exit"
+    "Map Zoom In", "Map Zoom Out", "Terminal Exit",
+    "Spy Next Player", "Spy Previous Player"
 };
 
 /* The original terminal is A/NEXT, B/SELECT/PREVIOUS and C/EXIT.
@@ -83,6 +84,7 @@ void avp_mp_input_defaults(AvpMpInputConfig *cfg)
         v->audio_motion_tracker=1;v->audio_player_pain=1;
         v->audio_facehug_pain=1;v->audio_facehug_shake=1;
         v->remember_automap=0; /* original level-change behavior by default */
+        v->low_health_energy_flash=1; /* original 37.5% HUD blinking by default */
         v->mouse_sensitivity=1.0f;
         /* No default keyboard/gamepad bindings for secondary players:
          * avoid claiming input that still belongs to Player 1. */
@@ -92,6 +94,7 @@ void avp_mp_input_defaults(AvpMpInputConfig *cfg)
      * Never turn these into original Jaguar keypad or player actions. */
     cfg->player[0].key[AVP_MP_MAP_ZOOM_IN]=0x003dul;
     cfg->player[0].key[AVP_MP_MAP_ZOOM_OUT]=0x002dul;
+    /* Spycam is opt-in: do not seize keys used by an existing control. */
 }
 void avp_mp_input_validate(AvpMpInputConfig *cfg)
 {
@@ -116,7 +119,11 @@ void avp_mp_input_validate(AvpMpInputConfig *cfg)
         v->audio_facehug_pain=!!v->audio_facehug_pain;
         v->audio_facehug_shake=!!v->audio_facehug_shake;
         v->remember_automap=!!v->remember_automap;
+        v->crosshair_enabled=!!v->crosshair_enabled;
+        v->crosshair_weapon_sway=!!v->crosshair_weapon_sway;
+        v->low_health_energy_flash=!!v->low_health_energy_flash;
         v->cheat_reveal_map=!!v->cheat_reveal_map;
+        v->cheat_show_enemies_on_map=!!v->cheat_show_enemies_on_map;
         v->gamepad_analog_movement=!!v->gamepad_analog_movement;
         v->gamepad_enhanced_analog_controls=!!v->gamepad_enhanced_analog_controls;
         if(!isfinite(v->gamepad_turn_sensitivity))v->gamepad_turn_sensitivity=1.0f;
@@ -257,12 +264,16 @@ int avp_mp_input_parse_setting(AvpMpInputConfig *cfg,const char *key,const char 
         static const char *const names[]={
             "cheat_infinite_health","cheat_infinite_ammo","cheat_tracker","cheat_noclip",
             "audio_motion_tracker","audio_player_pain","audio_facehug_pain","audio_facehug_shake",
-            "remember_automap","cheat_no_facehug","cheat_no_enemy_attack","cheat_reveal_map"};
+            "remember_automap","cheat_no_facehug","cheat_no_enemy_attack","cheat_reveal_map",
+            "crosshair_enabled","crosshair_weapon_sway","cheat_show_enemies_on_map",
+            "low_health_energy_flash"};
         int *const values[]={&profile->cheat_infinite_health,&profile->cheat_infinite_ammo,
             &profile->cheat_tracker,&profile->cheat_noclip,&profile->audio_motion_tracker,
             &profile->audio_player_pain,&profile->audio_facehug_pain,
             &profile->audio_facehug_shake,&profile->remember_automap,
-            &profile->cheat_no_facehug,&profile->cheat_no_enemy_attack,&profile->cheat_reveal_map};
+            &profile->cheat_no_facehug,&profile->cheat_no_enemy_attack,&profile->cheat_reveal_map,
+            &profile->crosshair_enabled,&profile->crosshair_weapon_sway,
+            &profile->cheat_show_enemies_on_map,&profile->low_health_energy_flash};
         for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++){
             if(strcmp(f,names[i]))continue;
             if(!number(value,&n)||(n!=0&&n!=1))return 0;
@@ -349,6 +360,11 @@ void avp_mp_input_write_settings(const AvpMpInputConfig *cfg,FILE *out)
             (unsigned)AVP_MP_MAP_ZOOM_IN,cfg->player[0].key[AVP_MP_MAP_ZOOM_IN]);
     fprintf(out,"local_multiplayer.input.p1.key_%u=0x%lx\n",
             (unsigned)AVP_MP_MAP_ZOOM_OUT,cfg->player[0].key[AVP_MP_MAP_ZOOM_OUT]);
+    for(unsigned a=AVP_MP_SPY_NEXT_PLAYER;a<=AVP_MP_SPY_PREVIOUS_PLAYER;a++){
+        fprintf(out,"local_multiplayer.input.p1.key_%u=0x%lx\n",a,cfg->player[0].key[a]);
+        fprintf(out,"local_multiplayer.input.p1.gamepad_button_%u=%d\n",a,
+                cfg->player[0].gamepad_button[a]);
+    }
     /* Persist the four independent profiles; P1 gameplay still uses legacy
      * single-player settings as authoritative values. */
     for(p=0;p<AVP_MP_INPUT_PLAYERS;p++){
@@ -364,7 +380,11 @@ void avp_mp_input_write_settings(const AvpMpInputConfig *cfg,FILE *out)
         fprintf(out,"local_multiplayer.input.p%u.audio_facehug_pain=%d\n",p+1,v->audio_facehug_pain);
         fprintf(out,"local_multiplayer.input.p%u.audio_facehug_shake=%d\n",p+1,v->audio_facehug_shake);
         fprintf(out,"local_multiplayer.input.p%u.remember_automap=%d\n",p+1,v->remember_automap);
+        fprintf(out,"local_multiplayer.input.p%u.crosshair_enabled=%d\n",p+1,v->crosshair_enabled);
+        fprintf(out,"local_multiplayer.input.p%u.crosshair_weapon_sway=%d\n",p+1,v->crosshair_weapon_sway);
+        fprintf(out,"local_multiplayer.input.p%u.low_health_energy_flash=%d\n",p+1,v->low_health_energy_flash);
         fprintf(out,"local_multiplayer.input.p%u.cheat_reveal_map=%d\n",p+1,v->cheat_reveal_map);
+        fprintf(out,"local_multiplayer.input.p%u.cheat_show_enemies_on_map=%d\n",p+1,v->cheat_show_enemies_on_map);
     }
     for(p=1;p<AVP_MP_INPUT_PLAYERS;p++){
         const AvpMpInputProfile *v=&cfg->player[p];

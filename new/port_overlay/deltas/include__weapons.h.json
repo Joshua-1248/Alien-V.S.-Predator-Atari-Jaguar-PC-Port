@@ -1,0 +1,17 @@
+{
+  "path": "include/weapons.h",
+  "base_sha256": "e530b78b410626cd38d0f4173bc2bf653fc3771f36861e2a2a947eef2db8724c",
+  "output_sha256": "e4d15c9eded92214763405460796461201e453ad5c1d1ad08f11cae4da735b49",
+  "edits": [
+    {
+      "start": 18,
+      "end": 18,
+      "replacement": "#include \"../new/pc_host/integration/weapons_cycle_declarations.inc\"\n\n"
+    },
+    {
+      "start": 19,
+      "end": 19,
+      "replacement": "#include \"../new/pc_host/integration/weapons_dm_declarations.inc\"\n\n"
+    }
+  ]
+}

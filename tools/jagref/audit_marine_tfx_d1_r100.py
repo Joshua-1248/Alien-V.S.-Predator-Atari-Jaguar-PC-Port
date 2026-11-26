@@ -28,8 +28,8 @@ def audit(rom_path: Path, source_path: Path):
     for address in FIVE_TO_ONE:
         assert re.search(r'mjp_audio_id\(0x0*%x[uU]?,\s*0x2600\)'%address,text,re.I),hex(address)
     assert re.search(r'mjp_audio_id\(0x0*21718[uU]?,\s*-1\)',text,re.I)
-    runtime=(source_path/'src/platform/pc/pc_runtime.c').read_text()
-    synth=(source_path/'src/jaguar/host/fullsynth_host.c').read_text()
+    runtime=(source_path/'new/pc_host/src/pc_runtime.c').read_text()
+    synth=(source_path/'new/jaguar/host/fullsynth_host.c').read_text()
     assert 'avp_music_tfx_d1((unsigned)a,b)' in runtime
     assert 'tfx_store_volume(&v,d1);' in synth
     assert '(*w&0xffff0000u)|word' in synth

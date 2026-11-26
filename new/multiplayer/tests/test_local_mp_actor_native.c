@@ -80,7 +80,7 @@ int main(void)
         CHECK(avp_mp_actor_scope_enter(&scope,&actors[i]));
         CHECK(!avp_mp_actor_scope_enter(&other,&actors[(i+1u)%4u]));
         CHECK(player_type==species[i] && player_energy==(s16)(100+i*100));
-        CHECK(acs_level==(u8)(2+i));
+        CHECK(acs_level==(species[i]==PT_HUMAN?(u8)(2+i):10u));
         CHECK(show_mt==(i==0u?-1:0));
         CHECK(ammo_info[0].cur==(u16)(45u+i));
         CHECK(cur_wepno==weapon[i]);
@@ -167,6 +167,19 @@ int main(void)
         CHECK(avp_mp_actor_native_capture(&again));
         CHECK(memcmp(&host,&again,sizeof(host))==0);
     }
+    /* R235 ROM-derived InitAccess parity: a historical malformed/older
+     * per-player snapshot must never lower Alien/Predator clearance when
+     * PC multiplayer rebinds the original Jaguar player globals. The
+     * original DOORS.S access comparison is NOT modified for this case. */
+    for(unsigned i=0;i<4u;i++){
+        bad=actors[i];bad.access_level=0;
+        CHECK(avp_mp_actor_scope_enter(&scope,&bad));
+        CHECK(acs_level==(species[i]==PT_HUMAN?0u:10u));
+        CHECK(avp_mp_actor_scope_leave(&scope,&bad));
+        CHECK(bad.access_level==(species[i]==PT_HUMAN?0u:10u));
+        CHECK(avp_mp_actor_native_capture(&again));
+        CHECK(memcmp(&host,&again,sizeof(host))==0);
+    }
     /* A failed live script capture still restores the original engine. */
     CHECK(avp_mp_actor_scope_enter(&scope,&actors[0]));
     num_weps=7;
@@ -198,6 +211,6 @@ int main(void)
     CHECK(!avp_mp_actor_scope_enter(&scope,&bad));
     CHECK(avp_mp_actor_native_capture(&again));
     CHECK(memcmp(&host,&again,sizeof(host))==0);
-    puts("PASS: four player/weapon/HUD contexts, original map keys and health bars isolated, host rollback and pointer rejection; one process");
+    puts("PASS: four actor scopes, original InitAccess-level non-Marine restoration, host rollback and HUD isolation");
     return 0;
 }

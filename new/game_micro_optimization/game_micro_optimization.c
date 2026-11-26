@@ -6,6 +6,7 @@
 #include "game_micro_optimization.h"
 #ifdef AVP_GAME_MICRO_OPT_WRAP
 #include "collision.h"
+#include "doors.h"
 #include "amp.h"
 #if defined(AVP_LOCAL_MULTIPLAYER)
 #include "local_mp_amp_native.h"
@@ -13,6 +14,7 @@
 #endif
 
 static int enabled;
+#include "maze_binding.inc"
 void avp_game_micro_opt_set(int value)
 {
     enabled = !!value;
@@ -34,7 +36,10 @@ int __real_AMPCollisions(s32 xpos,s32 ypos);
  * For an interior cell with nine empty owner IDs, its original collision
  * result is provably zero: there is no actor to inspect.  Never cache the
  * grid: AMP movement, deaths and level changes can update it every tick.
- * Retain the original routine for any occupied or boundary neighborhood. */
+ * Interior occupied neighborhoods use an exact bounded scan; boundary
+ * neighborhoods retain the original routine. */
+
+#include "amp_occupied.inc"
 int __wrap_AMPCollisions(s32 xpos,s32 ypos)
 {
     if (enabled) {
@@ -47,10 +52,15 @@ int __wrap_AMPCollisions(s32 xpos,s32 ypos)
                 row[2u*AVP_AMP_GRID_W]|row[2u*AVP_AMP_GRID_W+1u]|
                 row[2u*AVP_AMP_GRID_W+2u]);
             if (!occupied) return 0;
+            return amp_interior_hit(row,x,y,xpos,ypos);
         }
     }
     return __real_AMPCollisions(xpos,ypos);
 }
+
+#include "safe_pos_edge.inc"
+#include "axis_los.inc"
+#include "diagonal_los.inc"
 
 /* Enemy AI repeatedly asks whether its player target is visible. For two
  * valid positions inside a single map cell, the straight segment cannot
@@ -62,17 +72,22 @@ int __wrap_LineOfSight(const AvpXY *from,const AvpXY *to)
     if (enabled && from && to) {
         const u32 x=(u32)from->x>>16, y=(u32)from->y>>16;
         if (x==((u32)to->x>>16) && y==((u32)to->y>>16) &&
-            avp_collision_maze_data() &&
-            x<avp_collision_maze_width() && y<avp_collision_maze_height() &&
+            micro_maze &&
+            x<micro_width && y<micro_height &&
             (u16)from->x>=0x6000u && (u16)from->x<=0x9fffu &&
             (u16)from->y>=0x6000u && (u16)from->y<=0x9fffu &&
             (u16)to->x>=0x6000u && (u16)to->x<=0x9fffu &&
             (u16)to->y>=0x6000u && (u16)to->y<=0x9fffu)
             return 0;
+        const int axis=axis_los_result(from,to);
+        if (axis) return axis-1;
+        const int result=oblique_los_result(from,to);
+        if (result) return result-1;
     }
     return __real_LineOfSight(from,to);
 }
 
+#include "safe_pos_corner.inc"
 u8 __wrap_SafePos(u8 height,s32 xpos,s32 ypos,u16 width)
 {
     if (enabled) {
@@ -83,15 +98,23 @@ u8 __wrap_SafePos(u8 height,s32 xpos,s32 ypos,u16 width)
         const u16 near = (u16)(width << 9);
         const u16 far = (u16)~near;
         const u16 fx = (u16)xpos, fy = (u16)ypos;
-        if (fx >= near && fx <= far && fy >= near && fy <= far) {
-            if (avp_collision_maze_data() &&
-                ((u32)xpos >> 16) < avp_collision_maze_width() &&
-                ((u32)ypos >> 16) < avp_collision_maze_height())
-                return AVP_COLL_SAFE;
+        const int midx=fx>=near && fx<=far, midy=fy>=near && fy<=far;
+        if (midx || midy) {
+            const u8 *map=micro_maze;
+            const unsigned x=(u32)xpos>>16, y=(u32)ypos>>16;
+            const unsigned w=micro_width, h=micro_height;
+            if (!map || x>=w || y>=h) return AVP_COLL_WALL;
+            if (midx && midy) return AVP_COLL_SAFE;
+            /* One middle axis implies near<=far, hence exactly one wall. */
+            if (midy) return safe_pos_edge(map,w,h,x,y,fx<near?0u:2u,fx<near?(u16)~fy:fy,height);
+            return safe_pos_edge(map,w,h,x,y,fy<near?1u:3u,fy<near?fx:(u16)~fx,height);
         }
+        if (near<=far) return safe_pos_corner(height,xpos,ypos,near);
     }
     return __real_SafePos(height,xpos,ypos,width);
 }
+#include "fixed_math_and_moves.inc"
+#include "trig.inc"
 #else
 /* On unsupported linkers leave the original engine untouched. */
 void avp_game_micro_opt_set(int value) { (void)value; }

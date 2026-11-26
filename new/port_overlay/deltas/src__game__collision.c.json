@@ -1,0 +1,67 @@
+{
+  "path": "src/game/collision.c",
+  "base_sha256": "059d750d9fc757c95b3cf61f181dc66c46b34ef8e9a3628a20b598e348bdbffb",
+  "output_sha256": "523f211440283f41f0dd9a8f275fecdcf053fc4bd3a41f19e6a47befc9ad5dca",
+  "edits": [
+    {
+      "start": 60,
+      "end": 60,
+      "replacement": "/* The retail 68000 SUB.L wraps at 32 bits.  Signed subtraction in C\n * invokes undefined behavior on overflow; decode the unsigned 32-bit\n * difference back to its exact signed two's-complement value. */\nstatic s32 wrapped_delta(s32 to,s32 from)\n{\n    u32 d=(u32)to-(u32)from;\n    return d<=0x7fffffffu ? (s32)d : (s32)((s64)d-INT64_C(4294967296));\n}\n\n/* COLLIDE.S AMPCollisions uses SUB.L followed by conditional NEG.L.\n * Both 68000 operations wrap as 32-bit words; in particular NEG.L on\n * $80000000 leaves that same signed word. C signed subtraction and\n * negation can overflow, so reproduce the original register result with\n * unsigned arithmetic before interpreting its sign. */\nstatic s32 wrapped_abs_delta(s32 to,s32 from)\n{\n    u32 d=(u32)to-(u32)from;\n    if(d&0x80000000u)d=0u-d;\n    return d<=0x7fffffffu ? (s32)d : (s32)((s64)d-INT64_C(4294967296));\n}\n\n"
+    },
+    {
+      "start": 61,
+      "end": 62,
+      "replacement": "    s32 sx=wrapped_delta(to->x,from->x), sy=wrapped_delta(to->y,from->y);\n"
+    },
+    {
+      "start": 77,
+      "end": 78,
+      "replacement": "    s32 sx=wrapped_delta(to->x,from->x), sy=wrapped_delta(to->y,from->y);\n"
+    },
+    {
+      "start": 102,
+      "end": 104,
+      "replacement": "    size_t off=(size_t)(wall-maze_data);\n    unsigned slot=(unsigned)(off&3u);\n    size_t cell_index=off/CELL_SIZE;\n    size_t x=cell_index%bound_w,y=cell_index/bound_w;\n"
+    },
+    {
+      "start": 106,
+      "end": 106,
+      "replacement": "    /* The retail mazes keep their outer boundaries closed. A boundary door\n     * cannot have a neighboring door-open byte: reading right/bottom would\n     * alias the next row or leave the allocation entirely. Treat it as solid\n     * rather than consulting unrelated geometry or out-of-range memory. */\n"
+    },
+    {
+      "start": 107,
+      "end": 111,
+      "replacement": "    case LEFT_WALL:   return x?base+LEFT_DOOR:NULL;\n    case TOP_WALL:    return y?base+TOP_DOOR:NULL;\n    case RIGHT_WALL:  return x+1u<bound_w?base+CELL_SIZE+LEFT_DOOR:NULL;\n    default:          return y+1u<bound_h?base+row+TOP_DOOR:NULL;\n"
+    },
+    {
+      "start": 134,
+      "end": 135,
+      "replacement": "    {const u8 *door=door_for_wall(wall);\n    if(!door)return HIT_WALL;\n    open=*door;}\n"
+    },
+    {
+      "start": 151,
+      "end": 151,
+      "replacement": "\n#include \"../../new/multiplayer/collision_door_query.inc\"\n"
+    },
+    {
+      "start": 237,
+      "end": 239,
+      "replacement": "        a=&amp_data[n-1u];\n        /* Grid IDs are reusable AMP slots, not permanent occupancy.  An\n         * inactive actor or a live actor that has moved to another square\n         * must not block the player through an obsolete grid registration.\n         * Static furniture with a real owner remains solid. */\n        if((!a->mode && !a->host_static) ||\n           ((u32)a->xpos>>16)!=(unsigned)x ||\n           ((u32)a->ypos>>16)!=(unsigned)y)continue;\n        if(a->creature>=40u)continue;\n        w=coll_widths[a->creature];\n        if(!w)continue;\n        dx=wrapped_abs_delta(a->xpos,xpos);\n        dy=wrapped_abs_delta(a->ypos,ypos);\n"
+    },
+    {
+      "start": 243,
+      "end": 243,
+      "replacement": "\n#include \"../../new/multiplayer/collision_overlap_escape.inc\"\n"
+    },
+    {
+      "start": 423,
+      "end": 423,
+      "replacement": "/* The 68000's SUB.L, NEG.L and ADD.L use modulo-2^32 results.  In\n * particular NEG.L of $80000000 remains $80000000; C signed overflow is\n * undefined, so keep the register words unsigned until explicitly decoded. */\nstatic s32 signed_word32(u32 v)\n{\n    return v<=0x7fffffffu ? (s32)v : (s32)((s64)v-INT64_C(4294967296));\n}\n\n"
+    },
+    {
+      "start": 425,
+      "end": 427,
+      "replacement": "    s32 dx=wrapped_delta(ax,bx),dy=wrapped_delta(ay,by);\n    if(dx<0)dx=signed_word32(0u-(u32)dx);\n    if(dy<0)dy=signed_word32(0u-(u32)dy);\n    if(dx>dy){s32 t=dx;dx=dy;dy=t;}\n    /* Source arithmetic shift by two, including the sign bits if NEG.L\n     * encountered its self-negating 0x80000000 corner case. */\n    u32 quarter=((u32)dx>>2)|(dx<0?0xc0000000u:0u);\n    return signed_word32((u32)dy+quarter);\n"
+    }
+  ]
+}

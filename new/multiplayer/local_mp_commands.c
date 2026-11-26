@@ -93,7 +93,8 @@ int avp_mp_commands_take(const AvpMpInputConfig *cfg,
             int down=0;
             /* P1's original host keyboard and controller mappings remain
              * authoritative; never silently double-poll them. */
-            if (p!=0 || a==AVP_MP_MAP_ZOOM_IN || a==AVP_MP_MAP_ZOOM_OUT) {
+            if (p!=0 || a==AVP_MP_MAP_ZOOM_IN || a==AVP_MP_MAP_ZOOM_OUT ||
+                a==AVP_MP_SPY_NEXT_PLAYER || a==AVP_MP_SPY_PREVIOUS_PLAYER) {
                 down=key_down(in,v->key[a]);
                 if (action_pad_down(pad,v->gamepad_button[a])) down=1;
             }
@@ -113,6 +114,11 @@ int avp_mp_commands_take(const AvpMpInputConfig *cfg,
          * PLAYER.S host bridge. Previously these command fields stayed zero,
          * so the native input layer silently disabled all proportional axes. */
         staged[p].analog_enabled=v->gamepad_analog_movement && v->gamepad_enabled;
+        if(staged[p].analog_enabled){
+            staged[p].analog_forward=avp_pc_axis_precision(axis[0],v->gamepad_deadzone,1);
+            staged[p].analog_strafe=avp_pc_axis_precision(axis[1],v->gamepad_deadzone,1);
+            staged[p].analog_turn=avp_pc_axis_precision(axis[2],v->gamepad_deadzone,0);
+        }
         staged[p].enhanced_analog_enabled=v->gamepad_enhanced_analog_controls;
         staged[p].analog_turn_sensitivity=v->gamepad_turn_sensitivity;
         staged[p].analog_turn_speed=v->gamepad_turn_speed;

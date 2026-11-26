@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 s16 player_type=PT_HUMAN;
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
@@ -33,20 +33,20 @@ int main(void)
     settings_defaults(&v->cfg);v->mouse_focused=1;
     for(int species=0;species<3;species++){
         player_type=species==0?PT_HUMAN:(species==1?PT_ALIEN:PT_PREDATOR);
-        check_chord(v,0,1,1,0,-1,0,1,1); /* Q + D: turn right, strafe left */
-        check_chord(v,1,0,0,1,+1,1,0,1); /* E + A: turn left, strafe right */
-        check_chord(v,1,0,1,0,-1,1,0,1); /* Q + A: left turn + left strafe */
-        check_chord(v,0,1,0,1,+1,0,1,1); /* E + D: right turn + right strafe */
-        check_chord(v,0,0,1,0,0,1,0,0);  /* Q alone: normal retail strafe */
-        check_chord(v,0,0,0,1,0,0,1,0);  /* E alone */
-        check_chord(v,0,1,0,0,0,0,1,1);  /* D alone: original chord */
-        check_chord(v,1,0,0,0,0,1,0,1);  /* A alone */
-        check_chord(v,0,1,1,1,0,0,1,1);  /* opposing strafe keys neutral */
+        check_chord(v,0,1,1,0,-1,0,1,0); /* Q + D: turn right, strafe left */
+        check_chord(v,1,0,0,1,+1,1,0,0); /* E + A: turn left, strafe right */
+        check_chord(v,1,0,1,0,-1,1,0,0); /* Q + A: left turn + left strafe */
+        check_chord(v,0,1,0,1,+1,0,1,0); /* E + D: right turn + right strafe */
+        check_chord(v,0,0,1,0,0,1,0,1);  /* Q alone: Jaguar sidestep modifier */
+        check_chord(v,0,0,0,1,0,0,1,1);  /* E alone */
+        check_chord(v,0,1,0,0,0,0,1,0);  /* D alone: Jaguar unmodified turn */
+        check_chord(v,1,0,0,0,0,1,0,0);  /* A alone */
+        check_chord(v,0,1,1,1,0,0,1,0);  /* opposing strafe keys neutral */
         check_chord(v,1,1,0,0,0,0,0,0);  /* A+D: absolutely no yaw */
-        check_chord(v,1,1,1,0,0,1,0,0);  /* A+D+Q: strafe, no yaw */
-        check_chord(v,1,1,0,1,0,0,1,0);  /* A+D+E: strafe, no yaw */
+        check_chord(v,1,1,1,0,0,1,0,1);  /* A+D+Q: strafe, no yaw */
+        check_chord(v,1,1,0,1,0,0,1,1);  /* A+D+E: strafe, no yaw */
     }
-    check_chord(v,0,1,1,0,-1,0,1,1);
+    check_chord(v,0,1,1,0,-1,0,1,0);
     v->menu_open=1;assert(!avp_pc_video_keyboard_strafe_during_turn(v));v->menu_open=0;
     v->frontend_input=1;assert(!avp_pc_video_keyboard_strafe_during_turn(v));v->frontend_input=0;
     v->capture_mode=1;assert(!avp_pc_video_keyboard_strafe_during_turn(v));v->capture_mode=0;

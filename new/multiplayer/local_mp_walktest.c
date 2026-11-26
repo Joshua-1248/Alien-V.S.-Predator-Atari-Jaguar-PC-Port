@@ -23,6 +23,8 @@
 #include "avp_runtime.h"
 #include "jaguar/host/fullsynth_host.h"
 #include "dev_cheats.h"
+#include "../cheats/health_policy.h"
+#include "../cheats/damage_gate.h"
 #include "pc/pc_original_cheats.h"
 #include "local_mp_respawn_policy.h"
 #include "savegame.h"
@@ -32,6 +34,7 @@
 #include "local_mp_kill_notice.h"
 #include "local_mp_dm_loot.h"
 #include "local_mp_death_camera.h"
+#include "local_mp_spycam.h"
 #include "local_mp_corpses.h"
 #include "local_mp_sprite_pose.h"
 #include "avp_sfx_ids.h"
@@ -59,6 +62,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+typedef struct AvpMpDmBotTravelState {
+    unsigned level,previous_level,target_level,valid_hop,avoid_valid;
+    AvpMpBotLevelPlan hop,avoid;
+    uint64_t entered_tick,last_contact_tick,retry_tick,plan_tick;
+    uint64_t last_progress_tick,best_distance;
+} AvpMpDmBotTravelState;
 
 typedef struct AvpMpWalkHost {
     AvpPcVideo *video;
@@ -88,7 +98,28 @@ typedef struct AvpMpWalkHost {
     unsigned actors; /* human players + standalone bot actors */
     uint8_t random_species[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpBotState bots[AVP_LOCAL_MP_MAX_ACTORS];
+    /* R300: one shared campaign emergency; no solo bot can trigger repeated
+     * launch or choose a fresh leader every tick. */
+    unsigned evacuation_active;
+    unsigned evacuation_leader; /* AVP_LOCAL_MP_MAX_ACTORS when humans lead */
+    uint64_t evacuation_start_tick;
+    AvpMpHudWorldState shared_countdown; /* Same original countdown on ALL levels. */
+    unsigned shared_countdown_valid;
+    AvpMpBotPickupMemory pickup_memory[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpBotDoorClaims shared_door_claims;
+    /* One stable destination and Use owner per original lift shaft. */
+    AvpMpBotLiftClaims shared_lift_claims;
+    unsigned last_bot_world_level[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned last_bot_goal_lift[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_arrival_pending[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_arrival_x[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_arrival_y[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_egress_valid[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_egress_level[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_egress_x[AVP_LOCAL_MP_MAX_ACTORS];
+    unsigned lift_egress_y[AVP_LOCAL_MP_MAX_ACTORS];
+    struct {unsigned level,x,y,destination,side,follow_human;uint64_t tick;} lift_intent[AVP_LOCAL_MP_MAX_ACTORS];
+    uint64_t lift_board_tick; /* Current original bot-input tick, for intent expiry. */
     AvpMpBotContact contacts[AVP_LOCAL_MP_MAX_ACTORS][AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpBotTrail amp_trails[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     AvpMpBotTrail player_trails[AVP_LOCAL_MP_MAX_ACTORS];
@@ -110,23 +141,28 @@ typedef struct AvpMpWalkHost {
         unsigned from_level,goal_level,gx,gy,species,goal_known;
         unsigned valid;
     } bot_level_cache[AVP_LOCAL_MP_MAX_ACTORS];
+    /* DM exploration is a route commitment, not a teleport or an enemy
+     * position lookup. Each bot remembers its destination and a single
+     * failed source-authored doorway to avoid repeated portal ping-pong. */
+    AvpMpDmBotTravelState dm_bot_travel[AVP_LOCAL_MP_MAX_ACTORS];
     /* Security Keycards persist per actor, not as a single consumed AMP.
      * Reset only the dying player's record upon a successful respawn. */
     u16 collected_keycards[AVP_LOCAL_MP_MAX_ACTORS];
     /* Current-world item stays alive for all players; ownership is per life
      * and per physical AMP slot. An AMP reused for a different item must
      * invalidate stale claims without resetting other worlds. */
-    uint16_t collected_items[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
+    AvpMpActorMask collected_items[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     uint64_t collected_identity[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     /* Deathmatch corpse attempts persist through respawns. New AMP slot
      * generations invalidate stale claims; other pickups still reset per life. */
     uint64_t dm_body_identity[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
-    uint16_t dm_body_claimed[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
+    AvpMpActorMask dm_body_claimed[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     unsigned collecting_player;
+    uint8_t random_level_entry[AVP_LOCAL_MP_MAX_ACTORS];
     u32 spawn_x[AVP_LOCAL_MP_MAX_ACTORS];
     u32 spawn_y[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpSharedArrivalGrace shared_arrival; /* Existing P1-P4 arrival policy. */
-    AvpMpPeerGrace peer_spawn_grace; /* All 16 actors. */
+    AvpMpPeerGrace peer_spawn_grace; /* All 20 actors. */
     AvpMpEnhancementBuffer host_input_buffer; /* Opt-in P2-P4 sub-tick pulses. */
     u32 last_pad;
     float p1_forward, p1_strafe, p1_turn;
@@ -176,12 +212,16 @@ typedef struct AvpMpWalkHost {
     double presentation_alpha;
     AvpMpLife player_life[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpLife vent_fade[AVP_LOCAL_MP_MAX_ACTORS];
+    AvpMpLifeFrame vent_frame[AVP_LOCAL_MP_MAX_PLAYERS];
     AvpMpDeathmatch dm;
     unsigned dm_shooter;
     unsigned dm_amp_target; /* actor currently scoped for native AMP AI */
     /* A native AMP slot can be reused: validate its true world-specific
      * generation before crediting projectile hits to a player. */
     uint8_t dm_projectile_owner[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
+    /* Snapshot the attacker cloak state at projectile creation, not impact.
+     * Inherited by explosions and guarded by the existing slot generation. */
+    uint8_t dm_projectile_predator_uncloaked[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     uint32_t dm_projectile_gen[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS];
     uint8_t dm_death_credited[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpKillNotice dm_notices[AVP_LOCAL_MP_MAX_PLAYERS];
@@ -276,18 +316,29 @@ static int walk_dm_random_spawn(AvpMpWalkHost *t,const AvpMpNativeWorld *world,
     if(!t||!world||!world->map||!actor||!out_x||!out_y)return 0;
     map=(AvpMpBotMap){world->map->bytes+8u,world->map->width,
         world->map->height,world->doors.wall_flags,world->doors.current_meta,
-        actor->player.player_type==PT_HUMAN?99u:actor->access_level,NULL,NULL};
+        actor->player.player_type==PT_HUMAN?99u:actor->access_level,NULL,NULL,0u};
     if(map.width>64u||map.height>64u||!map.width||!map.height||
        !avp_mp_bot_components(&map,components))return 0;
     /* A dead player may be in a detached/invalid floor island. Anchoring
      * the next random spawn to that last position perpetuates the error.
      * Always use the original authored start pose for THIS level, never
      * the player's last position (or a previous level's start pose). */
-    if(!avp_levels_start_pose(world->map->level,
-                              &origin_x,&origin_y,&origin_angle) ||
-       !walk_spawn_on_retail_map(world->map,origin_x,origin_y) ||
+    if(t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL){
+        /* Custom session 16 borrows a retail level ONLY for its artwork.
+         * Its authored playable geometry is independent of the retail
+         * start pose, which can be inside the VOID (DM1) or a wall. Use the
+         * already validated custom-map entry from the native host actor.
+         * This keeps the connectivity/island and SafePos rules below intact
+         * without reusing a retail campaign coordinate in a custom level. */
+        origin_x=t->initial_actor.player.x_pos;
+        origin_y=t->initial_actor.player.y_pos;
+        origin_angle=t->initial_actor.player.centre_angle;
+    }else if(!avp_levels_start_pose(world->map->level,
+                                    &origin_x,&origin_y,&origin_angle))
+        return 0;
+    if(!walk_spawn_on_retail_map(world->map,origin_x,origin_y) ||
        SafePos(80,(s32)origin_x,(s32)origin_y,40)!=AVP_COLL_SAFE)
-        return 0; /* Fail closed instead of selecting an arbitrary island. */
+        return 0; /* Invalid source/custom spawn; never put actor in void. */
     ax=origin_x>>16;ay=origin_y>>16;
     if(ax>=map.width||ay>=map.height ||
        !components[ay*64u+ax])return 0;
@@ -532,6 +583,7 @@ static int walk_arm_alien_end_queen(AvpMpWalkHost *t,unsigned level)
     return 1;
 }
 
+static int walk_random_level_spawn(AvpMpWalkHost *t,unsigned p);
 static int walk_join(void *u,AvpMpNativeWorld *w,unsigned p,AvpMpActorNativeState *a)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
@@ -542,6 +594,12 @@ static int walk_join(void *u,AvpMpNativeWorld *w,unsigned p,AvpMpActorNativeStat
     if(!t||!w||!a||p>=t->actors||!avp_mp_actor_native_valid(a))return 0;
     if(!t->entering[p].valid)return 1; /* Initial campaign join. */
     if(t->entering[p].target_level!=(int16_t)w->map->level)return 0;
+    /* Original Predator cannot enter narrow retail ducts. Prevent every
+     * fresh-actor join from restarting a Predator inside a vent. Regular
+     * scripted transitions are unchanged and use their own door rules. */
+    if(t->entering_reset[p] && t->session.setup.custom_session_id!=AVP_MP_CUSTOM_LEVEL &&
+       !avp_mp_spawn_level_allowed(t->session.setup.species[p],w->map->level))
+        return 0;
     if(!avp_levels_start_pose(w->map->level,&x,&y,&angle))return 0;
     if(t->entering[p].new_x>=0){
         x=(u32)t->entering[p].new_x;y=(u32)t->entering[p].new_y;
@@ -576,7 +634,8 @@ static int walk_join(void *u,AvpMpNativeWorld *w,unsigned p,AvpMpActorNativeStat
         }
         if(best!=UINT64_MAX){x=selected_x;y=selected_y;found=1;}
     }
-    if(found && t->dm.enabled && t->entering_reset[p]){
+    if(found && t->entering_reset[p] &&
+       (t->dm.enabled || t->random_level_entry[p])){
         u32 sx,sy;
         if(!walk_dm_random_spawn(t,w,p,a,&sx,&sy))
             found=0;
@@ -607,14 +666,34 @@ static int walk_join(void *u,AvpMpNativeWorld *w,unsigned p,AvpMpActorNativeStat
  * through a wall or outside the map, that passenger shares a VALID group
  * arrival point instead. No group passenger is rejected for overlapping an
  * existing player or another member of this batch. */
-static int walk_join_group(void *u,AvpMpNativeWorld *w,unsigned mask,
+/* Execute LEVELS.S's exact entry-cell hostile cleanup for committed
+ * co-op arrivals. Unlike a single-player LoadLevel, the destination may be
+ * an already-live world; do not clear other map cells or touch protected
+ * actors, corpse templates, grids, or the original AMP allocation list.
+ * This must follow the successful group transaction (never a staged join).
+ */
+static int walk_clear_arrival_enemies(AvpMpWalkHost *t,AvpMpActorMask mask)
+{
+    if(!t)return 0;
+    for(unsigned p=0;p<t->actors;p++)if(mask&AVP_MP_ACTOR_BIT(p)){
+        const AvpMpActiveWorld *active=avp_mp_session_player_world(&t->session,p);
+        const AvpMpActorNativeState *actor=(const AvpMpActorNativeState *)t->session.player[p];
+        AvpMpNativeWorld *world=active?(AvpMpNativeWorld *)active->context:NULL;
+        AvpMpNativeScope scope={0};
+        if(!world||!actor||!avp_mp_native_world_enter(&scope,world))return 0;
+        avp_levels_kill_bastards_at(actor->player.x_pos,actor->player.y_pos);
+        if(!avp_mp_native_world_leave(&scope,world))return 0;
+    }
+    return 1;
+}
+static int walk_join_group(void *u,AvpMpNativeWorld *w,AvpMpActorMask mask,
                            AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS])
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     u32 anchor_x=0u,anchor_y=0u;
     int anchor_found=0;
-    unsigned fallback_mask=0u;
-    for(unsigned p=0;p<t->actors;p++)if(mask&(1u<<p)){
+    AvpMpActorMask fallback_mask=0u;
+    for(unsigned p=0;p<t->actors;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         u32 requested_x=(u32)t->entering[p].new_x;
         u32 requested_y=(u32)t->entering[p].new_y;
         int requested=t->entering[p].valid && t->entering[p].new_x>=0 &&
@@ -624,7 +703,7 @@ static int walk_join_group(void *u,AvpMpNativeWorld *w,unsigned mask,
          * walk_join had to repair should instead stack with the group. */
         if(requested && (actors[p]->player.x_pos!=requested_x ||
                          actors[p]->player.y_pos!=requested_y))
-            fallback_mask|=1u<<p;
+            fallback_mask|=AVP_MP_ACTOR_BIT(p);
         else if(!anchor_found){
             anchor_x=actors[p]->player.x_pos;
             anchor_y=actors[p]->player.y_pos;
@@ -634,13 +713,13 @@ static int walk_join_group(void *u,AvpMpNativeWorld *w,unsigned mask,
     if(!anchor_found){
         /* All requested positions needed repair: share the first repaired
          * in-bounds floor cell, never scatter the passengers. */
-        for(unsigned p=0;p<t->actors;p++)if(mask&(1u<<p)){
+        for(unsigned p=0;p<t->actors;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
             anchor_x=actors[p]->player.x_pos;anchor_y=actors[p]->player.y_pos;
             anchor_found=1;break;
         }
     }
     if(!anchor_found)return 0;
-    for(unsigned p=0;p<t->actors;p++)if(fallback_mask&(1u<<p)){
+    for(unsigned p=0;p<t->actors;p++)if(fallback_mask&(AVP_MP_ACTOR_BIT(p))){
         actors[p]->player.x_pos=anchor_x;
         actors[p]->player.y_pos=anchor_y;
         actors[p]->player.x_vel=actors[p]->player.y_vel=0;
@@ -652,7 +731,7 @@ static int walk_join_group(void *u,AvpMpNativeWorld *w,unsigned mask,
 /* The co-op host tracks pairs recently placed on the same valid floor
  * point. Original P1-P4 shared-arrival accounting is retained alongside
  * the 16-actor PC-only peer-collision grace for overlapping arrivals. */
-static void walk_shared_arrival_refresh(AvpMpWalkHost *t,unsigned arriving_mask)
+static void walk_shared_arrival_refresh(AvpMpWalkHost *t,AvpMpActorMask arriving_mask)
 {
     uint8_t present[4]={0};
     unsigned world_level[4]={0};
@@ -669,24 +748,60 @@ static void walk_shared_arrival_refresh(AvpMpWalkHost *t,unsigned arriving_mask)
         }
     }
     avp_mp_shared_arrival_update(&t->shared_arrival,present,world_level,x,y,arriving_mask);
-    /* All 16 actors, including headless bots, share the same original
+    /* All 20 actors, including headless bots, share the same original
      * same-world / PLAYER_WIDTH rule. The reusable helper also handles
      * grace expiry when either actor moves away or changes worlds. */
     {
         uintptr_t worlds[AVP_MP_PEER_COUNT]={0};
         uint32_t xs[AVP_MP_PEER_COUNT]={0},ys[AVP_MP_PEER_COUNT]={0};
-        uint32_t mask=0u;
+        AvpMpActorMask mask=0u;
         for(unsigned p=0;p<t->actors;p++){
             const AvpMpActiveWorld *world=avp_mp_session_player_world(&t->session,p);
             const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
             if(world&&a){
                 worlds[p]=(uintptr_t)(const void *)world;
                 xs[p]=a->player.x_pos;ys[p]=a->player.y_pos;
-                mask|=1u<<p;
+                mask|=AVP_MP_ACTOR_BIT(p);
             }
         }
         avp_mp_peer_grace_update(&t->peer_spawn_grace,mask,worlds,xs,ys,arriving_mask);
     }
+}
+/* R467: a bot's accepted pressure request is not a license to transfer
+ * after a later actor reopens a door during the same shared-world tick.
+ * Re-read the captured native slots and actual map immediately at commit.
+ * Resolve the authored destination and chamber; unknown state fails closed. */
+static int walk_bot_airlock_commit_ready(const AvpMpNativeWorld *world,
+    const AvpMpActorNativeState *a,const AvpMpTransitionRequest *request)
+{
+    uint32_t active[2];unsigned count=0;
+    const AvpDoorLevelMeta *meta;
+    const AvpMpRetailMap *map=world?world->map:NULL;
+    if(!map||!map->bytes||!a||!request||!world->doors.valid||
+       world->doors.maze!=map->bytes+8u||world->doors.width!=map->width||
+       world->doors.height!=map->height||world->doors.level!=(int)map->level||
+       !world->doors.level_meta||!map->level||
+       map->level>world->doors.level_meta_count||
+       map->width!=64u||map->height!=64u||map->size<8u+64u*64u*8u)
+        return 0;
+    meta=&world->doors.level_meta[map->level-1u];
+    for(unsigned d=0;d<2u;d++)if(world->doors.door[d].active){
+        if(world->doors.door[d].offset>=64u*64u*8u)return 0;
+        active[count++]=(uint32_t)world->doors.door[d].offset;
+    }
+    for(size_t i=0;i<meta->exit_count;i++){
+        const AvpDoorExitEntry *e=&meta->exits[i];
+        AvpMpAirlockRoom room;
+        if(e->level!=(unsigned)request->target_level||
+           e->x!=((uint32_t)request->new_x>>16)||
+           e->y!=((uint32_t)request->new_y>>16)||
+           !avp_mp_airlock_room(map,meta,e->panel_offset,&room)||
+           !avp_mp_chamber_contains(map,(room.exit_x<<16)|0x8000u,
+               (room.exit_y<<16)|0x8000u,a->player.x_pos,a->player.y_pos))continue;
+        return avp_mp_airlock_action(&room,map->bytes+8u,64u*64u*8u,
+            active,count)==AVP_MP_AIRLOCK_PRESSURE;
+    }
+    return 0;
 }
 /* Derive passengers only from the source map's authored closed chamber,
  * never distance or a visible open door. Keep the initiator's destination
@@ -697,7 +812,7 @@ static unsigned walk_room_passengers(AvpMpWalkHost *t,unsigned leader,
     const AvpMpActiveWorld *origin=avp_mp_session_player_world(&t->session,leader);
     const AvpMpNativeWorld *world=origin?(const AvpMpNativeWorld *)origin->context:NULL;
     const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[leader];
-    unsigned mask=1u<<leader;
+    AvpMpActorMask mask=AVP_MP_ACTOR_BIT(leader);
     AvpMpTransitionRequest staged[AVP_LOCAL_MP_MAX_ACTORS];
     memset(staged,0,sizeof(staged));
     /* A same-level authored warp uses walk_join(), not the multi-world
@@ -735,10 +850,10 @@ static unsigned walk_room_passengers(AvpMpWalkHost *t,unsigned leader,
         staged[p]=*request;
         staged[p].new_x=tx;
         staged[p].new_y=ty;
-        mask|=1u<<p;
+        mask|=AVP_MP_ACTOR_BIT(p);
     }
     /* Publish passenger staging only once ALL valid offsets are known. */
-    for(unsigned p=0;p<t->actors;p++)if(p!=leader && (mask&(1u<<p)))
+    for(unsigned p=0;p<t->actors;p++)if(p!=leader && (mask&(AVP_MP_ACTOR_BIT(p))))
         t->entering[p]=staged[p];
     return mask;
 }
@@ -782,27 +897,52 @@ static void walk_finish_exit_effect(AvpMpWalkHost *t,unsigned old_level,
 /* Keep source locations and actual human listeners in ONE PC stereo mix.
  * The original player slots P1-P4 still own the only local viewports; bots
  * (including AI-controlled P1-P4) never borrow unrelated input or views. */
+/* A living, dying, or dead actor with an owned native world is a valid
+ * camera subject. The original subject's death camera and FadeDown overlay
+ * are rendered by walk_draw_view; changing the subject on death would hide
+ * that black fade. Only a deliberate Spy Next/Previous press changes views.
+ * World/actor loss is handled by the existing session compose fallback. */
+static AvpMpActorMask walk_spy_eligible_mask(const AvpMpWalkHost *t,unsigned viewer)
+{
+    AvpMpActorMask eligible=AVP_MP_ACTOR_BIT(viewer);
+    for(unsigned q=0;q<t->actors;q++){
+        if(q==viewer || !t->session.player[q] ||
+           !avp_mp_session_player_world(&t->session,q))continue;
+        eligible|=AVP_MP_ACTOR_BIT(q);
+    }
+    return eligible;
+}
 static void walk_refresh_audio_listeners(AvpMpWalkHost *t)
 {
     AvpMpSpatialListener listeners[4]={{0}};
-    unsigned bot_mask=0u,views=0u;
+    AvpMpActorMask bot_mask=0u;
+    unsigned views=0u,spy_active=0u;
     if(!t)return;
     for(unsigned p=0;p<t->actors && p<AVP_LOCAL_MP_MAX_ACTORS;p++)
-        if(t->session.setup.bot_enabled[p])bot_mask|=1u<<p;
+        if(t->session.setup.bot_enabled[p])bot_mask|=AVP_MP_ACTOR_BIT(p);
     for(unsigned p=0;p<t->players;p++){
-        const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,p);
-        const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
+        const unsigned subject=t->session.spy_target[p]<t->actors ?
+                                t->session.spy_target[p]:p;
+        const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,subject);
+        const AvpMpActorNativeState *a=
+            (const AvpMpActorNativeState *)t->session.player[subject];
         if(!w||!a||!w->level||w->level>15u)continue;
-        /* The display is an audio listener regardless of who controls it.
-         * Otherwise an AI-controlled P2/P3/P4 viewport only hears its own
-         * positional sounds when P1 (or another human viewport) is nearby. */
+        /* The audio listener follows the *displayed* subject, including
+         * their original level, location and facing. Input and game state
+         * remain attached to the viewer's own actor. */
         listeners[p].active=avp_mp_spatial_view_listener(p,t->players,w->level);
+        listeners[p].subject_plus_one=subject+1u;
         listeners[p].level=w->level;
         listeners[p].x=(s32)a->player.x_pos;
         listeners[p].y=(s32)a->player.y_pos;
         listeners[p].heading=a->player.centre_angle;
         views+=listeners[p].active;
+        if(subject!=p)spy_active=1u;
     }
+    /* While spying, sounds from the viewer's own character are spatial as
+     * well, rather than remaining centered despite the remote camera. The
+     * observed player's own effects gain the direct-feedback path below. */
+    if(spy_active)bot_mask=AVP_MP_ACTOR_BIT(t->actors)-UINT64_C(1);
     /* Preserve the original solo-bot spectator fallback for an unbound
      * scene, without stealing the other on-screen listeners. */
     if(!views && t->players)listeners[0].active=1u;
@@ -813,11 +953,17 @@ static int walk_sync_ambient(AvpMpWalkHost *t)
     unsigned levels[AVP_LOCAL_MP_MAX_ACTORS]={0};
     unsigned target;
     if(!t||!t->players)return 0;
-    for(unsigned p=0;p<t->actors;p++){
-        const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,p);
+    for(unsigned p=0;p<t->players;p++){
+        const unsigned subject=t->session.spy_target[p]<t->actors ?
+                               t->session.spy_target[p]:p;
+        const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,subject);
         if(!w)return 0;
         levels[p]=w->level;
     }
+    /* Voice zero is one shared original ambience. Choose it from the
+     * displayed viewpoints rather than characters the viewers have left
+     * behind. Mixed-level split screens retain the established level-2
+     * shared-ambience policy; normal unspied co-op is unchanged. */
     target=avp_mp_ambient_target(levels,t->players);
     if(!target)return 0;
     if(target!=t->current_ambient_level){
@@ -901,20 +1047,26 @@ static void walk_dm_other_bodies(AvpMpWalkHost *t,unsigned p)
     if(level<1u||level>AVP_MP_RETAIL_LEVELS)return;
     /* Real dead player visual actors have no AMP/grid slot; scavenge their
      * retained death-pose record without turning it into a collision item. */
-    if(avp_mp_corpse_claim_at(&t->corpses,level,p,x_pos,y_pos))
+    if(avp_mp_corpse_claim_at(&t->corpses,level,p,x_pos,y_pos)){
         walk_dm_award_body_loot();
+        if(getenv("AVP_BOT_PLAYTEST_TRACE"))
+            fprintf(stderr,"BODYLOOT tick=%llu p=%u level=%u xy=%08x/%08x owned=%u ammo=%u,%u,%u,%u\n",
+                (unsigned long long)t->session.tick,p+1u,level,x_pos,y_pos,
+                (unsigned)cur_weps,(unsigned)ammo_info[0].cur,(unsigned)ammo_info[1].cur,
+                (unsigned)ammo_info[2].cur,(unsigned)ammo_info[3].cur);
+    }
     /* Fallen native enemy and authored AMP corpses retain their original
      * collection rules. Only an AC_HUMAN player corpse grants random gear. */
 }
 static int walk_mp_item_available(AvpMpWalkHost *t,unsigned p,
             unsigned level,unsigned slot,const AvpAmp *amp)
 {
-    uint16_t bit;
+    AvpMpActorMask bit;
     uint64_t identity;
     if(!t||p>=t->actors||p>=AVP_LOCAL_MP_MAX_ACTORS ||
        level<1u||level>AVP_MP_RETAIL_LEVELS ||slot>=AVP_NUM_AMPS ||!amp)
         return 0;
-    bit=(uint16_t)(1u<<p);
+    bit=AVP_MP_ACTOR_BIT(p);
     identity=walk_pickup_identity(amp);
     if(t->collected_identity[level-1u][slot]!=identity)return 1;
     return !(t->collected_items[level-1u][slot]&bit);
@@ -923,7 +1075,7 @@ static int walk_claim_mp_item(void *u,unsigned level,unsigned slot,s16 type,int 
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     unsigned p;
-    uint16_t bit;
+    AvpMpActorMask bit;
     uint64_t identity;
     const AvpMpActiveWorld *current;
     const AvpAmp *amp;
@@ -945,7 +1097,7 @@ static int walk_claim_mp_item(void *u,unsigned level,unsigned slot,s16 type,int 
             t->collected_items[level-1u][slot]=0u;
         }
     }
-    bit=(uint16_t)(1u<<p);
+    bit=AVP_MP_ACTOR_BIT(p);
     if(t->collected_identity[level-1u][slot]==identity &&
        (t->collected_items[level-1u][slot]&bit))return 0;
     if(commit)t->collected_items[level-1u][slot]|=bit;
@@ -954,13 +1106,27 @@ static int walk_claim_mp_item(void *u,unsigned level,unsigned slot,s16 type,int 
 static void walk_reset_mp_item_claims(AvpMpWalkHost *t,unsigned p)
 {
     unsigned level,slot;
-    const uint16_t keep=(uint16_t)~(1u<<p);
+    const AvpMpActorMask keep=~(AVP_MP_ACTOR_BIT(p));
     if(!t||p>=AVP_LOCAL_MP_MAX_ACTORS)return;
     for(level=0;level<AVP_MP_RETAIL_LEVELS;level++)
         for(slot=0;slot<AVP_NUM_AMPS;slot++)
             t->collected_items[level][slot]&=keep;
 }
 
+/* A duct passenger is outside both levels during their PERSONAL fade.
+ * The avatar returns only after the destination fade-in fully completes.
+ * Keep the original 60 Hz fade/view rendering; this flag affects world
+ * targeting, collision, animation and damage, not the player's camera. */
+static int walk_vent_world_present(const AvpMpWalkHost *t,unsigned p)
+{
+    return t && p<t->actors && !avp_mp_life_busy(&t->vent_fade[p]);
+}
+static int walk_amp_world_present(void *user,unsigned p)
+{
+    return walk_vent_world_present((const AvpMpWalkHost *)user,p);
+}
+static int walk_is_duct_transfer(unsigned from,const AvpMpTransitionRequest *r);
+static int walk_bot_shared_lift_pair(const AvpMpWalkHost *t,unsigned p,unsigned q);
 static int walk_actor(void *u,unsigned p)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
@@ -975,8 +1141,7 @@ static int walk_actor(void *u,unsigned p)
      * nor weapons advance while waiting for their own respawn. Their renderer
      * AMP snapshot is refreshed separately before each world update. */
     if(avp_mp_life_busy(&t->player_life[p]) ||
-       t->vent_fade[p].phase==AVP_MP_LIFE_FADE_OUT ||
-       t->vent_fade[p].phase==AVP_MP_LIFE_WAIT_LEVEL)return 1;
+       !walk_vent_world_present(t,p))return 1;
     if(p<t->players && !avp_pc_video_local_mp_hud_message_route(t->video,(int)p))return 0;
     /* LEVELS.S has one exit request per Jaguar player; clear it BEFORE
      * each actor and retain any new exit with its actual owner. */
@@ -1013,14 +1178,16 @@ static int walk_actor(void *u,unsigned p)
     t->prev_angle[p]=centre_angle;
     if(p<t->players && !avp_pc_video_local_mp_snapshot_actor(t->video,p,
                  avp_collision_maze_data(),maze_width,maze_height))result=0;
+    /* Save the real preceding weapon pose for every spyable subject,
+     * including headless bots. It is presentation data, not game state. */
+    if(!avp_pc_video_local_mp_snapshot_spy_weapon(t->video,p))result=0;
     {
         const AvpMpInputConfig *cfg=avp_pc_video_local_mp_profiles(t->video);
         const AvpMpInputProfile *pref=cfg&&p<AVP_LOCAL_MP_MAX_PLAYERS?
             &cfg->player[p]:NULL; /* Standalone bots never borrow P2 cheats. */
         const int primary=(p==0u);
         avp_dev_cheats_tracker_borrowed_restore(t->tracker_cheat_borrowed[p]);
-        avp_dev_cheats_set_infinite_health(primary?avp_pc_video_infinite_health(t->video):
-                 (pref?pref->cheat_infinite_health:0));
+        avp_dev_cheats_set_health_mode(p<t->players?avp_pc_video_new_health_mode(t->video,p):AVP_NEW_HEALTH_OFF);
         avp_dev_cheats_set_infinite_ammo(primary?avp_pc_video_infinite_ammo(t->video):
                  (pref?pref->cheat_infinite_ammo:0));
         /* Bots must never inherit a human noclip toggle. In particular,
@@ -1034,7 +1201,13 @@ static int walk_actor(void *u,unsigned p)
          * callback, while leaving source PLAYER.S physics untouched. */
         avp_pc_runtime_set_mp_bot_floor_guard(t->session.setup.bot_enabled[p]);
         avp_pc_runtime_set_mp_player_floor_guard(!t->session.setup.bot_enabled[p]);
-        avp_pc_runtime_set_mp_fast_sweep_guard(t->dm.enabled && t->dm.fast_movement);
+        /* Deathmatch Fast Movement is a 2x floor, not a stacking factor.
+         * Never apply a human-only cheat to a bot. */
+        const int cheat_fast=p<t->players && !t->session.setup.bot_enabled[p] ?
+            avp_pc_video_double_movement(t->video,p):0;
+        avp_player_host_movement_speed(cheat_fast,t->dm.enabled && t->dm.fast_movement);
+        avp_pc_runtime_set_mp_fast_sweep_guard(
+            (t->dm.enabled && t->dm.fast_movement) || cheat_fast);
         /* Player collisions apply to humans AND native bots in the same
          * physical world, with spawn/transport grace only for overlapping
          * pairs.  The original SafePos/MovePlayer physics is unchanged. */
@@ -1047,8 +1220,9 @@ static int walk_actor(void *u,unsigned p)
                 const AvpMpActiveWorld *other=avp_mp_session_player_world(&t->session,q);
                 const AvpMpActorNativeState *actor=(const AvpMpActorNativeState *)t->session.player[q];
                 if(own&&own==other&&actor&&actor->player.player_energy>0 &&
-                   !avp_mp_life_busy(&t->player_life[q]) &&
-                   !avp_mp_peer_grace_exempt(&t->peer_spawn_grace,p,q)){
+                   !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q) &&
+                   !avp_mp_peer_grace_exempt(&t->peer_spawn_grace,p,q) &&
+                   !walk_bot_shared_lift_pair(t,p,q)){
                     peer_view.active[q]=1;
                     peer_view.x[q]=actor->player.x_pos;
                     peer_view.y[q]=actor->player.y_pos;
@@ -1126,7 +1300,12 @@ static int walk_actor(void *u,unsigned p)
                                       t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL,
                                       t->dm.level_travel &&
                                       t->session.setup.custom_session_id!=AVP_MP_CUSTOM_LEVEL);
+    avp_dev_cheats_before_actor();
+    avp_doors_mp_bot_airlock_interlock(t->session.setup.bot_enabled[p]);
     avp_mp_player_native_step_actor();
+    avp_doors_mp_bot_airlock_interlock(0);
+    avp_dev_cheats_health_tick();
+    avp_player_host_double_movement(0); /* Never leak actor P1-P4 mode. */
     avp_pc_runtime_set_mp_peer_collision_view(NULL);
     avp_pc_runtime_set_mp_bot_floor_guard(0);
     avp_pc_runtime_set_mp_player_floor_guard(0);
@@ -1196,7 +1375,14 @@ static int walk_actor(void *u,unsigned p)
     avp_dev_cheats_tick();
     /* The lightweight no-AMP walktest still needs the original HUD
      * calculations; normal combat mode does these after the world step. */
-    if(!t->combat_test){UpdtHUDMsg();UpdtHUD();}
+    if(!t->combat_test){
+        UpdtHUDMsg();
+        avp_hud_set_low_health_energy_flash(
+            p==0u?avp_pc_video_low_health_energy_flash(t->video):
+            (p<AVP_MP_INPUT_PLAYERS?
+                t->profiles.player[p].low_health_energy_flash:1));
+        UpdtHUD();
+    }
     {uint16_t lift_x,lift_y;
      if(cur_level>=1 && cur_level<=15 &&
         avp_mp_doors_native_pending_lift(&lift_x,&lift_y) &&
@@ -1278,7 +1464,7 @@ static int walk_actor(void *u,unsigned p)
      * Latch the actual owner + authored panel offset and clear the shared
      * event so the next actor cannot overwrite the first request. */
     if(comp_panel && player_type==PT_HUMAN && !t->dm.enabled){
-        t->terminal_pending_mask|=1u<<p;
+        t->terminal_pending_mask|=(1u<<p);
         t->terminal_pending_panel[p]=comp_panel;
         t->terminal_pending_offset[p]=comp_offset;
         comp_panel=0;
@@ -1287,6 +1473,11 @@ static int walk_actor(void *u,unsigned p)
         t->exit_kind[p]=avp_doors_host_exit_kind();
         if(!avp_mp_transition_queue(&t->transitions,p,new_level,
                                      new_x,new_y,use_cocoon))result=0;
+        else if(!use_cocoon){
+            const AvpMpTransitionRequest *r=&t->transitions.player[p];
+            if(walk_is_duct_transfer((unsigned)cur_level,r))
+                avp_mp_life_begin(&t->vent_fade[p]);
+        }
     }
     /* Original per-actor exit must never leak to the next actor, nor to
      * whatever player was bound before the shared-world transaction. */
@@ -1300,11 +1491,13 @@ static int walk_actor(void *u,unsigned p)
     avp_pc_runtime_set_mp_bot_floor_guard(0);
     avp_pc_runtime_set_mp_player_floor_guard(0);
     avp_pc_runtime_set_mp_fast_sweep_guard(0);
+    avp_player_host_double_movement(0);
     avp_pc_runtime_set_noclip(avp_pc_video_noclip(t->video));
     avp_player_set_pain_sounds(avp_pc_video_player_pain_sounds_enabled(t->video));
     avp_player_set_facehug_pain_sounds(avp_pc_video_facehug_pain_sounds_enabled(t->video));
     avp_mazescrn_set_facehug_shake_pain_sounds(avp_pc_video_facehug_shake_sounds_enabled(t->video));
     if(p<t->players && !avp_pc_video_local_mp_hud_message_route(t->video,-1))result=0;
+    avp_new_damage_gate_set(0);
     return result;
 }
 
@@ -1318,7 +1511,7 @@ static int walk_actor(void *u,unsigned p)
  * a living acquired target while visible. Reacquire nearest visible actor,
  * or nearest living actor if none is visible, and reset on AMP slot reuse. */
 static int walk_choose_target(void *u,const AvpAmp *a,unsigned amp_index,
-                              unsigned mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
+                              AvpMpActorMask mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     unsigned best=~0u, visible=~0u;
@@ -1335,7 +1528,7 @@ static int walk_choose_target(void *u,const AvpAmp *a,unsigned amp_index,
         t->amp_locked_player[level][amp_index]=-1;
      }}
     from.x=a->xpos;from.y=a->ypos;
-    for(unsigned i=0;i<AVP_LOCAL_MP_MAX_ACTORS;i++)if(mask&(1u<<i)){
+    for(unsigned i=0;i<AVP_LOCAL_MP_MAX_ACTORS;i++)if(mask&(AVP_MP_ACTOR_BIT(i))){
         const AvpMpActorNativeState *p=actors[i];
         uint64_t dx,dy,d;
         int clear;
@@ -1383,7 +1576,7 @@ static int walk_choose_target(void *u,const AvpAmp *a,unsigned amp_index,
     return best==~0u?-1:(int)best;
 }
 static int walk_update_view_contacts(AvpMpWalkHost *t,unsigned p,
-                                     const AvpMpNativeWorld *world);
+                                     unsigned viewer,const AvpMpNativeWorld *world);
 
 /* R64: all Marine third-person attack timing is derived AFTER the original
  * UpdtScrOverlays weapon-script tick. PLAYER.S movement (walk_actor) merely
@@ -1433,19 +1626,20 @@ static int walk_post_actor(void *u,unsigned player)
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     AvpMpWeaponAudioState old_host;
     int ok;
-    if(player>=t->actors || avp_mp_life_busy(&t->player_life[player]))return 1;
+    if(player>=t->actors || avp_mp_life_busy(&t->player_life[player]) || !walk_vent_world_present(t,player))return 1;
     if(player<t->players && !avp_pc_video_local_mp_hud_message_route(t->video,(int)player))return 0;
     if(!avp_music_mp_weapon_enter(&old_host,&t->weapon_voice[player])){
         if(player<t->players)(void)avp_pc_video_local_mp_hud_message_route(t->video,-1);
         return 0;
     }
+    avp_dev_cheats_set_health_mode(player<t->players?avp_pc_video_new_health_mode(t->video,player):AVP_NEW_HEALTH_OFF);
     avp_jaguar_fullsynth_mp_set_weapon_owner(player);
     avp_jaguar_fullsynth_mp_set_sound_source(player,(unsigned)cur_level,x_pos,y_pos);
     /* The original scanner reads its nearest contact at HUD update time,
      * before the next render. Refresh this actor's real same-level roster
      * here so player motion also drives the normal 10-Hz tracker click. */
     {const AvpMpActiveWorld *active=avp_mp_session_player_world(&t->session,player);
-     if(!active || (player<t->players && !walk_update_view_contacts(t,player,
+     if(!active || (player<t->players && !walk_update_view_contacts(t,player,player,
                    (const AvpMpNativeWorld *)active->context))){
          avp_jaguar_fullsynth_mp_clear_sound_source();
          avp_jaguar_fullsynth_mp_set_weapon_owner(0u);
@@ -1459,6 +1653,11 @@ static int walk_post_actor(void *u,unsigned player)
      * PvP shot victims must update their saved snapshots. */
     t->dm_amp_target=AVP_LOCAL_MP_MAX_ACTORS;
     t->dm_shooter=player;
+    /* R300: world-scoped HUD.S clock must follow one SESSION timebase.
+     * Separate level instances can have different historical frame_counter
+     * values; all Marines still see the SAME 120-second alarm countdown. */
+    if(t->evacuation_active && !t->dm.enabled)
+        avp_hud_set_clock((u32)(t->session.tick+1u),10u);
     avp_mazescrn_mp_fast_equip(t->dm.enabled && t->dm.fast_equip);
     avp_weapons_mp_predator_deathmatch(t->dm.enabled && player_type==PT_PREDATOR);
     /* F2 multiplayer runs outside pc_main.c's single-player settings loop.
@@ -1469,6 +1668,9 @@ static int walk_post_actor(void *u,unsigned player)
      * ammunition and weapon/species restrictions without modification. */
     avp_mazescrn_set_unlimited_shooting_range(
         avp_pc_video_unlimited_shooting_range(t->video));
+    avp_mazescrn_set_alien_cocoon_infinite_ammo_assist(
+        avp_pc_video_alien_cocoon_infinite_ammo_assist(t->video) &&
+        avp_dev_cheats_infinite_ammo());
     {
         AvpMpWeaponEngineState before,after;
         const int watch_marine=player_type==PT_HUMAN &&
@@ -1481,6 +1683,7 @@ static int walk_post_actor(void *u,unsigned player)
     avp_mazescrn_mp_fast_equip(0);
     t->dm_shooter=AVP_LOCAL_MP_MAX_ACTORS;
     PostFrame();
+    avp_dev_cheats_health_tick();
     UpdtHUDMsg();
     /* The original HP2 calculation now receives *this listener's* actual
      * voice PCM samples: own sounds always, others only if same original
@@ -1489,6 +1692,12 @@ static int walk_post_actor(void *u,unsigned player)
     {s32 l=0,r=0;
         avp_jaguar_fullsynth_mp_meter_near(player,(unsigned)cur_level,x_pos,y_pos,&l,&r);
         avp_hud_set_pred_meter_samples(l,r);
+        /* Native HUD world is shared, but each actor's Energy preference is not.
+         * Restore the proper value immediately before the scoped HUD update. */
+        avp_hud_set_low_health_energy_flash(
+            player==0u?avp_pc_video_low_health_energy_flash(t->video):
+            (player<AVP_MP_INPUT_PLAYERS?
+                t->profiles.player[player].low_health_energy_flash:1));
         UpdtHUD();
         if(player<t->players && !avp_pc_video_local_mp_waveform_step(t->video,player,l,r)){
             avp_jaguar_fullsynth_mp_clear_sound_source();
@@ -1499,6 +1708,7 @@ static int walk_post_actor(void *u,unsigned player)
     avp_jaguar_fullsynth_mp_clear_sound_source();
     avp_jaguar_fullsynth_mp_set_weapon_owner(0u);
     ok=avp_music_mp_weapon_leave(&old_host,&t->weapon_voice[player]);
+    avp_new_damage_gate_set(0);
     ++t->weapon_updates;
     if(player<t->players && !avp_pc_video_local_mp_hud_message_route(t->video,-1))ok=0;
     return ok;
@@ -1508,12 +1718,12 @@ static int walk_post_actor(void *u,unsigned player)
  * actors skip that callback, but their fixed-camera view still shows moving
  * enemies. Refresh only their renderer history, without stepping movement,
  * weapons, death fade, or world simulation again. */
-static int walk_snapshot_dying_views(void *u,unsigned member_mask)
+static int walk_snapshot_dying_views(void *u,AvpMpActorMask member_mask)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     const u8 *maze=avp_collision_maze_data();
     if(!t || !maze || !maze_width || !maze_height)return 0;
-    for(unsigned p=0;p<t->players;p++)if((member_mask&(1u<<p)) &&
+    for(unsigned p=0;p<t->players;p++)if((member_mask&(AVP_MP_ACTOR_BIT(p))) &&
                                            avp_mp_life_busy(&t->player_life[p])){
         AvpMpActorNativeState *a=(AvpMpActorNativeState *)t->session.player[p];
         AvpMpActorNativeScope scope={0};
@@ -1566,6 +1776,67 @@ static int walk_debug_refresh_bound_level(AvpMpWalkHost *t)
     return 1;
 }
 
+/* The original AMP.S ACIDX is one shared effect per puddle. Multiplayer
+ * contact is evaluated for each living actor; route each NEW contact cue
+ * through that actor's source identity rather than playing it globally.
+ * The hosted DSP keeps the same original descriptor and synthesis. */
+/* The original AMP loop owns every enemy's precise XY.  Apply the
+ * source tag only for the duration of THAT enemy mode, so an Alien on
+ * Sub-Level 3 cannot be heard by a Sub-Level 4 listener.  This also tags
+ * direct DoEffect voices from enemy Marine guns, not only amp_sfx calls. */
+static void walk_refill_protected_actor(void *u,unsigned player,int entering)
+{
+    AvpMpWalkHost *t=(AvpMpWalkHost *)u;
+    AvpNewHealthMode mode=t && player<t->players?
+        avp_pc_video_new_health_mode(t->video,player):AVP_NEW_HEALTH_OFF;
+    if(entering)avp_new_damage_gate_set(mode==AVP_NEW_HEALTH_INVINCIBLE);
+    else{
+        avp_new_health_apply(mode,&player_energy,&old_energy,max_energy);
+        avp_new_damage_gate_set(0);
+    }
+}
+static void walk_enemy_sound_scope(void *u,const AvpAmp *a,unsigned level,
+                                    int entering)
+{
+    (void)u;
+    if(entering && a && a>=amp_data && a<amp_data+AVP_NUM_AMPS)
+        avp_jaguar_fullsynth_mp_set_world_sound_source(level,a->xpos,a->ypos,
+                                                        (unsigned)(a-amp_data));
+    else avp_jaguar_fullsynth_mp_clear_sound_source();
+}
+static void walk_player_acid_cue(void *u,unsigned player,unsigned level,
+                                  int32_t x,int32_t y)
+{
+    const AvpMpWalkHost *t=(const AvpMpWalkHost *)u;
+    const AvpRuntimeOps *ops=avp_runtime_ops();
+    if(!t || player>=t->actors || !ops || !ops->play_sfx)return;
+    avp_jaguar_fullsynth_mp_set_sound_source(player,level,x,y);
+    avp_jaguar_fullsynth_mp_set_personal_cue(1);
+    ops->play_sfx(ops->user,AVP_FX_ACIDX);
+    avp_jaguar_fullsynth_mp_set_personal_cue(0);
+    avp_jaguar_fullsynth_mp_clear_sound_source();
+}
+/* World-local physical presence, not view count or player collision toggle.
+ * Duct/death fades have no physical avatar, and other levels must not
+ * influence the door state of this bound level. */
+static int walk_door_actor_present(const AvpMpWalkHost *t,unsigned q,unsigned level)
+{
+    const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,q);
+    const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[q];
+    return w && w->level==level && a && a->player.player_energy>0 &&
+        !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q);
+}
+static unsigned walk_door_occupants(const AvpMpWalkHost *t,unsigned level,
+                                   AvpMpDoorOccupant *out)
+{
+    unsigned count=0;
+    for(unsigned q=0;q<t->actors;q++)if(walk_door_actor_present(t,q,level)){
+        const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[q];
+        out[count++]=(AvpMpDoorOccupant){a->player.x_pos,a->player.y_pos};
+    }
+    return count;
+}
+
 static int walk_world(void *u)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
@@ -1605,12 +1876,13 @@ static int walk_world(void *u)
      int32_t prior_new_x=new_x,prior_new_y=new_y;
      const AvpMpActiveWorld *member=NULL;
      const AvpMpActorNativeState *passenger=NULL;
+     int lift_present=0;
      if(level && avp_mp_doors_native_pending_lift(&lx,&ly)){
         int valid=0;
         if(owner>=0 && (unsigned)owner<t->actors){
             const AvpMpActiveWorld *assigned=avp_mp_session_player_world(&t->session,(unsigned)owner);
             const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[(unsigned)owner];
-            valid=assigned && assigned->level==level && a &&
+            valid=assigned && a && walk_door_actor_present(t,(unsigned)owner,level) &&
                 (u16)(a->player.x_pos>>16)==lx &&
                 (u16)(a->player.y_pos>>16)==ly && a->player.player_energy>0;
         }
@@ -1619,7 +1891,7 @@ static int walk_world(void *u)
             for(unsigned q=0;q<t->actors;q++){
                 const AvpMpActiveWorld *candidate=avp_mp_session_player_world(&t->session,q);
                 const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[q];
-                if(candidate && candidate->level==level && a && a->player.player_energy>0 &&
+                if(candidate && a && walk_door_actor_present(t,q,level) &&
                    (u16)(a->player.x_pos>>16)==lx && (u16)(a->player.y_pos>>16)==ly){
                     owner=(int8_t)q;break;
                 }
@@ -1631,15 +1903,31 @@ static int walk_world(void *u)
         owner>=0 && (unsigned)owner<t->actors){
         member=avp_mp_session_player_world(&t->session,(unsigned)owner);
         passenger=(const AvpMpActorNativeState *)t->session.player[(unsigned)owner];
-        if(member && member->level==level && passenger &&
+        if(member && passenger && walk_door_actor_present(t,(unsigned)owner,level) &&
            (u16)(passenger->player.x_pos>>16)==lx &&
            (u16)(passenger->player.y_pos>>16)==ly){
             x_pos=passenger->player.x_pos;
             y_pos=passenger->player.y_pos;
+            lift_present=1;
         }
      }
      avp_doors_host_clear_exit_kind();
-     avp_mp_player_native_step_world_doors();
+     /* The delayed original lift effect is emitted by world DoorStep, not
+      * by an actor update. Attribute its sound to the authored lift cell
+      * in THIS bound multiplayer level. SP never enters this host path. */
+     {uint16_t sound_x=0u,sound_y=0u;
+      const int sound_lift=level && avp_mp_doors_native_pending_lift(&sound_x,&sound_y);
+      if(sound_lift)avp_jaguar_fullsynth_mp_set_world_sound_source(level,
+          (s32)((uint32_t)sound_x<<16 | 0x8000u),
+          (s32)((uint32_t)sound_y<<16 | 0x8000u),AVP_NUM_AMPS+level);
+      AvpMpDoorOccupant occupants[AVP_LOCAL_MP_MAX_ACTORS];
+      const unsigned count=walk_door_occupants(t,level,occupants);
+      const unsigned reversed=avp_mp_doors_native_step_occupied(occupants,count,lift_present);
+      if(reversed && getenv("AVP_BOT_PLAYTEST_TRACE"))
+          fprintf(stderr,"MP door occupancy: level=%u tick=%llu count=%u reversed=%u\n",
+                  level,(unsigned long long)t->session.tick,count,reversed);
+      if(sound_lift)avp_jaguar_fullsynth_mp_clear_sound_source();
+     }
      if(new_level && new_level!=prior_new_level){
         if(!passenger || !member || member->level!=level ||
            x_pos!=passenger->player.x_pos ||
@@ -1675,8 +1963,7 @@ static void walk_live_look_poll(AvpMpWalkHost *t,uint64_t now,unsigned sim_hz)
         int enabled;
         if(!a || t->session.setup.bot_enabled[p] ||
            avp_mp_life_busy(&t->player_life[p]) ||
-           t->vent_fade[p].phase==AVP_MP_LIFE_FADE_OUT ||
-           t->vent_fade[p].phase==AVP_MP_LIFE_WAIT_LEVEL ||
+           !walk_vent_world_present(t,p) ||
            t->quick_turn[p].active || a->weapon.hugkill){
             avp_pc_live_heading_reset(&t->live_heading[p]);
             continue;
@@ -1703,13 +1990,13 @@ static void walk_live_look_poll(AvpMpWalkHost *t,uint64_t now,unsigned sim_hz)
  * existing map marker roster so that neither dead/corpse players nor actors
  * in another original Jaguar level appear as moving motion contacts. */
 static int walk_update_view_contacts(AvpMpWalkHost *t,unsigned p,
-                                     const AvpMpNativeWorld *world)
+                                     unsigned viewer,const AvpMpNativeWorld *world)
 {
     AvpGpuMapTeammate dots[AVP_GPU_MAP_TEAMMATES];
     AvpGpuMapTeammate presentation[AVP_GPU_MAP_TEAMMATES];
     unsigned count=0;
     int smooth;
-    if(!t||!world||p>=t->players)return 0;
+    if(!t||!world||p>=t->actors||viewer>=t->players)return 0;
     smooth=avp_pc_video_smooth_presentation(t->video) && t->session.tick!=0;
     for(unsigned q=0;q<t->actors;q++){
         const AvpMpActorNativeState *other;
@@ -1717,7 +2004,8 @@ static int walk_update_view_contacts(AvpMpWalkHost *t,unsigned p,
         pw=avp_mp_session_player_world(&t->session,q);
         other=(const AvpMpActorNativeState *)t->session.player[q];
         if(!other || !avp_mp_tracker_peer_eligible(p,q,world,
-                pw?pw->context:NULL,avp_mp_life_busy(&t->player_life[q]),
+                pw?pw->context:NULL,
+                avp_mp_life_busy(&t->player_life[q]) || !walk_vent_world_present(t,q),
                 other->player.player_energy,other->player.game_over))continue;
         if(count>=AVP_GPU_MAP_TEAMMATES)break;
         dots[count].x=other->player.x_pos;
@@ -1742,7 +2030,7 @@ static int walk_update_view_contacts(AvpMpWalkHost *t,unsigned p,
         }
         ++count;
     }
-    return avp_pc_video_local_mp_map_teammates(t->video,p,dots,
+    return avp_pc_video_local_mp_map_teammates(t->video,viewer,dots,
                              presentation,count,t->map_zoom_steps[p]);
 }
 
@@ -1762,8 +2050,9 @@ static int walk_marine_attack_front(const AvpGpuOtherPlayer *other,
     return fabs(rel)>3.0*pi/4.0;
 }
 
-static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
-                     AvpMpActorNativeState *actor,AvpLocalMpSourceFrame *out)
+static int walk_draw_view(void *u,AvpMpNativeWorld *world,unsigned p,
+                          unsigned viewer,AvpMpActorNativeState *actor,
+                          AvpLocalMpSourceFrame *out)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)u;
     const AvpMpRetailMap *m=world->map;
@@ -1811,7 +2100,8 @@ static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
             const AvpMpActiveWorld *pw;
             s16 type;
             int moving;
-            if(q==p || avp_mp_life_busy(&t->player_life[q]))continue;
+            if(q==p || avp_mp_life_busy(&t->player_life[q]) ||
+               !walk_vent_world_present(t,q))continue;
             pw=avp_mp_session_player_world(&t->session,q);
             if(!pw || pw->context!=world)continue;
             b=(const AvpMpActorNativeState *)t->session.player[q];
@@ -1895,6 +2185,13 @@ static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
                     others[visible].animation=pose.sequence;
                     others[visible].frame=pose.frame;
                 }else if(t->sprite_fire_active[q] &&
+                    /* The frontend has already claimed Pulse/Smart frames:
+                     * never pre-display the generic crouch sprite, which
+                     * otherwise precedes/duplicates the wind-up. */
+                    !avp_mp_sprite_marine_front_owns_attack(species,
+                        t->sprite_fire_weapon[q],
+                        type==PT_HUMAN &&
+                        walk_marine_attack_front(&others[visible],rx,ry)) &&
                     (pose=avp_mp_sprite_attack_pose_view(species,
                         t->sprite_fire_weapon[q],(unsigned)(
                             t->session.tick-t->sprite_attack_tick[q]),
@@ -1944,30 +2241,47 @@ static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
                 others[visible].frame=0;
             ++visible;
         }
-        if(!avp_pc_video_local_mp_set_other_players(t->video,p,others,visible))return 0;
+        if(!avp_pc_video_local_mp_set_other_players(t->video,viewer,others,visible))return 0;
     }
-    if(!walk_update_view_contacts(t,p,world))return 0;
-    if(!avp_pc_video_local_mp_render_actor(t->video,p,m->bytes+8u,
+    if(!walk_update_view_contacts(t,p,viewer,world))return 0;
+    avp_pc_video_local_mp_spy_status(t->video,viewer,p,t->dm.enabled,
+                       t->dm.kills[p],t->dm.deaths[p]);
+    if(!avp_pc_video_local_mp_render_actor(t->video,viewer,p,m->bytes+8u,
           (u16)m->width,(u16)m->height,rx,ry,ra,m->level,
           t->session.tick,out))return 0;
+    if(viewer==p && viewer<t->players &&
+       !avp_mp_life_frame_preserve(&t->vent_frame[viewer],&t->vent_fade[p],
+            (uint32_t *)(uintptr_t)out->pixels,out->width,out->height,out->pitch))
+        return 0;
     avp_mp_life_apply(&t->player_life[p],(uint32_t *)(uintptr_t)out->pixels,
                       out->width,out->height,out->pitch);
     avp_mp_life_apply(&t->vent_fade[p],(uint32_t *)(uintptr_t)out->pixels,
                       out->width,out->height,out->pitch);
     /* Render the PC kill confirmation AFTER death/transition fades, so the
      * victim can read KILLED BY even during the black death screen. */
-    if(t->dm.enabled){
+    if(t->dm.enabled && viewer<t->players){
         unsigned other=0u;
-        unsigned kind=avp_mp_kill_notice_visible(&t->dm_notices[p],
-                                                 t->session.tick,&other);
-        if(kind && !avp_pc_video_local_mp_draw_kill_notice(t->video,p,kind,other,
-                                               actor->player.player_type))
+        unsigned kind=avp_mp_kill_notice_visible_for_viewer(
+            t->dm_notices,t->players,viewer,t->session.tick,&other);
+        const AvpMpActorNativeState *viewer_actor=
+            (const AvpMpActorNativeState *)t->session.player[viewer];
+        if(kind && !avp_pc_video_local_mp_draw_kill_notice(t->video,viewer,kind,other,
+            viewer_actor?viewer_actor->player.player_type:actor->player.player_type))
             return 0;
     }
     return 1;
 }
+static int walk_draw(void *u,AvpMpNativeWorld *world,unsigned p,
+                     AvpMpActorNativeState *actor,AvpLocalMpSourceFrame *out)
+{return walk_draw_view(u,world,p,p,actor,out);}
+static int walk_draw_spy(void *u,AvpMpNativeWorld *world,unsigned p,
+                         unsigned viewer,AvpMpActorNativeState *actor,
+                         AvpLocalMpSourceFrame *out)
+{return walk_draw_view(u,world,p,viewer,actor,out);}
 static void walk_cleanup(AvpMpWalkHost *t)
 {
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_PLAYERS;p++)
+        avp_mp_life_frame_release(&t->vent_frame[p]);
     /* A game-over, an aborted transfer, or closing the co-op window does
      * not enter PlayAvP::load_complete. Release any still-owned airlock/lift
      * loops while the original per-world handles remain available. This is
@@ -2024,6 +2338,9 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
     if(!t||!v||!controls||!source||!maze_width||maze_width>64u||
        !maze_height||maze_height>64u||level<1u||level>15u||
        players<1u||players>AVP_LOCAL_MP_MAX_PLAYERS)return 0;
+    avp_amp_set_enemy_number_multiplier(avp_pc_video_enemy_number_multiplier(v));
+    avp_amp_set_vent_facehuggers(avp_pc_video_vent_facehuggers(v));
+    avp_pc_video_apply_enemy_stats(v);
     t->video=v;t->rom=rom;t->level=level;t->combat_test=combat_test!=0;t->players=players;
     t->species=(unsigned)player_type>>2;
     if(t->species>AVP_MP_PREDATOR)return 0;
@@ -2112,9 +2429,14 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
     t->host.advance_level=walk_world;
     if(t->combat_test){
         t->host.choose_amp_target=walk_choose_target;
+        t->host.actor_world_present=walk_amp_world_present;
+        t->host.on_acid_contact=walk_player_acid_cue;
+        t->host.on_enemy_sound_scope=walk_enemy_sound_scope;
+        t->host.on_actor_damage=walk_refill_protected_actor;
         t->host.advance_actor_post_world=walk_post_actor;
     }
     t->host.draw_actor=walk_draw;
+    t->host.draw_spy_actor=walk_draw_spy;
     avp_local_mp_defaults(&setup);
     setup.enabled=1;setup.players=t->players;setup.campaign=t->species;
     {const AvpLocalMpSetup *menu=avp_pc_video_local_mp_setup(v);
@@ -2159,6 +2481,16 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
     avp_pc_video_local_mp_runtime_setup(v,&setup);
     ops=avp_mp_native_backend_ops();
     if(!avp_mp_session_start(&t->session,&setup,&ops,&t->host))return 0;
+    if(!walk_clear_arrival_enemies(t,
+        (AVP_MP_ACTOR_BIT(t->actors)-UINT64_C(1))))return 0;
+    /* First-spawn randomization is independent from death/respawn. Apply
+     * per actor after the original first world exists, through the normal
+     * transactional destination factory, before the first rendered frame. */
+    if(setup.spawn_in_random_level && setup.custom_session_id!=AVP_MP_CUSTOM_LEVEL){
+        for(unsigned p=0;p<t->actors;p++)
+            if(!walk_random_level_spawn(t,p))return 0;
+        walk_shared_arrival_refresh(t,AVP_MP_ACTOR_BIT(t->actors)-UINT64_C(1));
+    }
     walk_refresh_audio_listeners(t);
     t->dm_shooter=AVP_LOCAL_MP_MAX_ACTORS;
     t->dm_amp_target=AVP_LOCAL_MP_MAX_ACTORS;
@@ -2173,6 +2505,7 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
         if(a)avp_mp_dm_speed(1,&a->player.max_speed,&a->player.acc_shift);
     }
     avp_amp_mp_set_campaign_type((s16)(t->species<<2));
+    avp_amp_mp_set_predator_honor_coop(t->species==AVP_MP_PREDATOR && !t->dm.enabled);
     t->current_ambient_level=level; /* host already started the original level cue */
     for(unsigned p=0;p<t->players;p++){
         const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
@@ -2183,7 +2516,7 @@ static int walk_init(AvpMpWalkHost *t,AvpPcVideo *v,unsigned level,
         t->prev_angle[p]=a->player.centre_angle;
         t->live_last_game_angle[p]=a->player.centre_angle;
     }
-    walk_shared_arrival_refresh(t,(1u<<t->actors)-1u);
+    walk_shared_arrival_refresh(t,AVP_MP_ACTOR_BIT(t->actors)-UINT64_C(1));
     t->presentation_alpha=1.0;
     return 1;
 }
@@ -2302,6 +2635,56 @@ static int walk_bot_source_los(AvpMpNativeWorld *world,
     if(!avp_mp_native_world_leave(&scope,world))return 0;
     return clear;
 }
+/* Original sight can be clear while a source-collision furniture AMP is
+ * directly between the Marine and an Alien. This probe is ONLY a movement
+ * heuristic; original TestSpark / FireDistance still decide actual hits.
+ * It never treats a hostile AMP as invisible furniture or peeks beyond a
+ * currently known last-seen/tracker contact. */
+static int walk_bot_prop_line_clear(const AvpMpNativeWorld *world,
+    u32 x,u32 y,u32 tx,u32 ty,unsigned target_slot)
+{
+    const double ax=(double)x/65536.0,ay=(double)y/65536.0;
+    const double dx=(double)((int64_t)tx-(int64_t)x)/65536.0;
+    const double dy=(double)((int64_t)ty-(int64_t)y)/65536.0;
+    const double length=sqrt(dx*dx+dy*dy);
+    const unsigned samples=(unsigned)(length*8.0)+1u;
+    if(!world || !samples)return 0;
+    for(unsigned i=1u;i<samples;i++){
+        const double t=(double)i/(double)samples;
+        const double cx=ax+dx*t,cy=ay+dy*t;
+        const unsigned bx=(unsigned)cx,by=(unsigned)cy;
+        unsigned owner;
+        const AvpAmp *obstacle;
+        const uint32_t half_limit=(uint32_t)(0.125*65536.0);
+        uint32_t half;
+        if(cx<0.0||cy<0.0||bx>=64u||by>=64u)continue;
+        owner=world->amp.collmap[by*64u+bx];
+        if(!owner||owner>AVP_NUM_AMPS||owner-1u==target_slot)continue;
+        obstacle=&world->amp.actors[owner-1u];
+        if((!obstacle->mode&&!obstacle->host_static) ||
+           walk_bot_hostile(obstacle))continue;
+        half=walk_bot_amp_halfwidth(obstacle->creature);
+        if(!half)continue;
+        /* Do not veto the muzzle merely because it starts inside an
+         * obstacle's large original collision square. */
+        if(t*length<0.25 || (1.0-t)*length<0.28)continue;
+        if(fabs(cx-(double)obstacle->xpos/65536.0)<
+               (double)(half+half_limit)/65536.0 &&
+           fabs(cy-(double)obstacle->ypos/65536.0)<
+               (double)(half+half_limit)/65536.0)return 0;
+    }
+    return 1;
+}
+typedef struct WalkBotLaneProbe {
+    AvpMpNativeWorld *world;
+    unsigned target_slot;
+} WalkBotLaneProbe;
+static int walk_bot_firing_lane_probe(void *ctx,u32 x,u32 y,u32 tx,u32 ty)
+{
+    const WalkBotLaneProbe *q=(const WalkBotLaneProbe *)ctx;
+    return q && walk_bot_source_los(q->world,x,y,tx,ty) &&
+           walk_bot_prop_line_clear(q->world,x,y,tx,ty,q->target_slot);
+}
 static int walk_bot_trail_los(void *ctx,u32 x,u32 y,u32 tx,u32 ty)
 { return walk_bot_source_los((AvpMpNativeWorld *)ctx,x,y,tx,ty); }
 /* Incremental map exploration is scoped to this bot, not the positions of
@@ -2320,6 +2703,25 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
         ++t->patrol[p].visits[y*64u+x];
     dx=(uint64_t)llabs((long long)(int64_t)v->x-((long long)t->patrol[p].x));
     dy=(uint64_t)llabs((long long)(int64_t)v->y-((long long)t->patrol[p].y));
+    if(t->patrol[p].valid && t->bots[p].acid_exit_count && v->map.risk){
+        AvpMpBotObservation previous=*v;
+        previous.goal=AVP_MP_BOT_PATROL;previous.has_target=1u;
+        previous.hostile_target=0u;
+        previous.target_x=t->patrol[p].x;previous.target_y=t->patrol[p].y;
+        if(avp_mp_bot_acid_goal_unsafe(&t->bots[p],&previous) ||
+           avp_mp_bot_acid_goal_blocked(&previous)){
+            t->patrol[p].valid=0u;
+            t->bots[p].nav_retarget_patrol=0u;
+        }
+    }
+    if(t->patrol[p].valid){
+        if(t->bots[p].nav_retarget_patrol){
+            const unsigned gx=t->patrol[p].x>>16,gy=t->patrol[p].y>>16;
+            if(gx<64u && gy<64u)t->patrol[p].visits[gy*64u+gx]=65535u;
+            t->patrol[p].valid=0u;
+            t->bots[p].nav_retarget_patrol=0u;
+        }
+    }
     if(t->patrol[p].valid){
         const unsigned gx=t->patrol[p].x>>16,gy=t->patrol[p].y>>16;
         const unsigned gi=gy*64u+gx;
@@ -2354,7 +2756,8 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
                 t->patrol[p].visits[gi]+=500u;
             t->patrol[p].valid=0u;
         }else if(v->tick>=t->patrol[p].expires ||
-                 v->tick-t->patrol[p].last_progress_tick>=25u){
+                 v->tick-t->patrol[p].last_progress_tick>=
+                     (level==4u?130u:75u)){
             /* Reject the repeatedly blocked destination until this level
              * is reset; don't choose it again after every 19-tick recovery. */
             if(gi<AVP_MP_BOT_MAP_CELLS)t->patrol[p].visits[gi]=65535u;
@@ -2379,7 +2782,18 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
          (uint32_t)(p+1u)*0x9e3779b9u+(uint32_t)(v->tick/180u),&tx,&ty)){
         t->patrol[p].x=(tx<<16)|0x8000u;
         t->patrol[p].y=(ty<<16)|0x8000u;
-        t->patrol[p].expires=v->tick+180u;
+        /* The Training Maze (Sub-Level 4) has long, winding hallways and
+         * dead ends. Give the path enough wall-clock time to physically
+         * traverse its Dijkstra distance rather than resetting every 18s.
+         * Keep a separate progress watchdog for real stalls. */
+        {AvpMpBotRoute planned={0};
+         uint64_t budget=level==4u?1500u:600u;
+         if(avp_mp_bot_route(&v->map,x,y,tx,ty,&planned)){
+             const uint64_t travel=(uint64_t)planned.cost*(level==4u?8u:5u);
+             if(travel>budget)budget=travel;
+         }
+         if(budget>(level==4u?4200u:2400u))budget=level==4u?4200u:2400u;
+         t->patrol[p].expires=v->tick+budget;}
         t->patrol[p].last_progress_tick=v->tick;
         {
             uint64_t gx=(uint64_t)llabs((long long)(int64_t)v->x-(long long)t->patrol[p].x);
@@ -2405,9 +2819,10 @@ static void walk_bot_patrol(AvpMpWalkHost *t,unsigned p,
     }
 }
 /* One observation pass per bot per native 10-Hz tick. An enemy's current
- * position is NEVER handed to the planner unless it was visually observed
- * (forward 140-degree field + original LineOfSight), or is detected by an
- * actually-owned Marine motion tracker inside original 15-m scanner range.
+ * position is NEVER handed to the planner unless it was observed through
+ * original LineOfSight (forward 140-degree field or a short-range proximity
+ * alert for a living threat),
+ * or is detected by an actually-owned Marine motion tracker in 15-m range.
  * Stale contacts only supply their LAST OBSERVED POSITION for four seconds.
  * This policy applies to both original AMP enemies and Deathmatch players. */
 static void walk_bot_scan_contacts(AvpMpWalkHost *t,unsigned p,
@@ -2424,7 +2839,21 @@ static void walk_bot_scan_contacts(AvpMpWalkHost *t,unsigned p,
         const u32 x=(u32)a->xpos,y=(u32)a->ypos;
         const int radar=usable && tracker && (a->flags&(1u<<AMP_MOTION)) &&
             avp_bot_motion_range(v->x,v->y,x,y);
-        const int sight=usable && avp_bot_in_view(v->heading,v->x,v->y,x,y) &&
+        /* R298: Source-LOS-gated proximity detection. A Facehugger can
+         * sprint in from beside/behind a Marine before entering the old
+         * 140-degree cone. Give active Facehuggers a four-tile warning,
+         * adult/Queen melee threats three, active ranged enemies two.
+         * Never disclose an egg, item, wall-hidden or closed-door actor.
+         * Keep the forward cone's original eight-tile reach otherwise. */
+        unsigned peripheral_tiles=0u;
+        if(a->creature==AC_FACEHUG)peripheral_tiles=4u;
+        else if(a->creature==AC_ALIEN || a->creature==AC_ACRAWL ||
+                a->creature==AC_AQUEEN)peripheral_tiles=3u;
+        else if(a->creature==AC_PREDATOR || a->creature==AC_HUMAN)
+            peripheral_tiles=2u;
+        const int sight=usable &&
+            avp_bot_in_view_or_nearby(v->heading,v->x,v->y,x,y,
+                                     peripheral_tiles) &&
             walk_bot_source_los((AvpMpNativeWorld *)world,v->x,v->y,x,y);
         AvpMpBotTrail *trail=&t->amp_trails[level-1u][i];
         if(!usable){
@@ -2449,7 +2878,7 @@ static void walk_bot_scan_contacts(AvpMpWalkHost *t,unsigned p,
         u32 x,y;
         int radar,sight;
         if(!t->dm.enabled||q==p||q>=t->actors||
-           avp_mp_life_busy(&t->player_life[q]) ||
+           avp_mp_life_busy(&t->player_life[q]) || !walk_vent_world_present(t,q) ||
            avp_mp_session_player_world(&t->session,q)!=
              avp_mp_session_player_world(&t->session,p) ||
            !(enemy=(const AvpMpActorNativeState *)t->session.player[q])||
@@ -2640,7 +3069,7 @@ static int walk_bot_level_layouts(const AvpMpWalkHost *t,
             return 0;
         layouts[idx].map=(AvpMpBotMap){bytes+8u,width,height,
              loaded?loaded->doors.wall_flags:current->doors.wall_flags,
-             &metas[idx],access_level,NULL,NULL};
+             &metas[idx],access_level,NULL,NULL,0u};
         layouts[idx].meta=&metas[idx];
         layouts[idx].panel_ids=t->bot_panel_ids[idx];
         memcpy(layouts[idx].panel_list,t->bot_panel_list[idx],
@@ -2694,7 +3123,8 @@ static int walk_bot_choose_level_route(AvpMpWalkHost *t,unsigned player,
          * the actual chosen portal remains reachable EVERY decision. */
         if(t->bot_level_cache[player].valid &&
            tick>=t->bot_level_cache[player].tick &&
-           tick-t->bot_level_cache[player].tick<8u &&
+           tick-t->bot_level_cache[player].tick<
+               (world->map->level==4u?75u:35u) &&
            t->bot_level_cache[player].from_level==world->map->level &&
            t->bot_level_cache[player].goal_level==destination &&
            t->bot_level_cache[player].species==species &&
@@ -2744,10 +3174,1784 @@ static int walk_bot_choose_level_route(AvpMpWalkHost *t,unsigned player,
     }
     return 0;
 }
+/* Deathmatch bots otherwise run the SAME single-level patrol forever: the
+ * campaign and co-op code are the only callers of the authored portal
+ * graph. R125 supplies a goal when no known local target needs attention.
+ * The goal is stable through intermediate ducts, and uses only original
+ * DOORS.S exits/lifts, actual passage geometry and native Use commands. */
+static int walk_bot_dm_travel(AvpMpWalkHost *t,unsigned p,
+                              const AvpMpNativeWorld *world,unsigned species,
+                              AvpMpBotObservation *v)
+{
+    AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL];
+    AvpMpBotLevelPlan chosen={0};
+    unsigned level,from_x,from_y,destination=0u,ready=0u;
+    uint64_t distance;
+    /* Never change the "Players Can Move Between Levels" DM toggle or
+     * offer a retail portal on a custom map without authored LEVDOOR. */
+    if(!t || !t->dm.enabled || !t->dm.level_travel ||
+       !t->retail_catalog_ready ||
+       t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL ||
+       !world || !world->map || !v || !v->map.cells ||
+       !world->doors.level_meta ||
+       world->doors.level_meta_count<AVP_MAX_LEVEL ||
+       p>=AVP_LOCAL_MP_MAX_ACTORS)return 0;
+    level=world->map->level;
+    if(level<1u||level>AVP_MAX_LEVEL)return 0;
+    from_x=v->x>>16;from_y=v->y>>16;
+    if(from_x>=v->map.width || from_y>=v->map.height)return 0;
+    {
+        /* Alias only the one bot's policy state. The original actor and
+         * world snapshots are never written by this helper. */
+        AvpMpDmBotTravelState *r=&t->dm_bot_travel[p];
+        if(r->level!=level){
+            r->previous_level=r->level;
+            r->level=level;r->entered_tick=v->tick;
+            r->valid_hop=0u;r->avoid_valid=0u;r->retry_tick=0u;
+            if(r->target_level==level)r->target_level=0u;
+        }
+        /* An observed enemy or badly needed health takes precedence over
+         * roaming. A vent pickup is a short detour, not a permanent excuse
+         * to circle inside an empty duct: after five seconds, seek a real
+         * exit if available and keep the supply goal as fallback. */
+        if(v->has_target &&
+           (v->hostile_target || v->goal==AVP_MP_BOT_HEALTH ||
+            v->goal==AVP_MP_BOT_COCOON ||
+            !(level>=6u && level<=13u) ||
+            v->tick<r->entered_tick+50u)){
+            r->last_contact_tick=v->tick;
+            return 0;
+        }
+        if(level>=6u&&level<=13u){
+            /* No outside position is supplied. Even if a bot spawns in
+             * a vent with no opponent, it can seek a genuine exit. */
+            if(species==AVP_MP_PREDATOR)return 0; /* original duct rule */
+        }else if(!r->target_level &&
+                 (v->tick<r->entered_tick+120u ||
+                  v->tick<r->last_contact_tick+60u))return 0;
+        if(r->avoid_valid && v->tick>=r->last_progress_tick+180u)
+            r->avoid_valid=0u; /* Retry a temporarily busy exit later. */
+        if(v->tick<r->retry_tick)return 0;
+        if(r->valid_hop && r->hop.from_level==level &&
+           v->tick>=r->plan_tick && v->tick-r->plan_tick<(level==4u?100u:45u)){
+            chosen=r->hop;ready=1u;
+        }else{
+            const unsigned access=species==AVP_MP_MARINE ?
+                ((const AvpMpActorNativeState*)t->session.player[p])->access_level:10u;
+            if(!walk_bot_level_layouts(t,world,access,layouts)){
+                r->retry_tick=v->tick+30u;return 0;
+            }
+            destination=r->target_level;
+            if(!destination && level>=6u&&level<=13u){
+                ready=(unsigned)avp_mp_bot_plan_levels_avoiding(layouts,
+                    species,level,from_x,from_y,0u,0u,0u,0,
+                    r->avoid_valid?&r->avoid:NULL,&chosen);
+                if(ready)r->target_level=chosen.goal_level;
+            }else if(destination){
+                ready=(unsigned)avp_mp_bot_plan_levels_avoiding(layouts,
+                    species,level,from_x,from_y,destination,0u,0u,0,
+                    r->avoid_valid?&r->avoid:NULL,&chosen);
+            }else{
+                /* If a surface becomes quiet, explore a different level;
+                 * never use a roster's hidden coordinates to chase players.
+                 * Each bot takes a different deterministic rotation. Prefer
+                 * surface destinations to avoid aimless vent-to-vent loops. */
+                const unsigned surface[7]={1u,2u,3u,4u,5u,14u,15u};
+                const unsigned offset=(p*3u+(unsigned)(v->tick/160u))%7u;
+                for(unsigned n=0;n<7u && !ready;n++){
+                    unsigned to=surface[(n+offset)%7u];
+                    if(to==level || to==r->previous_level)continue;
+                    ready=(unsigned)avp_mp_bot_plan_levels_avoiding(layouts,
+                        species,level,from_x,from_y,to,0u,0u,0,
+                        r->avoid_valid?&r->avoid:NULL,&chosen);
+                    if(ready)r->target_level=to;
+                }
+            }
+            if(!ready){
+                /* Clear an invalid target once; use local patrol until a
+                 * fresh authored route appears, not a tight failed loop. */
+                r->target_level=0u;r->valid_hop=0u;
+                r->retry_tick=v->tick+45u;
+                return 0;
+            }
+            if(!r->valid_hop || r->hop.from_level!=chosen.from_level ||
+               r->hop.to_level!=chosen.to_level || r->hop.x!=chosen.x ||
+               r->hop.y!=chosen.y || r->hop.side!=chosen.side){
+                r->last_progress_tick=v->tick;
+                r->best_distance=UINT64_MAX;
+            }
+            r->hop=chosen;r->valid_hop=1u;r->plan_tick=v->tick;
+        }
+        if(!walk_bot_apply_level_hop(world,&v->map,from_x,from_y,
+                                     &chosen,v)){
+            r->valid_hop=0u;r->retry_tick=v->tick+8u;
+            return 0;
+        }
+        /* The chosen portal must get closer over time. If blocked by an
+         * already active door or an inaccessible panel for long enough,
+         * blacklist that FIRST portal and replan via another authored one.
+         * Leave plenty of time for the original door animation to finish. */
+        {
+            const int64_t dx=(int64_t)v->x-((int64_t)chosen.x*65536+32768);
+            const int64_t dy=(int64_t)v->y-((int64_t)chosen.y*65536+32768);
+            distance=(uint64_t)(llabs(dx)+llabs(dy));
+        }
+        if(r->best_distance==UINT64_MAX || distance+8192u<r->best_distance){
+            r->best_distance=distance;
+            r->last_progress_tick=v->tick;
+        }else if(v->tick>=r->last_progress_tick+100u){
+            r->avoid=chosen;r->avoid_valid=1u;
+            r->valid_hop=0u;
+            r->retry_tick=v->tick+10u;
+            r->last_progress_tick=v->tick;
+            r->best_distance=UINT64_MAX;
+        }
+    }
+    return 1;
+}
+
+/* Find a source-reachable tile outside the SMALL authored elevator chamber.
+ * If it is a multi-cell room, don't just move the passenger to another
+ * elevator tile and claim that the door has cleared. */
+static int walk_bot_lift_disembark(const AvpMpNativeWorld *world,
+                                  AvpMpBotObservation *v,unsigned lx,unsigned ly)
+{
+    uint32_t best=UINT32_MAX;
+    unsigned goal_x=0u,goal_y=0u,found=0u;
+    if(!world||!world->map||!v||!v->map.cells)return 0;
+    for(int dy=-4;dy<=4;dy++)for(int dx=-4;dx<=4;dx++){
+        int nx=(int)lx+dx,ny=(int)ly+dy;
+        AvpMpBotRoute route={0};
+        if(nx<0||ny<0||nx>=(int)v->map.width||ny>=(int)v->map.height ||
+           (nx==(int)lx && ny==(int)ly) ||
+           !avp_mp_bot_playable_position(v->map.cells,v->map.width,
+               v->map.height,(uint32_t)nx<<16,(uint32_t)ny<<16))continue;
+        if(avp_mp_chamber_contains(world->map,
+               (lx<<16)|0x8000u,(ly<<16)|0x8000u,
+               ((unsigned)nx<<16)|0x8000u,((unsigned)ny<<16)|0x8000u))
+            continue;
+        if(!avp_mp_bot_route(&v->map,v->x>>16,v->y>>16,
+                             (unsigned)nx,(unsigned)ny,&route) ||
+           route.cost>=best)continue;
+        best=route.cost;goal_x=(unsigned)nx;goal_y=(unsigned)ny;found=1u;
+    }
+    if(!found && !avp_mp_bot_lift_egress(&v->map,v->x>>16,v->y>>16,
+                                         &goal_x,&goal_y))return 0;
+    v->goal=AVP_MP_BOT_PATROL;
+    v->target_x=(goal_x<<16)|0x8000u;
+    v->target_y=(goal_y<<16)|0x8000u;
+    v->has_target=1u;v->hostile_target=0u;
+    v->lift_wait=0u;
+    return 1;
+}
+
+/* Co-op invitation uses only original authored lift panels and chamber
+ * containment. Human players operate their own lift; a nearby bot boards
+ * as a PASSENGER and never synthesizes the human's desired floor. The
+ * caller retains all existing source DOORS.S restrictions. */
+static unsigned walk_bot_lift_passenger_destination(unsigned level,
+        unsigned x,unsigned y,unsigned species)
+{
+    for(int delta=1;delta>=-1;delta-=2){
+        int next=(int)level+delta;
+        if(next<1||next>5 ||
+           !avp_mp_bot_transition_allowed(species,level,(unsigned)next,
+                                          AVP_MP_BOT_TRANS_LIFT) ||
+           avp_mp_bot_lift_jammed(level,x,y,delta))continue;
+        return (unsigned)next;
+    }
+    return 0u;
+}
+static int walk_bot_lift_panel(const AvpMpNativeWorld *world,
+                               unsigned x,unsigned y,unsigned *side)
+{
+    const AvpMpRetailMap *map=world?world->map:NULL;
+    if(!map || x>=map->width||y>=map->height)
+        return 0;
+    const uint8_t *cell=map->bytes+8u+((size_t)y*map->width+x)*8u;
+    unsigned authored=0u;
+    for(unsigned s=0;s<4u;s++)if(cell[s]==64u)authored=1u; /* DOORS.S LIFTDOR */
+    if(!authored)return 0;
+    for(unsigned s=0;s<4u;s++){
+        unsigned panel=cell[s]&0x7fu;
+        if(panel && panel<=AVP_MAX_PANELS){
+            unsigned file=world->doors.panel_list[panel-1u];
+            if((world->doors.panels.lift_back!=0xffu &&
+                file==world->doors.panels.lift_back) ||
+               (world->doors.panels.lift_side!=0xffu &&
+                file==world->doors.panels.lift_side)){
+                *side=s;return 1;
+            }
+        }
+    }
+    return 0;
+}
+/* Same-world, read-only co-op lift rendezvous. Only live human occupants
+ * already in an original closed elevator chamber invite bots. For a second
+ * bot, an active bot lift claim can invite another bot to join that SAME
+ * shaft, not create a second operator or destination. */
+static void walk_bot_invite_lift(AvpMpWalkHost *t,unsigned p,
+        const AvpMpNativeWorld *world,AvpMpBotObservation *v)
+{
+    unsigned chosen_x=0u,chosen_y=0u,chosen_side=0u,chosen_dest=0u;
+    unsigned human=0u,found=0u;
+    uint32_t best=UINT32_MAX;
+    const AvpMpActiveWorld *here=avp_mp_session_player_world(&t->session,p);
+    if(t->dm.enabled||!world||!world->map||!v||!v->map.cells||
+       world->map->level<1u||world->map->level>5u||
+       v->player_species==AVP_MP_ALIEN)return;
+    for(unsigned y=0;y<world->map->height;y++)for(unsigned x=0;x<world->map->width;x++){
+        unsigned side, destination=0u,is_human=0u;
+        AvpMpBotRoute route={0};
+        const uint64_t lx=((uint64_t)x<<16)|0x8000u;
+        const uint64_t ly=((uint64_t)y<<16)|0x8000u;
+        if(llabs((int64_t)v->x-(int64_t)lx)>(int64_t)(6u<<16) ||
+           llabs((int64_t)v->y-(int64_t)ly)>(int64_t)(6u<<16) ||
+           !walk_bot_lift_panel(world,x,y,&side))continue;
+        /* Occupancy is evaluated from the actual native world and actor
+         * positions, never from remembered contact coordinates. */
+        for(unsigned q=0;q<t->players;q++)if(q!=p &&
+            !t->session.setup.bot_enabled[q] &&
+            avp_mp_session_player_world(&t->session,q)==here &&
+            !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
+            const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)t->session.player[q];
+            if(a && a->player.player_energy>0 && !a->player.game_over &&
+               avp_mp_chamber_contains(world->map,(uint32_t)lx,(uint32_t)ly,
+                   a->player.x_pos,a->player.y_pos)){
+                destination=walk_bot_lift_passenger_destination(
+                    world->map->level,x,y,v->player_species);
+                if(destination){is_human=1u;break;}
+            }
+        }
+        if(!is_human){
+            for(unsigned i=0;i<AVP_MP_BOT_LIFT_CLAIMS;i++){
+                const AvpMpBotLiftClaim *c=&t->shared_lift_claims.entries[i];
+                if(!c->active || c->level!=world->map->level||
+                   c->x!=x||c->y!=y || c->leader==p ||
+                   v->tick>=c->until ||
+                   c->leader>=t->actors ||
+                   !t->session.setup.bot_enabled[c->leader] ||
+                   avp_mp_session_player_world(&t->session,c->leader)!=here ||
+                   !t->lift_intent[c->leader].level ||
+                   v->tick<t->lift_intent[c->leader].tick ||
+                   v->tick-t->lift_intent[c->leader].tick>20u ||
+                   !avp_mp_bot_transition_allowed(v->player_species,
+                       world->map->level,c->destination,AVP_MP_BOT_TRANS_LIFT))
+                    continue;
+                destination=c->destination;break;
+            }
+        }
+        {AvpMpBotObservation probe=*v;
+         probe.current_level=world->map->level;
+         if(!destination || !avp_mp_bot_lift_boarding_route(&probe,
+                   x,y,destination,&route))continue;}
+        /* Humans in the lift take precedence over other bot lift claims.
+         * Source route cost picks the closest actually reachable shaft. */
+        if(found && (is_human<human || (is_human==human && route.cost>=best)))
+            continue;
+        found=1u;human=is_human;best=route.cost;
+        chosen_x=x;chosen_y=y;chosen_side=side;chosen_dest=destination;
+    }
+    if(found){
+        v->goal=AVP_MP_BOT_LIFT;v->has_target=1u;v->hostile_target=0u;
+        v->target_x=(chosen_x<<16)|0x8000u;
+        v->target_y=(chosen_y<<16)|0x8000u;
+        v->target_side=chosen_side;
+        v->current_level=world->map->level;
+        v->destination_level=chosen_dest;
+        v->lift_direction=chosen_dest>world->map->level?1:-1;
+        v->lift_follow_human=human;
+        v->target_visible=0u;v->target_is_alien=0u;
+    }
+}
+/* Temporarily ignore only peer BODY collision between co-op passengers
+ * approaching the SAME enclosed elevator. This avoids bots forming a
+ * blocking queue at a one-cell door. Walls, door geometry, all unrelated
+ * player collisions, single player and deathmatch remain untouched. */
+static int walk_bot_shared_lift_pair(const AvpMpWalkHost *t,unsigned p,unsigned q)
+{
+    if(!t||t->dm.enabled||p>=t->actors||q>=t->actors||p==q||
+       (!t->session.setup.bot_enabled[p] && !t->session.setup.bot_enabled[q]))
+        return 0;
+    const AvpMpActiveWorld *here=avp_mp_session_player_world(&t->session,p);
+    const AvpMpNativeWorld *world=here?(const AvpMpNativeWorld*)here->context:NULL;
+    const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)t->session.player[p];
+    const AvpMpActorNativeState *b=(const AvpMpActorNativeState*)t->session.player[q];
+    if(!world||!world->map||here!=avp_mp_session_player_world(&t->session,q)||
+       here->level>5u||!a||!b)return 0;
+    for(unsigned i=0;i<2u;i++){
+        unsigned bot=i?q:p,other=i?p:q;
+        unsigned x=t->lift_intent[bot].x,y=t->lift_intent[bot].y;
+        if(!t->session.setup.bot_enabled[bot] ||
+           t->lift_intent[bot].level!=here->level ||
+           t->lift_board_tick<t->lift_intent[bot].tick ||
+           t->lift_board_tick-t->lift_intent[bot].tick>2u)continue;
+        const AvpMpActorNativeState *r=(const AvpMpActorNativeState*)t->session.player[other];
+        if(t->session.setup.bot_enabled[other]){
+            if(t->lift_intent[other].level!=here->level ||
+               t->lift_intent[other].x!=x||t->lift_intent[other].y!=y ||
+               t->lift_board_tick<t->lift_intent[other].tick ||
+               t->lift_board_tick-t->lift_intent[other].tick>2u)continue;
+        }else if(!avp_mp_chamber_contains(world->map,
+               (x<<16)|0x8000u,(y<<16)|0x8000u,
+               r->player.x_pos,r->player.y_pos))continue;
+        if(llabs((int64_t)a->player.x_pos-(((int64_t)x<<16)|0x8000))>
+                (int64_t)(2u<<16) ||
+           llabs((int64_t)a->player.y_pos-(((int64_t)y<<16)|0x8000))>
+                (int64_t)(2u<<16) ||
+           llabs((int64_t)b->player.x_pos-(((int64_t)x<<16)|0x8000))>
+                (int64_t)(2u<<16) ||
+           llabs((int64_t)b->player.y_pos-(((int64_t)y<<16)|0x8000))>
+                (int64_t)(2u<<16))continue;
+        return 1;
+    }
+    return 0;
+}
+
+static void walk_bot_coordinate_lift(AvpMpWalkHost *t,unsigned p,
+        const AvpMpNativeWorld *world,AvpMpBotObservation *v,uint64_t tick)
+{
+    unsigned x,y,sx,sy,leader,destination,unready=0u,waiting=0u;
+    uint64_t created;
+    if(!t||!world||!world->map||!v)return;
+    if(t->last_bot_world_level[p] &&
+       t->last_bot_world_level[p]!=world->map->level){
+        t->lift_egress_valid[p]=0u;
+    }
+    if(t->last_bot_world_level[p] &&
+       t->last_bot_world_level[p]!=world->map->level &&
+       (t->last_bot_goal_lift[p] || t->exit_kind[p]==AVP_DOORS_EXIT_LIFT)){
+        t->lift_arrival_pending[p]=1u;
+        t->lift_arrival_x[p]=v->x>>16;
+        t->lift_arrival_y[p]=v->y>>16;
+    }
+    if(t->lift_arrival_pending[p] &&
+       (v->x>>16!=t->lift_arrival_x[p] ||
+        v->y>>16!=t->lift_arrival_y[p]) &&
+       !avp_mp_chamber_contains(world->map,
+           (t->lift_arrival_x[p]<<16)|0x8000u,
+           (t->lift_arrival_y[p]<<16)|0x8000u,v->x,v->y)){
+        t->lift_arrival_pending[p]=0u;
+        t->lift_egress_valid[p]=0u;
+    }
+    /* R288: every bot that ARRIVED on this floor must clear the chamber.
+     * The former logic checked this only after selecting another lift goal,
+     * then left the new lift owner inside forever while sending followers
+     * out. It also skipped egress when supply/health/combat selected PATROL.
+     * Do not choose another floor while still in the arrival chamber. */
+    if(avp_mp_bot_lift_needs_disembark(t->lift_arrival_pending[p],
+       avp_mp_chamber_contains(world->map,
+           (t->lift_arrival_x[p]<<16)|0x8000u,
+           (t->lift_arrival_y[p]<<16)|0x8000u,v->x,v->y)) &&
+       !(v->hostile_target && v->target_visible) &&
+       !(v->melee_visible && v->melee_threat!=AVP_MP_BOT_THREAT_NONE)){
+        unsigned ex=t->lift_egress_x[p],ey=t->lift_egress_y[p];
+        /* Continue to the same exit for as many ticks as are necessary;
+         * replanning to a new exit inside the chamber causes oscillation. */
+        if(t->lift_egress_valid[p] &&
+           t->lift_egress_level[p]==world->map->level){
+            v->goal=AVP_MP_BOT_PATROL;
+            v->target_x=(ex<<16)|0x8000u;
+            v->target_y=(ey<<16)|0x8000u;
+            v->has_target=1u;v->hostile_target=0u;
+        }else if(walk_bot_lift_disembark(world,v,
+                  t->lift_arrival_x[p],t->lift_arrival_y[p])){
+            t->lift_egress_valid[p]=1u;
+            t->lift_egress_level[p]=world->map->level;
+            t->lift_egress_x[p]=v->target_x>>16;
+            t->lift_egress_y[p]=v->target_y>>16;
+        }else{
+            /* Never operate the lift again with an unresolved arrival;
+             * a truly blocked exit must be solved by authentic doors or
+             * another route, not by bouncing between two floors. */
+            v->goal=AVP_MP_BOT_PATROL;
+            v->has_target=0u;v->hostile_target=0u;
+        }
+        t->lift_intent[p].level=0u;
+        for(unsigned i=0u;i<AVP_MP_BOT_LIFT_CLAIMS;i++)
+            if(t->shared_lift_claims.entries[i].active &&
+               t->shared_lift_claims.entries[i].leader==p)
+                t->shared_lift_claims.entries[i].active=0u;
+        return;
+    }
+    /* DM opponents are not passengers in a shared planned trip. Keep
+     * native chamber egress, but never inherit an opponent's destination. */
+    if(t->dm.enabled){
+        t->lift_intent[p].level=0u;
+        v->lift_wait=0u;v->lift_follow_human=0u;
+        return;
+    }
+    /* A bot already boarded this genuine chamber must not abandon its
+     * agreed lift direction just because the scanner or supply planner
+     * produced another routine waypoint on the next original game tick. */
+    if((v->goal!=AVP_MP_BOT_LIFT || !v->has_target ||
+        (v->target_x>>16)!=t->lift_intent[p].x ||
+        (v->target_y>>16)!=t->lift_intent[p].y ||
+        v->destination_level!=t->lift_intent[p].destination) &&
+       avp_mp_bot_lift_keep_trip(v,t->lift_intent[p].level,
+           world->map->level,t->lift_intent[p].tick,
+           avp_mp_chamber_contains(world->map,
+               (t->lift_intent[p].x<<16)|0x8000u,
+               (t->lift_intent[p].y<<16)|0x8000u,v->x,v->y))){
+        unsigned side=0u;
+        const unsigned lx=t->lift_intent[p].x,ly=t->lift_intent[p].y;
+        const unsigned dst=t->lift_intent[p].destination;
+        if(walk_bot_lift_panel(world,lx,ly,&side) &&
+           side==t->lift_intent[p].side &&
+           avp_mp_bot_transition_allowed(v->player_species,
+              world->map->level,dst,AVP_MP_BOT_TRANS_LIFT) &&
+           !avp_mp_bot_lift_jammed(world->map->level,lx,ly,
+               dst>world->map->level?1:-1)){
+            v->goal=AVP_MP_BOT_LIFT;v->has_target=1u;
+            v->target_x=(lx<<16)|0x8000u;
+            v->target_y=(ly<<16)|0x8000u;
+            v->target_side=side;v->hostile_target=0u;
+            v->destination_level=dst;
+            v->lift_direction=dst>world->map->level?1:-1;
+            v->lift_follow_human=t->lift_intent[p].follow_human;
+        }
+    }
+    if(v->goal!=AVP_MP_BOT_LIFT || !v->has_target){
+        /* The former owner changed tasks, died, or got distracted by a
+         * real enemy. Other passengers may elect a new owner next tick. */
+        t->lift_intent[p].level=0u;
+        for(unsigned i=0u;i<AVP_MP_BOT_LIFT_CLAIMS;i++)
+            if(t->shared_lift_claims.entries[i].active &&
+               t->shared_lift_claims.entries[i].leader==p)
+                t->shared_lift_claims.entries[i].active=0u;
+        return;
+    }
+    x=v->target_x>>16;y=v->target_y>>16;
+    sx=v->x>>16;sy=v->y>>16;
+    /* Even bots six tiles away have declared their common boarding intent:
+     * the owner can see them approaching rather than activating first. */
+    if((sx>x?sx-x:x-sx)>6u || (sy>y?sy-y:y-sy)>6u){
+        t->lift_intent[p].level=0u;
+        return;
+    }
+    t->lift_intent[p].level=world->map->level;
+    t->lift_intent[p].x=x;t->lift_intent[p].y=y;
+    t->lift_intent[p].destination=v->destination_level;
+    t->lift_intent[p].side=v->target_side;
+    t->lift_intent[p].follow_human=v->lift_follow_human;
+    t->lift_intent[p].tick=tick;
+    if(v->lift_follow_human){
+        /* A human passenger may have left before operating the lift. Do not
+         * preserve a phantom human operator forever: if nobody human is
+         * still in the chamber, elect one bot through the normal claims. */
+        unsigned human_inside=0u;
+        const AvpMpActiveWorld *here=avp_mp_session_player_world(&t->session,p);
+        for(unsigned q=0u;q<t->players;q++)if(q!=p &&
+            !t->session.setup.bot_enabled[q] &&
+            avp_mp_session_player_world(&t->session,q)==here &&
+            !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
+            const AvpMpActorNativeState *a=
+                (const AvpMpActorNativeState *)t->session.player[q];
+            if(a && a->player.player_energy>0 && !a->player.game_over &&
+               avp_mp_chamber_contains(world->map,
+                   (x<<16)|0x8000u,(y<<16)|0x8000u,
+                   a->player.x_pos,a->player.y_pos)){
+                human_inside=1u;break;
+            }
+        }
+        if(!human_inside){
+            v->lift_follow_human=0u;
+            t->lift_intent[p].follow_human=0u;
+        }
+    }
+    if(v->lift_follow_human){
+        /* A human already in this chamber operates the source lift. Bots
+         * only board; no additional conflicting keypad Use commands. */
+        for(unsigned i=0u;i<AVP_MP_BOT_LIFT_CLAIMS;i++){
+            AvpMpBotLiftClaim *c=&t->shared_lift_claims.entries[i];
+            if(c->active && c->level==world->map->level &&
+               c->x==x && c->y==y)c->active=0u;
+        }
+        v->lift_wait=1u;
+        return;
+    }
+    /* An unrelated bot across the maze does not hold this lift hostage.
+     * Once close enough to board, agree on one destination and one owner. */
+    if((sx>x?sx-x:x-sx)>2u || (sy>y?sy-y:y-sy)>2u)return;
+    /* Don't retain an owner whose last approach was abandoned. Other
+     * bots should not wait 120 ticks for a dead/disconnected player. */
+    for(unsigned i=0u;i<AVP_MP_BOT_LIFT_CLAIMS;i++){
+        AvpMpBotLiftClaim *c=&t->shared_lift_claims.entries[i];
+        if(c->active && c->level==world->map->level &&
+           c->x==x && c->y==y && c->leader!=p){
+            const unsigned owner=c->leader;
+            const AvpMpActorNativeState *a=owner<t->actors?
+                (const AvpMpActorNativeState*)t->session.player[owner]:NULL;
+            const AvpMpActiveWorld *where=owner<t->actors?
+                avp_mp_session_player_world(&t->session,owner):NULL;
+            if(!a || !where || where->level!=world->map->level ||
+               a->player.player_energy<=0 || a->player.game_over ||
+               (tick>t->lift_intent[owner].tick+20u))c->active=0u;
+        }
+    }
+    if(!avp_mp_bot_lift_agree(&t->shared_lift_claims,
+        world->map->level,x,y,p,v->destination_level,tick,
+        &leader,&destination,&created))return;
+    v->destination_level=destination;
+    v->lift_direction=destination>world->map->level?1:-1;
+    v->lift_wait=leader!=p || tick<created+3u;
+    t->lift_intent[p].level=world->map->level;
+    t->lift_intent[p].x=x;t->lift_intent[p].y=y;
+    t->lift_intent[p].tick=tick;
+    for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+       t->session.setup.bot_enabled[q] &&
+       avp_mp_session_player_world(&t->session,q) &&
+       avp_mp_session_player_world(&t->session,q)->level==world->map->level){
+        const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[q];
+        unsigned qx,qy;
+        if(!a||a->player.player_energy<=0||a->player.game_over)continue;
+        qx=a->player.x_pos>>16;qy=a->player.y_pos>>16;
+        if((qx==x && qy==y) ||
+           (((qx>x?qx-x:x-qx)<=4u && (qy>y?qy-y:y-qy)<=4u) &&
+            avp_mp_chamber_contains(world->map,
+              (x<<16)|0x8000u,(y<<16)|0x8000u,
+              a->player.x_pos,a->player.y_pos))){
+            /* A passenger who still touches a door margin can reverse
+             * the original closing animation. Wait for actual clearance. */
+            if(llabs((int64_t)(a->player.x_pos&0xffffu)-32768)>7500 ||
+               llabs((int64_t)(a->player.y_pos&0xffffu)-32768)>7500)
+                unready++;
+        }else if(t->lift_intent[q].level==world->map->level &&
+                 t->lift_intent[q].x==x && t->lift_intent[q].y==y &&
+                 tick>=t->lift_intent[q].tick &&
+                 tick-t->lift_intent[q].tick<20u &&
+                 (qx>x?qx-x:x-qx)<=6u && (qy>y?qy-y:y-qy)<=6u)
+            waiting++;
+    }
+    if(leader==p && (unready || (tick<created+160u && waiting)))
+        v->lift_wait=1u;
+}
+
+/* R296: original Predator/Alien ship airlocks contain two four-place
+ * recessed side bays. Coordinate ordinary bot movement inputs ONLY: the
+ * original DOORS.S door bytes, interlock and airlock transfer remain final
+ * authority. Never synthesize an exit for a non-retail or unknown map. */
+static int walk_bot_airlock_interrupt(const AvpMpBotObservation *v)
+{
+    if(!v || v->deathmatch)return 1;
+    if(v->facehugged || v->other_player_alien_trapped ||
+       v->other_player_swarmed || v->melee_visible ||
+       (v->hostile_target && v->target_visible) ||
+       v->retreat_to_teammate || v->retreat_to_refuge ||
+       (v->health_low && (v->goal==AVP_MP_BOT_HEALTH ||
+                          v->goal==AVP_MP_BOT_MEDICAL)) ||
+       (v->marine_low_ammo && v->goal==AVP_MP_BOT_SUPPLY) ||
+       v->goal==AVP_MP_BOT_LIFT || v->goal==AVP_MP_BOT_COCOON ||
+       v->goal==AVP_MP_BOT_QUEEN_WAIT)return 1;
+    return 0;
+}
+static int walk_bot_airlock_is_member(const AvpMpWalkHost *t,unsigned q,
+    const AvpMpActiveWorld *here,const AvpMpAirlockRoom *room)
+{
+    const AvpMpActorNativeState *a;
+    if(q>=t->actors || !t->session.setup.bot_enabled[q] ||
+       avp_mp_session_player_world(&t->session,q)!=here ||
+       avp_mp_life_busy(&t->player_life[q]) ||
+       !walk_vent_world_present(t,q))return 0;
+    a=(const AvpMpActorNativeState*)t->session.player[q];
+    return a && a->player.player_energy>0 && !a->player.game_over &&
+        t->bots[q].airlock_level==here->level &&
+        t->bots[q].airlock_panel_offset==
+            (room->exit_y*64u+room->exit_x)*8u+room->exit_side;
+}
+/* Predict assigned recesses in stable bot-index order, respecting any
+ * human already standing in a recess. Beyond available seats, later bots
+ * wait OUTSIDE for the next airlock cycle instead of blocking both doors. */
+static unsigned walk_bot_airlock_seat(const AvpMpWalkHost *t,unsigned p,
+     const AvpMpActiveWorld *here,const AvpMpNativeWorld *world,
+     const AvpMpAirlockRoom *room)
+{
+    uint8_t claimed[AVP_MP_AIRLOCK_SEATS]={0};
+    unsigned chosen=AVP_MP_AIRLOCK_SEATS;
+    for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+       !t->session.setup.bot_enabled[q] &&
+       avp_mp_session_player_world(&t->session,q)==here &&
+       !avp_mp_life_busy(&t->player_life[q])){
+        const AvpMpActorNativeState *a=
+            (const AvpMpActorNativeState*)t->session.player[q];
+        if(!a||a->player.player_energy<=0||a->player.game_over)continue;
+        for(unsigned i=0;i<room->seat_count;i++){
+            const int64_t dx=(int64_t)a->player.x_pos-
+                ((int64_t)room->seats[i].x*65536+32768);
+            const int64_t dy=(int64_t)a->player.y_pos-
+                ((int64_t)room->seats[i].y*65536+32768);
+            if(llabs(dx)<20000 && llabs(dy)<20000)claimed[i]=1u;
+        }
+    }
+    for(unsigned q=0;q<t->actors;q++)if(
+       walk_bot_airlock_is_member(t,q,here,room)){
+        unsigned i=0u;
+        while(i<room->seat_count && claimed[i])i++;
+        if(q==p)chosen=i;
+        if(i<room->seat_count)claimed[i]=1u;
+    }
+    (void)world;
+    return chosen;
+}
+static void walk_bot_airlock_target(AvpMpBotObservation *v,unsigned goal,
+                                   unsigned x,unsigned y,unsigned side)
+{
+    v->goal=(enum AvpMpBotGoal)goal;
+    v->has_target=1u;v->hostile_target=0u;v->target_visible=0u;
+    v->tracker_only_target=0u;v->target_is_alien=0u;
+    v->target_x=(x<<16)|0x8000u;
+    v->target_y=(y<<16)|0x8000u;
+    v->target_side=side;
+    v->airlock_face_side=side;
+    v->airlock_pressure=0u;
+}
+static void walk_bot_coordinate_airlock(AvpMpWalkHost *t,unsigned p,
+     const AvpMpNativeWorld *world,AvpMpBotObservation *v)
+{
+    const AvpMpActiveWorld *here;
+    const AvpDoorLevelMeta *meta;
+    AvpMpBotState *memory;
+    AvpMpAirlockRoom room={0};
+    unsigned exit_offset=0u,chosen=AVP_MP_AIRLOCK_SEATS;
+    unsigned from_goal=0u,human_inside=0u,operator=t->actors;
+    uint64_t best=UINT64_MAX;
+    int inside,waiting=0;
+    if(!t||!world||!world->map||!v || !v->map.cells ||
+       (t->dm.enabled && !t->dm.level_travel) || !t->retail_catalog_ready ||
+       t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL ||
+       world->map->level>AVP_MAX_LEVEL || p>=t->actors ||
+       !world->doors.level_meta ||
+       world->doors.level_meta_count<AVP_MAX_LEVEL)return;
+    /* Do not override a just-finished elevator trip while that bot is
+     * still clearing the original lift doorway. */
+    if(t->lift_arrival_pending[p])return;
+    here=avp_mp_session_player_world(&t->session,p);
+    meta=&world->doors.level_meta[world->map->level-1u];
+    memory=&t->bots[p];
+    /* Deathmatch never recruits opponents or waits for co-op seats. A
+     * bot pursuing its own authored ship exit operates both door bytes
+     * from inside, with the same original animation/pressure interlock. */
+    if(t->dm.enabled){
+        if(v->facehugged || (v->hostile_target && v->target_visible) ||
+           !v->has_target || v->goal!=AVP_MP_BOT_EXIT || v->exit_is_duct)return;
+        for(size_t i=0;i<meta->exit_count;i++){
+            const AvpDoorExitEntry *e=&meta->exits[i];
+            if(e->level!=v->destination_level ||
+               e->panel_offset/8u%world->map->width!=(v->target_x>>16) ||
+               e->panel_offset/8u/world->map->width!=(v->target_y>>16) ||
+               e->panel_offset%8u!=v->target_side ||
+               !avp_mp_airlock_room(world->map,meta,e->panel_offset,&room))continue;
+            inside=avp_mp_chamber_contains(world->map,
+                (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,v->x,v->y);
+            if(avp_mp_airlock_cycle_reverse_block(&memory->airlock_cycle,
+                   world->map->level,room.destination,inside,0,0,v->tick)){
+                const unsigned outside_y=room.entry_side==3u?room.entry_y+1u:room.entry_y-1u;
+                walk_bot_airlock_target(v,AVP_MP_BOT_PATROL,room.entry_x,outside_y,room.entry_side);
+                v->destination_level=0u;return;
+            }
+            if(!inside)return; /* native route takes bot into chamber */
+            if(t->exit_kind[p]==AVP_DOORS_EXIT_AIRLOCK){
+                AvpMpTransitionRequest pending;
+                if(avp_mp_transition_peek(&t->transitions,p,&pending)){
+                    walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+                        v->x>>16,v->y>>16,room.entry_side);return;
+                }
+            }
+            switch(avp_mp_airlock_action(&room,world->map->bytes+8u,
+                   (size_t)world->map->width*world->map->height*8u,
+                   v->active_door_offsets,v->active_door_count)){
+            case AVP_MP_AIRLOCK_CLOSE_ENTRY:
+                walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_CLOSE,
+                    room.entry_x,room.entry_y,room.entry_side);
+                v->airlock_door_ready=1u;return;
+            case AVP_MP_AIRLOCK_CLOSE_EXIT:
+                walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_CLOSE,
+                    room.exit_x,room.exit_y,room.exit_side);
+                v->airlock_door_ready=1u;return;
+            case AVP_MP_AIRLOCK_PRESSURE:
+                v->airlock_pressure=1u;return;
+            default:
+                walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+                    v->x>>16,v->y>>16,room.entry_side);return;
+            }
+        }
+        return;
+    }
+    if(walk_bot_airlock_interrupt(v))return;
+    /* An existing, bounded boarding commitment survives routine follow,
+     * patrol and source scanner replanning. Real danger still interrupts. */
+    if(memory->airlock_level==world->map->level &&
+       memory->airlock_panel_offset &&
+       avp_mp_airlock_room(world->map,meta,memory->airlock_panel_offset,&room)){
+        const int matching=v->goal==AVP_MP_BOT_EXIT && v->has_target &&
+            !v->exit_is_duct && v->destination_level==room.destination &&
+            (v->target_x>>16)==room.exit_x && (v->target_y>>16)==room.exit_y &&
+            v->target_side==room.exit_side;
+        const int in_room=avp_mp_chamber_contains(world->map,
+            (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,v->x,v->y);
+        if(avp_mp_airlock_commitment_valid(v->tick,memory->airlock_last_intent,
+                                         in_room,matching)){
+            exit_offset=memory->airlock_panel_offset;
+            from_goal=matching;
+        }
+    }
+    /* Real exit goal (same level panel and ORIGINAL destination). */
+    if(!exit_offset && v->goal==AVP_MP_BOT_EXIT && v->has_target &&
+       !v->exit_is_duct && v->destination_level){
+        for(size_t i=0;i<meta->exit_count;i++){
+            const AvpDoorExitEntry *e=&meta->exits[i];
+            if(e->level!=v->destination_level ||
+               e->panel_offset/8u%world->map->width!=v->target_x>>16 ||
+               e->panel_offset/8u/world->map->width!=v->target_y>>16 ||
+               e->panel_offset%8u!=v->target_side)continue;
+            if(avp_mp_airlock_room(world->map,meta,e->panel_offset,&room)){
+                exit_offset=e->panel_offset;from_goal=1u;break;
+            }
+        }
+    }
+    /* An actual human inside a bounded chamber invites nearby bots,
+     * even when that human hasn't activated the pressurization panel yet. */
+    if(!exit_offset)for(size_t i=0;i<meta->exit_count;i++){
+        const AvpDoorExitEntry *e=&meta->exits[i];
+        AvpMpAirlockRoom candidate;
+        AvpMpBotRoute route={0};
+        uint64_t dist;
+        int occupied=0;
+        if(!avp_mp_airlock_room(world->map,meta,e->panel_offset,&candidate))continue;
+        dist=walk_bot_distance(v->x,v->y,
+            (candidate.exit_x<<16)|0x8000u,
+            (candidate.exit_y<<16)|0x8000u);
+        if(dist>(((uint64_t)8u<<16)*((uint64_t)8u<<16)) || dist>=best ||
+           !avp_mp_bot_route(&v->map,v->x>>16,v->y>>16,
+                    candidate.exit_x,candidate.exit_y,&route))continue;
+        for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+           !t->session.setup.bot_enabled[q] &&
+           avp_mp_session_player_world(&t->session,q)==here &&
+           !avp_mp_life_busy(&t->player_life[q]) &&
+           walk_vent_world_present(t,q)){
+            const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)
+                                       t->session.player[q];
+            if(a && a->player.player_energy>0 && !a->player.game_over &&
+               avp_mp_chamber_contains(world->map,
+                  (candidate.exit_x<<16)|0x8000u,
+                  (candidate.exit_y<<16)|0x8000u,
+                  a->player.x_pos,a->player.y_pos)){
+                occupied=1;break;
+            }
+        }
+        if(!occupied)for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+            walk_bot_airlock_is_member(t,q,here,&candidate)){
+            const AvpMpActorNativeState *a=
+                (const AvpMpActorNativeState*)t->session.player[q];
+            if(a && avp_mp_chamber_contains(world->map,
+                  (candidate.exit_x<<16)|0x8000u,
+                  (candidate.exit_y<<16)|0x8000u,
+                  a->player.x_pos,a->player.y_pos)){
+                occupied=1;break;
+            }
+        }
+        if(occupied){room=candidate;exit_offset=e->panel_offset;best=dist;}
+    }
+    if(!exit_offset){
+        if(memory->airlock_level &&
+           memory->airlock_level!=world->map->level)
+            memory->airlock_level=memory->airlock_panel_offset=0u;
+        return;
+    }
+    /* R299: After an ORIGINAL 1<->15 or 5<->14 ship transfer, the
+     * destination airlock is an ARRIVAL, not a fresh departure request.
+     * R296's physical-human-in-chamber invitation otherwise immediately
+     * reverses the pressure cycle when the party arrives together. The
+     * ordinary level planner can also choose the old level on its next
+     * FOLLOW tick while a teammate lags behind. Both are suppressed until
+     * the bot and a human have established themselves OUTSIDE this arrival
+     * chamber. Native Jaguar doors, pressure effects and travel stay intact.
+     */
+    if(memory->airlock_cycle.arrived_level==world->map->level &&
+       memory->airlock_cycle.arrived_from==room.destination){
+        int bot_inside=avp_mp_chamber_contains(world->map,
+            (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,
+            v->x,v->y);
+        int any_human=0,disembarked=0;
+        const AvpMpActorNativeState *outside_human=NULL;
+        uint64_t outside_best=UINT64_MAX;
+        for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+           !t->session.setup.bot_enabled[q] &&
+           !avp_mp_life_busy(&t->player_life[q]) &&
+           walk_vent_world_present(t,q)){
+            const AvpMpActorNativeState *a=
+                (const AvpMpActorNativeState*)t->session.player[q];
+            const AvpMpActiveWorld *qworld=
+                avp_mp_session_player_world(&t->session,q);
+            uint64_t dist;
+            if(!a||!qworld||a->player.player_energy<=0||
+               a->player.game_over)continue;
+            /* Only humans in this world can disembark from this chamber.
+             * A bot arriving alone must be able to leave it. */
+            if(qworld!=here)continue;
+            any_human=1;
+            if(avp_mp_chamber_contains(world->map,
+                  (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,
+                  a->player.x_pos,a->player.y_pos))continue;
+            disembarked=1;
+            dist=walk_bot_distance(v->x,v->y,
+                                  a->player.x_pos,a->player.y_pos);
+            if(dist<outside_best){outside_best=dist;outside_human=a;}
+        }
+        if(avp_mp_airlock_cycle_reverse_block(&memory->airlock_cycle,
+             world->map->level,room.destination,bot_inside,
+             disembarked,any_human,v->tick)){
+            if(outside_human){
+                /* Walk OUT toward the teammate, not toward the return
+                 * pressure panel. This also permits the rearm condition
+                 * to become true without inventing a bot teleport. */
+                v->goal=AVP_MP_BOT_FOLLOW;
+                v->has_target=1u;v->hostile_target=0u;
+                v->target_visible=0u;v->tracker_only_target=0u;
+                v->target_x=outside_human->player.x_pos;
+                v->target_y=outside_human->player.y_pos;
+            }else if(bot_inside && !any_human){
+                /* Solo arrival: walk through the normal entrance into the
+                 * destination level. Never press the reverse pressure panel. */
+                const unsigned outside_y=room.entry_side==3u?room.entry_y+1u:room.entry_y-1u;
+                walk_bot_airlock_target(v,AVP_MP_BOT_PATROL,room.entry_x,outside_y,room.entry_side);
+                v->destination_level=0u;
+            }else if(bot_inside && room.seat_count){
+                /* Hold at an existing recess instead of pressing again.
+                 * Choose a nearby original seat and face inward. */
+                uint64_t nearest=UINT64_MAX;
+                unsigned nearest_seat=0u;
+                for(unsigned i=0;i<room.seat_count;i++){
+                    uint64_t d=walk_bot_distance(v->x,v->y,
+                        (room.seats[i].x<<16)|0x8000u,
+                        (room.seats[i].y<<16)|0x8000u);
+                    if(d<nearest){nearest=d;nearest_seat=i;}
+                }
+                walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+                    room.seats[nearest_seat].x,room.seats[nearest_seat].y,
+                    room.seats[nearest_seat].face_side);
+            }else{
+                /* Teammates still on the departure side have not issued
+                 * another valid crossing just because FOLLOW replanned.
+                 * Wait here without producing another panel Use. */
+                v->goal=AVP_MP_BOT_PATROL;
+                v->has_target=1u;v->hostile_target=0u;
+                v->target_visible=0u;v->tracker_only_target=0u;
+                v->target_x=v->x;v->target_y=v->y;
+            }
+            return;
+        }
+    }
+    /* An acknowledged original pressure request is already underway.
+     * Re-pressing the same panel before group commit can replace the native
+     * effect and does not create a second legitimate transfer. */
+    if(t->exit_kind[p]==AVP_DOORS_EXIT_AIRLOCK){
+        AvpMpTransitionRequest pending;
+        if(avp_mp_transition_peek(&t->transitions,p,&pending) &&
+           (unsigned)pending.target_level==room.destination &&
+           room.seat_count){
+            const unsigned seat=p%room.seat_count;
+            walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+                room.seats[seat].x,room.seats[seat].y,
+                room.seats[seat].face_side);
+            return;
+        }
+    }
+    if(memory->airlock_level!=world->map->level ||
+       memory->airlock_panel_offset!=exit_offset){
+        memory->airlock_level=world->map->level;
+        memory->airlock_panel_offset=exit_offset;
+        memory->airlock_destination=room.destination;
+        memory->airlock_since=v->tick;
+    }
+    if(from_goal || memory->airlock_last_intent==0u)
+        memory->airlock_last_intent=v->tick;
+    inside=avp_mp_chamber_contains(world->map,
+        (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,
+        v->x,v->y);
+    /* A chamber invitation persists while team members are truly present,
+     * or while a real level-transition goal is still requested. */
+    for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+       !t->session.setup.bot_enabled[q] &&
+       avp_mp_session_player_world(&t->session,q)==here &&
+       !avp_mp_life_busy(&t->player_life[q])){
+        const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)
+                                    t->session.player[q];
+        if(a && a->player.player_energy>0 && !a->player.game_over &&
+           avp_mp_chamber_contains(world->map,
+              (room.exit_x<<16)|0x8000u,
+              (room.exit_y<<16)|0x8000u,
+              a->player.x_pos,a->player.y_pos)){
+            human_inside=1u;break;
+        }
+    }
+    if(human_inside || inside)memory->airlock_last_intent=v->tick;
+    if(!human_inside && !inside && !from_goal &&
+       v->tick>memory->airlock_last_intent+90u){
+        memory->airlock_level=memory->airlock_panel_offset=0u;
+        return;
+    }
+    /* Choose only the lowest-index bot ALREADY inside the airlock as
+     * temporary operator. Humans may use the original panel during a
+     * grace period; the operator then assists if nobody presses it. */
+    for(unsigned q=0;q<t->actors;q++)if(
+        walk_bot_airlock_is_member(t,q,here,&room)){
+        const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)
+                                           t->session.player[q];
+        if(a && avp_mp_chamber_contains(world->map,
+            (room.exit_x<<16)|0x8000u,(room.exit_y<<16)|0x8000u,
+            a->player.x_pos,a->player.y_pos)){
+            operator=q;break;
+        }
+    }
+    chosen=walk_bot_airlock_seat(t,p,here,world,&room);
+    v->current_level=world->map->level;
+    v->destination_level=room.destination;
+    v->exit_is_duct=0u;
+    if(chosen>=room.seat_count){
+        /* Too many passengers for the ACTUAL authored recesses. No
+         * overlapping fictional standing spaces or blocker in doorway. */
+        const unsigned outside_y=room.entry_side==3u?
+               room.entry_y+2u:room.entry_y-2u;
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+            room.entry_x,outside_y,room.entry_side==3u?1u:3u);
+        return;
+    }
+    if(!inside || operator!=p){
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+            room.seats[chosen].x,room.seats[chosen].y,
+            room.seats[chosen].face_side);
+        return;
+    }
+    /* Give other registered, physically nearby passengers time to board
+     * and settle into their unique recesses. Never wait for an unrelated
+     * bot across the level; a bounded deadline prevents deadlock. */
+    if(v->tick<memory->airlock_since+160u){
+        for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+           walk_bot_airlock_is_member(t,q,here,&room)){
+            const AvpMpActorNativeState *a=(const AvpMpActorNativeState*)
+                                           t->session.player[q];
+            if(a && walk_bot_distance(v->x,v->y,
+                     a->player.x_pos,a->player.y_pos)<
+                 ((uint64_t)8u<<16)*((uint64_t)8u<<16)){
+                if(!avp_mp_chamber_contains(world->map,
+                        (room.exit_x<<16)|0x8000u,
+                        (room.exit_y<<16)|0x8000u,
+                        a->player.x_pos,a->player.y_pos))waiting++;
+            }
+        }
+    }
+    /* A human in the chamber may use the controls themselves. After a
+     * short grace period, a seated bot can operate for the whole group;
+     * never shut the door against a human still in the doorway. */
+    if(human_inside){
+        for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+           !t->session.setup.bot_enabled[q] &&
+           avp_mp_session_player_world(&t->session,q)==here &&
+           !avp_mp_life_busy(&t->player_life[q])){
+            const AvpMpActorNativeState *a=
+                (const AvpMpActorNativeState*)t->session.player[q];
+            if(!a || a->player.player_energy<=0 || a->player.game_over ||
+               !avp_mp_chamber_contains(world->map,
+                    (room.exit_x<<16)|0x8000u,
+                    (room.exit_y<<16)|0x8000u,
+                    a->player.x_pos,a->player.y_pos))continue;
+            if((a->player.x_pos>>16)==room.entry_x &&
+                (a->player.y_pos>>16)==room.entry_y){
+                const unsigned frac=a->player.y_pos&0xffffu;
+                if((room.entry_side==3u && frac>0xb800u) ||
+                   (room.entry_side==1u && frac<0x4800u))waiting++;
+            }
+            if((a->player.x_pos>>16)==room.exit_x &&
+                (a->player.y_pos>>16)==room.exit_y){
+                const unsigned frac=a->player.y_pos&0xffffu;
+                if((room.exit_side==3u && frac>0xb800u) ||
+                   (room.exit_side==1u && frac<0x4800u))waiting++;
+            }
+        }
+    }
+    if(waiting || (human_inside && v->tick<memory->airlock_since+80u)){
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+            room.seats[chosen].x,room.seats[chosen].y,
+            room.seats[chosen].face_side);
+        return;
+    }
+    /* Keep the native pressure request behind BOTH stationary closed bytes.
+     * While either door is moving, stay in the chamber and wait; never use
+     * the pressure panel on the first zero-byte opening tick. */
+    switch(avp_mp_airlock_action(&room,world->map->bytes+8u,
+            (size_t)world->map->width*world->map->height*8u,
+            v->active_door_offsets,v->active_door_count)){
+    case AVP_MP_AIRLOCK_CLOSE_ENTRY:
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_CLOSE,
+            room.entry_x,room.entry_y,room.entry_side);
+        v->airlock_door_ready=1u;
+        return;
+    case AVP_MP_AIRLOCK_CLOSE_EXIT:
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_CLOSE,
+            room.exit_x,room.exit_y,room.exit_side);
+        v->airlock_door_ready=1u;
+        return;
+    case AVP_MP_AIRLOCK_PRESSURE:
+        walk_bot_airlock_target(v,AVP_MP_BOT_EXIT,
+            room.exit_x,room.exit_y,room.exit_side);
+        v->airlock_pressure=1u;
+        return;
+    default:
+        /* Wait at the current interior position (not a door toggle).
+         * A seat would make the operator walk away and back on every cycle. */
+        walk_bot_airlock_target(v,AVP_MP_BOT_AIRLOCK_SEAT,
+            v->x>>16,v->y>>16,room.entry_side);
+        return;
+    }
+}
+
+/* R281: only use AMPs that EXIST in a previously initialized retail
+ * world (or a world currently occupied by another player). Do not invent
+ * a supply pickup in an unvisited level or run ResetDoors()/restore_level()
+ * merely to scout it. Source pickup claims and original access rules are
+ * evaluated per player, just as for current-level ammunition. */
+static const AvpMpNativeWorld *walk_bot_known_world(const AvpMpWalkHost *t,
+                                                    unsigned level)
+{
+    if(!t||level<1u||level>AVP_MP_RETAIL_LEVELS)return NULL;
+    for(unsigned i=0;i<AVP_LOCAL_MP_MAX_ACTORS;i++){
+        const AvpMpActiveWorld *active=&t->session.worlds[i];
+        if(active->context && active->level==level)
+            return (const AvpMpNativeWorld *)active->context;
+    }
+    return t->persistent_ready[level-1u]?
+        &t->persistent_world[level-1u]:NULL;
+}
+static int walk_bot_supply_useful(const AvpMpActorNativeState *a,
+                                  const AvpMpBotObservation *v,
+                                  unsigned level,const AvpAmp *item)
+{
+    s16 kind=COLL_NONE,amount=0;
+    unsigned weapon=0u;
+    if(!a||!v||!item ||
+       !avp_collect_peek(level,(uint32_t)item->xpos>>16,
+             (uint32_t)item->ypos>>16,item->astype,&kind,&amount))return 0;
+    switch(kind){
+    case COLL_SHOTGUN:case COLL_SHOTAMMO:weapon=1u;break;
+    case COLL_PULSERIFLE:case COLL_PULSEAMMO:weapon=2u;break;
+    case COLL_FLAMETHROWER:case COLL_FLAMEAMMO:weapon=3u;break;
+    case COLL_SMARTGUN:case COLL_SMARTAMMO:weapon=4u;break;
+    default:return 0;
+    }
+    /* Original CollectIt(COLL_*AMMO) stores reserve rounds even before the
+     * weapon itself is acquired. Only native ammo capacity decides whether
+     * this pickup is useful; a weapon item may also grant a new weapon. */
+    const int gun=kind==COLL_SHOTGUN || kind==COLL_PULSERIFLE ||
+                  kind==COLL_FLAMETHROWER || kind==COLL_SMARTGUN;
+    if(v->marine_unarmed){
+        if(gun && !(v->marine_owned&(1u<<weapon)))
+            return amount>0 || v->marine_ammo[weapon-1u]>0;
+        if(!(v->marine_owned&(1u<<weapon)) || amount<=0)return 0;
+    }
+    if(!(v->marine_owned&(1u<<weapon)) && gun)return 1;
+    return v->marine_ammo[weapon-1u]<a->weapon.ammo_info[weapon-1u].max;
+}
+/* Validate remembered stock against actual native lifetime and per-player claims. */
+static int walk_bot_resupply_item_valid(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpBotObservation *v,
+    const AvpMpNativeWorld *stock,unsigned level,unsigned slot)
+{
+    if(!stock || !stock->map || slot>=AVP_NUM_AMPS)return 0;
+    const AvpAmp *amp=&stock->amp.actors[slot];
+    return (amp->mode || amp->host_static) && !(amp->flags&(1u<<AMP_COLLECT)) &&
+           walk_mp_item_available(t,p,level,slot,amp) &&
+           !avp_mp_bot_pickup_avoided(&t->pickup_memory[p],level,slot,
+               stock->amp.slot_generation[slot],v->tick) &&
+           walk_bot_supply_useful(actor,v,level,amp);
+}
+static int walk_bot_resupply_held(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpNativeWorld *world,
+    const AvpMpBotObservation *v)
+{
+    AvpMpBotState *m=&t->bots[p];
+    if(!m->resupply_valid)return 0;
+    const AvpMpNativeWorld *stock=m->resupply_level==world->map->level?
+        world:walk_bot_known_world(t,m->resupply_level);
+    if(!walk_bot_resupply_item_valid(t,p,actor,v,stock,m->resupply_level,m->resupply_slot) ||
+       stock->amp.slot_generation[m->resupply_slot]!=m->resupply_generation ||
+       ((uint32_t)stock->amp.actors[m->resupply_slot].xpos>>16)!=m->resupply_x ||
+       ((uint32_t)stock->amp.actors[m->resupply_slot].ypos>>16)!=m->resupply_y ||
+       v->tick>=m->resupply_until){m->resupply_valid=0u;return 0;}
+    /* Bounded renewal on arrival at the actual supply level only. */
+    if(m->resupply_last_level!=world->map->level && m->resupply_level==world->map->level){
+        m->resupply_last_level=world->map->level;
+        m->resupply_until=v->tick+160u;
+    }
+    return 1;
+}
+static void walk_bot_supply_target(AvpMpBotObservation *v,const AvpAmp *amp,unsigned slot)
+{
+    v->goal=AVP_MP_BOT_SUPPLY;v->has_target=1u;v->hostile_target=0u;
+    v->target_visible=v->tracker_only_target=0u;v->target_slot=slot;
+    v->target_x=(u32)amp->xpos;v->target_y=(u32)amp->ypos;
+}
+/* Six graph probes per retry, interleaved across known levels. Within a
+ * stable set of eligible stock, failed batches advance rather than starving
+ * everything behind the first six AMP slots. Nearest numeric level is only
+ * a probe-order hint; the real portal graph still authorizes every route. */
+#define WALK_SUPPLY_PROBES 6u
+struct WalkSupplyScan {
+    uint16_t slots[AVP_MP_RETAIL_LEVELS][AVP_NUM_AMPS+32u];
+    unsigned count[AVP_MP_RETAIL_LEVELS];
+};
+struct WalkSupplyCandidate {unsigned level,slot;};
+static unsigned walk_bot_supply_batch(const struct WalkSupplyScan *scan,
+    unsigned current,unsigned *cursor,struct WalkSupplyCandidate out[WALK_SUPPLY_PROBES])
+{
+    unsigned order[AVP_MP_RETAIL_LEVELS],levels=0u,total=0u,max_count=0u;
+    unsigned start,n=0u,ordinal=0u;
+    for(unsigned l=1u;l<=AVP_MP_RETAIL_LEVELS;l++){
+        const unsigned count=scan->count[l-1u];
+        if(l==current || !count)continue;
+        unsigned d=l>current?l-current:current-l,at=levels;
+        while(at){
+            const unsigned prior=order[at-1u];
+            const unsigned pd=prior>current?prior-current:current-prior;
+            if(pd<=d)break;
+            order[at]=prior;at--;
+        }
+        order[at]=l;levels++;total+=count;
+        if(count>max_count)max_count=count;
+    }
+    if(!total){*cursor=0u;return 0u;}
+    start=*cursor%total;
+    /* Circular interval of at most six entries. Two passes only when it
+     * wraps; no repeated probe within one batch. */
+    for(unsigned pass=0u;pass<2u && n<total && n<WALK_SUPPLY_PROBES;pass++){
+        ordinal=0u;
+        for(unsigned row=0u;row<max_count && n<total && n<WALK_SUPPLY_PROBES;row++)
+            for(unsigned k=0u;k<levels && n<total && n<WALK_SUPPLY_PROBES;k++){
+                const unsigned l=order[k];
+                if(row>=scan->count[l-1u])continue;
+                if((pass==0u && ordinal>=start) || (pass==1u && ordinal<start))
+                    out[n++]=(struct WalkSupplyCandidate){l,scan->slots[l-1u][row]};
+                ordinal++;
+            }
+    }
+    *cursor=(start+n)%total;
+    return n;
+}
+static int walk_bot_choose_known_resupply(AvpMpWalkHost *t,unsigned p,
+              const AvpMpActorNativeState *actor,
+              const AvpMpNativeWorld *world,AvpMpBotObservation *v)
+{
+    AvpMpBotState *memory=&t->bots[p];
+    const unsigned current=world->map->level;
+    const unsigned sx=v->x>>16,sy=v->y>>16;
+    AvpMpBotObservation candidate;
+    const AvpMpNativeWorld *stock;
+    if(walk_bot_resupply_held(t,p,actor,world,v)){
+        const unsigned level=memory->resupply_level;
+        const unsigned slot=memory->resupply_slot;
+        candidate=*v;
+        if(level==current){
+            AvpMpBotRoute route={0};
+            if(avp_mp_bot_route(&v->map,sx,sy,memory->resupply_x,memory->resupply_y,&route) && route.valid){
+                walk_bot_supply_target(v,&world->amp.actors[slot],slot);return 1;
+            }
+        }else if(walk_bot_choose_level_route(t,p,world,level,AVP_MP_MARINE,
+             sx,sy,&v->map,&candidate,memory->resupply_x,memory->resupply_y,1)){
+            *v=candidate;return 1;
+        }
+        memory->resupply_valid=0u;
+    }
+    if(v->tick<memory->resupply_retry_tick)return 0;
+    /* Keep the existing bounded graph budget, but diversify the candidates
+     * and advance through them after an unsuccessful scan. */
+    struct WalkSupplyScan scan={0};
+    struct WalkSupplyCandidate top[WALK_SUPPLY_PROBES];
+    if(memory->resupply_scan_level!=current){
+        memory->resupply_scan_level=current;memory->resupply_scan_cursor=0u;
+    }
+    for(unsigned level=1u;level<=AVP_MP_RETAIL_LEVELS;level++){
+        if(level==current)continue;
+        stock=walk_bot_known_world(t,level);
+        if(!stock||!stock->map)continue;
+        for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+            if(!walk_bot_resupply_item_valid(t,p,actor,v,stock,level,i))continue;
+            scan.slots[level-1u][scan.count[level-1u]++]=(uint16_t)i;
+        }
+    }
+    const unsigned count=walk_bot_supply_batch(&scan,current,
+        &memory->resupply_scan_cursor,top);
+    for(unsigned k=0;k<count;k++){
+        const unsigned level=top[k].level,slot=top[k].slot;
+        const AvpAmp *amp;
+        stock=walk_bot_known_world(t,level);
+        if(!stock)continue;
+        amp=&stock->amp.actors[slot];
+        candidate=*v;
+        if(!walk_bot_choose_level_route(t,p,world,level,AVP_MP_MARINE,
+                sx,sy,&v->map,&candidate,
+                (uint32_t)amp->xpos>>16,(uint32_t)amp->ypos>>16,1))continue;
+        memory->resupply_valid=1u;
+        memory->resupply_scan_cursor=0u;
+        memory->resupply_level=level;memory->resupply_slot=slot;
+        memory->resupply_generation=stock->amp.slot_generation[slot];
+        memory->resupply_x=(uint32_t)amp->xpos>>16;
+        memory->resupply_y=(uint32_t)amp->ypos>>16;
+        memory->resupply_last_level=current;
+        memory->resupply_until=v->tick+160u;
+        memory->resupply_retry_tick=v->tick+40u;
+        *v=candidate;return 1;
+    }
+    memory->resupply_retry_tick=v->tick+40u;
+    return 0;
+}
+/* RE44 R283: health pickups are source AMPs, not synthesized health.
+ * Terminal coordinates are derived ONLY from bound original COMPUTER.S
+ * panel offsets and revalidated against the original map byte. */
+static int walk_bot_health_item_available(AvpMpWalkHost *t,unsigned p,
+    const AvpMpNativeWorld *world,unsigned level,unsigned slot)
+{
+    const AvpAmp *a;
+    if(!world||!world->map||slot>=AVP_NUM_AMPS)return 0;
+    a=&world->amp.actors[slot];
+    return (a->mode || a->host_static) && !(a->flags&(1u<<AMP_COLLECT)) &&
+           (a->astype==11 || a->astype==21 || a->astype==40) &&
+           walk_mp_item_available(t,p,level,slot,a);
+}
+static int walk_bot_medical_cell(const AvpMpNativeWorld *world,
+                                 unsigned level,u16 offset,
+                                 unsigned *x,unsigned *y,unsigned *side)
+{
+    unsigned cell;
+    if(!world||!world->map||!x||!y||!side ||
+       !avp_computer_is_medical_terminal(level,offset))return 0;
+    if((unsigned)offset>=(unsigned)world->map->width*world->map->height*8u)
+        return 0;
+    *side=(unsigned)offset%8u;
+    if(*side>=4u)return 0;
+    cell=(unsigned)offset/8u;
+    *x=cell%world->map->width;
+    *y=cell/world->map->width;
+    /* Must be the actual authored panel, not an invisible trigger.
+     * The real DoorKeys() verifies original panel type on Use. */
+    return world->map->bytes[8u+offset]!=0u &&
+           world->map->bytes[8u+cell*8u+5u]!=0u;
+}
+/* Health uses the same bounded rotating remote search as ammunition.
+ * Local, route-legal healing wins before remote graph probes. A medical
+ * entry encodes its authored panel offset after the AMP slot range. */
+static int walk_bot_healing_candidate(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpBotObservation *v,
+    const AvpMpNativeWorld *stock,unsigned level,unsigned id,
+    unsigned *x,unsigned *y,unsigned *side,unsigned *generation)
+{
+    *side=*generation=0u;
+    if(id>=AVP_NUM_AMPS){
+        const unsigned offset=id-AVP_NUM_AMPS;
+        return offset<=UINT16_MAX && v->player_species==AVP_MP_MARINE &&
+            avp_computer_first_aid_ceiling(actor->access_level)>v->player_energy &&
+            walk_bot_medical_cell(stock,level,(u16)offset,x,y,side);
+    }
+    if(!walk_bot_health_item_available(t,p,stock,level,id) ||
+       avp_mp_bot_pickup_avoided(&t->pickup_memory[p],level,id,
+            stock->amp.slot_generation[id],v->tick))return 0;
+    *generation=stock->amp.slot_generation[id];
+    *x=(uint32_t)stock->amp.actors[id].xpos>>16;
+    *y=(uint32_t)stock->amp.actors[id].ypos>>16;
+    return 1;
+}
+static void walk_bot_healing_target(AvpMpBotObservation *v,
+    const AvpMpNativeWorld *stock,unsigned id,unsigned x,unsigned y,unsigned side)
+{
+    v->has_target=1u;v->hostile_target=0u;
+    v->target_visible=v->tracker_only_target=0u;
+    v->goal=id>=AVP_NUM_AMPS?AVP_MP_BOT_MEDICAL:AVP_MP_BOT_HEALTH;
+    v->target_side=side;
+    v->target_slot=id>=AVP_NUM_AMPS?id-AVP_NUM_AMPS:id;
+    v->target_x=(x<<16)|0x8000u;v->target_y=(y<<16)|0x8000u;
+    if(id<AVP_NUM_AMPS){
+        v->target_x=(uint32_t)stock->amp.actors[id].xpos;
+        v->target_y=(uint32_t)stock->amp.actors[id].ypos;
+    }
+}
+static int walk_bot_choose_known_healing(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpNativeWorld *world,
+    AvpMpBotObservation *v)
+{
+    if(!t||!actor||!world||!world->map||!v||!v->map.cells ||
+       p>=AVP_LOCAL_MP_MAX_ACTORS || t->dm.enabled || v->player_species==AVP_MP_ALIEN ||
+       !avp_mp_bot_health_low(v->player_energy,v->max_energy))return 0;
+    AvpMpBotState *memory=&t->bots[p];
+    const unsigned current=world->map->level,sx=v->x>>16,sy=v->y>>16;
+    const AvpMpNativeWorld *stock;
+    AvpMpBotObservation candidate;
+    unsigned x,y,side,generation;
+    if(memory->healing_valid && v->tick<memory->healing_until){
+        const unsigned level=memory->healing_level;
+        const unsigned id=memory->healing_slot+(memory->healing_medical?AVP_NUM_AMPS:0u);
+        stock=level==current?world:walk_bot_known_world(t,level);
+        if((memory->healing_medical || memory->healing_slot<AVP_NUM_AMPS) &&
+           walk_bot_healing_candidate(t,p,actor,v,stock,level,id,&x,&y,&side,&generation) &&
+           generation==memory->healing_generation && x==memory->healing_x && y==memory->healing_y){
+            candidate=*v;
+            if(level==current){
+                AvpMpBotRoute route={0};
+                if(avp_mp_bot_route(&v->map,sx,sy,x,y,&route) && route.valid){
+                    if(memory->healing_last_level!=current){
+                        memory->healing_last_level=current;memory->healing_until=v->tick+150u;
+                    }
+                    walk_bot_healing_target(v,stock,id,x,y,side);return 1;
+                }
+            }else if(walk_bot_choose_level_route(t,p,world,level,v->player_species,
+                      sx,sy,&v->map,&candidate,x,y,1)){
+                *v=candidate;return 1;
+            }
+        }
+    }
+    if(memory->healing_valid)memory->healing_retry_tick=0u;
+    memory->healing_valid=0u;
+    if(memory->healing_scan_level!=current){
+        memory->healing_scan_level=current;memory->healing_scan_cursor=0u;
+        memory->healing_retry_tick=0u;
+    }
+    if(v->tick<memory->healing_retry_tick)return 0;
+    struct WalkSupplyScan scan={0};
+    struct WalkSupplyCandidate top[WALK_SUPPLY_PROBES];
+    unsigned best_id=0u,best_x=0u,best_y=0u,best_side=0u,best_generation=0u,best_level=0u;
+    uint64_t best_cost=UINT64_MAX;
+    for(unsigned level=1u;level<=AVP_MP_RETAIL_LEVELS;level++){
+        stock=level==current?world:walk_bot_known_world(t,level);
+        if(!stock||!stock->map)continue;
+        u16 offsets[32];size_t n=0u;
+        if(v->player_species==AVP_MP_MARINE &&
+           avp_computer_first_aid_ceiling(actor->access_level)>v->player_energy){
+            n=avp_computer_medical_terminals(level,offsets,32u);if(n>32u)n=32u;
+        }
+        for(unsigned i=0;i<AVP_NUM_AMPS+n;i++){
+            const unsigned id=i<AVP_NUM_AMPS?i:(unsigned)AVP_NUM_AMPS+offsets[i-AVP_NUM_AMPS];
+            if(!walk_bot_healing_candidate(t,p,actor,v,stock,level,id,&x,&y,&side,&generation))continue;
+            if(level!=current){
+                if(id<=UINT16_MAX)scan.slots[level-1u][scan.count[level-1u]++]=(uint16_t)id;
+                continue;
+            }
+            AvpMpBotRoute route={0};
+            if(!avp_mp_bot_route(&v->map,sx,sy,x,y,&route) || !route.valid)continue;
+            const uint64_t cost=(uint64_t)route.cost+(id>=AVP_NUM_AMPS?12u:0u);
+            if(cost>=best_cost)continue;
+            best_cost=cost;best_level=level;best_id=id;best_x=x;best_y=y;
+            best_side=side;best_generation=generation;
+        }
+    }
+    candidate=*v;
+    if(best_level){
+        walk_bot_healing_target(&candidate,world,best_id,best_x,best_y,best_side);
+    }else{
+        const unsigned count=walk_bot_supply_batch(&scan,current,&memory->healing_scan_cursor,top);
+        for(unsigned i=0;i<count;i++){
+            const unsigned level=top[i].level,id=top[i].slot;
+            stock=walk_bot_known_world(t,level);
+            if(!walk_bot_healing_candidate(t,p,actor,v,stock,level,id,&x,&y,&side,&generation))continue;
+            candidate=*v;
+            if(!walk_bot_choose_level_route(t,p,world,level,v->player_species,
+                 sx,sy,&v->map,&candidate,x,y,1))continue;
+            best_level=level;best_id=id;best_x=x;best_y=y;best_generation=generation;
+            break;
+        }
+    }
+    memory->healing_retry_tick=v->tick+35u;
+    if(!best_level)return 0;
+    memory->healing_valid=1u;memory->healing_level=best_level;
+    memory->healing_x=best_x;memory->healing_y=best_y;
+    memory->healing_medical=best_id>=AVP_NUM_AMPS;
+    memory->healing_slot=memory->healing_medical?best_id-AVP_NUM_AMPS:best_id;
+    memory->healing_generation=best_generation;memory->healing_last_level=current;
+    memory->healing_until=v->tick+150u;memory->healing_scan_cursor=0u;
+    *v=candidate;return 1;
+}
+
+/* Emergency fallback when the Marine has no usable rounds, cannot reach
+ * current-level ammunition and no remembered cross-level supply route was
+ * found. Select only an actual reachable authored exit/duct/lift. Commit to
+ * it instead of bouncing between tracker locations each bot tick. This is
+ * an ESCAPE from active danger, not a fake ammo source on an unseen level. */
+static int walk_bot_emergency_exit(AvpMpWalkHost *t,unsigned p,
+           const AvpMpNativeWorld *world,AvpMpBotObservation *v)
+{
+    AvpMpBotState *memory=&t->bots[p];
+    const unsigned level=world->map->level;
+    AvpMpBotObservation proposed;
+    if(memory->emergency_exit_valid){
+        if(v->tick<memory->emergency_exit_until &&
+           memory->emergency_exit_destination!=level){
+            proposed=*v;
+            if(walk_bot_choose_level_route(t,p,world,
+                  memory->emergency_exit_destination,AVP_MP_MARINE,
+                  v->x>>16,v->y>>16,&v->map,&proposed,0u,0u,0) &&
+               !avp_mp_bot_duct_reverse_block(&memory->duct_arrival,level,
+                   proposed.destination_level,v->x,v->y,v->tick)){
+                *v=proposed;return 1;
+            }
+        }
+        memory->emergency_exit_valid=0u;
+    }
+    if(v->tick<memory->emergency_exit_retry_tick)return 0;
+    uint64_t best=UINT64_MAX;
+    unsigned chosen=0u;
+    for(unsigned dest=1u;dest<=AVP_MAX_LEVEL;dest++){
+        AvpMpBotRoute route={0};
+        AvpMpBotObservation candidate=*v;
+        if(dest==level ||
+           avp_mp_bot_duct_reverse_block(&memory->duct_arrival,level,dest,v->x,v->y,v->tick) ||
+           !walk_bot_choose_exit(world,dest,AVP_MP_MARINE,
+                   v->x>>16,v->y>>16,&v->map,&candidate) ||
+           !avp_mp_bot_route(&v->map,v->x>>16,v->y>>16,
+                   candidate.target_x>>16,candidate.target_y>>16,&route))
+            continue;
+        /* The true source route cost, not raw distance to an illegal
+         * panel, chooses an escape. The graph also verifies destination
+         * reachability when committing the chosen candidate below. */
+        if(route.cost>=best)continue;
+        proposed=candidate;best=route.cost;chosen=dest;
+    }
+    if(chosen){
+        AvpMpBotObservation graph=*v;
+        if(walk_bot_choose_level_route(t,p,world,chosen,AVP_MP_MARINE,
+                 v->x>>16,v->y>>16,&v->map,&graph,0u,0u,0) &&
+           !avp_mp_bot_duct_reverse_block(&memory->duct_arrival,level,
+               graph.destination_level,v->x,v->y,v->tick)){
+            memory->emergency_exit_valid=1u;
+            memory->emergency_exit_destination=chosen;
+            memory->emergency_exit_until=v->tick+140u;
+            memory->emergency_exit_retry_tick=v->tick+30u;
+            *v=graph;return 1;
+        }
+    }
+    memory->emergency_exit_retry_tick=v->tick+30u;
+    return 0;
+}
+/* R493: player corpses are NOT AMPs. The native Deathmatch claim path
+ * already grants their loot, but a bot must deliberately navigate to the
+ * visible record. Keep identities in a separate pickup-watch namespace. */
+#define WALK_BOT_CORPSE_SLOT_BASE (AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS+1u)
+static int walk_bot_corpse_available(const AvpMpWalkHost *t,unsigned p,
+    unsigned level,unsigned i)
+{
+    if(!t->dm.enabled || p>=AVP_LOCAL_MP_MAX_ACTORS || i>=AVP_MP_CORPSE_LIMIT)return 0;
+    const AvpMpCorpse *c=&t->corpses.records[i];
+    return c->occupied && c->creature==AC_HUMAN && c->level==level &&
+        !(c->looted_mask&AVP_MP_ACTOR_BIT(p));
+}
+static int walk_bot_visible_corpse_supply(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpNativeWorld *world,
+    AvpMpBotObservation *v,uint64_t danger,uint32_t tx,uint32_t ty,
+    uint64_t fixed_cost,AvpBotBreadcrumbLos los,void *los_context)
+{
+    if(!t->dm.enabled || !v->marine_unarmed || v->facehugged || !los)return 0;
+    AvpMpDmLoot loot={0};
+    /* Query the existing odds function with a hypothetical winning draw.
+     * This consumes no random numbers and does not predict actual loot. */
+    if(!avp_mp_dm_corpse_loot((uint8_t)v->marine_owned,actor->weapon.ammo_info,0u,0u,&loot))return 0;
+    const unsigned level=world->map->level,sx=v->x>>16,sy=v->y>>16;
+    const uint64_t near=(UINT64_C(3)<<16)*(UINT64_C(3)<<16);
+    uint64_t best=fixed_cost;
+    unsigned chosen=AVP_MP_CORPSE_LIMIT;
+    const AvpMpBotPickupMemory *watch=&t->pickup_memory[p];
+    for(unsigned i=0;i<AVP_MP_CORPSE_LIMIT;i++){
+        const AvpMpCorpse *c=&t->corpses.records[i];
+        AvpMpBotRoute route={0};
+        if(!walk_bot_corpse_available(t,p,level,i) ||
+           avp_mp_bot_pickup_avoided(&t->pickup_memory[p],level,
+              WALK_BOT_CORPSE_SLOT_BASE+i,(unsigned)c->death_tick,v->tick) ||
+           !avp_bot_in_view_or_nearby(v->heading,v->x,v->y,c->x,c->y,4u) ||
+           !los(los_context,v->x,v->y,c->x,c->y))continue;
+        if(!avp_mp_bot_route(&v->map,sx,sy,c->x>>16,c->y>>16,&route) || !route.valid)continue;
+        if(danger<near && (walk_bot_distance(c->x,c->y,tx,ty)<danger ||
+           ((route.next_x!=sx || route.next_y!=sy) &&
+           walk_bot_distance((route.next_x<<16)|0x8000u,
+                (route.next_y<<16)|0x8000u,tx,ty)<danger)))continue;
+        /* Prefer certain authored supplies at comparable distances. */
+        const uint64_t cost=(uint64_t)route.cost+10u;
+        /* R495: keep the actual preceding supply objective while it still
+         * passes every eligibility/visibility/route/danger check. The same
+         * pickup watchdog then observes progress instead of resetting. */
+        if(watch->active && watch->level==level &&
+           watch->slot==WALK_BOT_CORPSE_SLOT_BASE+i &&
+           watch->generation==(unsigned)c->death_tick &&
+           watch->target_x==((c->x&0xffff0000u)|0x8000u) &&
+           watch->target_y==((c->y&0xffff0000u)|0x8000u)){
+            chosen=i;break;
+        }
+        if(cost>=best)continue;
+        best=cost;chosen=i;
+    }
+    if(chosen==AVP_MP_CORPSE_LIMIT)return 0;
+    const AvpMpCorpse *c=&t->corpses.records[chosen];
+    v->goal=AVP_MP_BOT_SUPPLY;v->has_target=1u;v->hostile_target=0u;
+    v->target_visible=v->tracker_only_target=0u;
+    v->target_slot=WALK_BOT_CORPSE_SLOT_BASE+chosen;
+    /* Collection is tile-based: target the corpse cell's safe centre. */
+    v->target_x=(c->x&0xffff0000u)|0x8000u;
+    v->target_y=(c->y&0xffff0000u)|0x8000u;
+    return 1;
+}
+/* R472: Empty Marines must not lose supply/escape objectives to combat,
+ * low-priority loot or squad regrouping. Use only real available items.
+ * Preserve native exit/lift coordination by choosing before its planner. */
+static void walk_bot_empty_marine(AvpMpWalkHost *t,unsigned p,
+    const AvpMpActorNativeState *actor,const AvpMpNativeWorld *world,
+    AvpMpBotObservation *v,AvpBotBreadcrumbLos corpse_los,void *los_context)
+{
+    if(!v->marine_unarmed || !v->map.cells || v->facehugged)return;
+    AvpMpBotState *memory=&t->bots[p];
+    const unsigned level=world->map->level;
+    const unsigned sx=v->x>>16,sy=v->y>>16;
+    unsigned best=AVP_NUM_AMPS;
+    const int held=walk_bot_resupply_held(t,p,actor,world,v) && memory->resupply_level==level;
+    const AvpMpBotPickupMemory *watch=&t->pickup_memory[p];
+    int local_held=0;
+    uint64_t best_cost=UINT64_MAX, danger=UINT64_MAX;
+    uint32_t tx=0,ty=0;
+    /* Current visible/tracker threats, including Deathmatch opponents.
+     * No private enemy positions are consulted. */
+    for(unsigned i=0;i<AVP_NUM_AMPS+ t->actors;i++){
+        if(i<AVP_NUM_AMPS){if(!walk_bot_hostile(&world->amp.actors[i]))continue;}
+        else{
+            unsigned q=i-AVP_NUM_AMPS;
+            const AvpMpActorNativeState *enemy=(const AvpMpActorNativeState *)t->session.player[q];
+            if(!t->dm.enabled || q==p || !enemy || enemy->player.player_energy<=0 ||
+               enemy->player.game_over || avp_mp_life_busy(&t->player_life[q]) ||
+               !walk_vent_world_present(t,q) ||
+               avp_mp_session_player_world(&t->session,q)!=
+               avp_mp_session_player_world(&t->session,p))continue;
+        }
+        const AvpMpBotContact *c=&t->contacts[p][i];
+        if(!c->sight && !c->tracker)continue;
+        uint64_t d=walk_bot_distance(v->x,v->y,c->x,c->y);
+        if(d<danger){danger=d;tx=c->x;ty=c->y;}
+    }
+    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+        const AvpAmp *amp=&world->amp.actors[i];
+        AvpMpBotRoute route={0};
+        if((!amp->mode && !amp->host_static) || (amp->flags&(1u<<AMP_COLLECT)) ||
+           !walk_mp_item_available(t,p,level,i,amp) ||
+           avp_mp_bot_pickup_avoided(&t->pickup_memory[p],level,i,
+               world->amp.slot_generation[i],v->tick) ||
+           !walk_bot_supply_useful(actor,v,level,amp))continue;
+        if(!avp_mp_bot_route(&v->map,sx,sy,(u32)amp->xpos>>16,
+               (u32)amp->ypos>>16,&route) || !route.valid)continue;
+        uint64_t cost=route.cost;
+        /* Avoid supply routes that immediately lead into a nearby threat.
+         * Use the first genuine route step, not the final item's angle. */
+        if(danger<((uint64_t)3u<<16)*((uint64_t)3u<<16) &&
+           walk_bot_distance((route.next_x<<16)|0x8000u,
+                (route.next_y<<16)|0x8000u,tx,ty)<danger &&
+           (route.next_x!=sx || route.next_y!=sy))continue;
+        if(held && i==memory->resupply_slot){best=i;break;}
+        /* Only the final preceding objective may claim this priority. No
+         * speculative scan may renew it, and a reused AMP cannot inherit it.
+         * Existing cross-level arrival commitment has priority. */
+        if(t->dm.enabled && !held && watch->active && watch->level==level &&
+           watch->slot==i && watch->generation==world->amp.slot_generation[i] &&
+           watch->target_x==(u32)amp->xpos && watch->target_y==(u32)amp->ypos){
+            best=i;local_held=1;break;
+        }
+        if(cost<best_cost){best=i;best_cost=cost;}
+    }
+    memory->travel_valid=memory->tracker_seek_valid=memory->cover_flank_valid=0u;
+    v->cover_flank_valid=v->retreat_to_teammate=v->retreat_to_refuge=0u;
+    v->other_player_alien_trapped=v->other_player_swarmed=0u;
+    if(held && best!=memory->resupply_slot)memory->resupply_valid=0u;
+    if(!local_held && !(held && best==memory->resupply_slot) &&
+       walk_bot_visible_corpse_supply(t,p,actor,world,v,danger,tx,ty,best_cost,
+                                    corpse_los,los_context))return;
+    if(best<AVP_NUM_AMPS){
+        const AvpAmp *amp=&world->amp.actors[best];
+        v->goal=AVP_MP_BOT_SUPPLY;v->has_target=1u;v->hostile_target=0u;
+        v->target_visible=v->tracker_only_target=0u;v->target_slot=best;
+        v->target_x=(u32)amp->xpos;v->target_y=(u32)amp->ypos;
+        return;
+    }
+    if((!t->dm.enabled || t->dm.level_travel) &&
+       walk_bot_choose_known_resupply(t,p,actor,world,v))return;
+    if(danger!=UINT64_MAX){
+        if((!t->dm.enabled || t->dm.level_travel) &&
+           walk_bot_emergency_exit(t,p,world,v))return;
+        unsigned gx,gy;
+        if(memory->refuge_valid && memory->refuge_level==level &&
+           v->tick<memory->refuge_until &&
+           (sx!=memory->refuge_x || sy!=memory->refuge_y)){
+            AvpMpBotRoute route={0};
+            if(!avp_mp_bot_route(&v->map,sx,sy,memory->refuge_x,memory->refuge_y,&route) ||
+               walk_bot_distance((route.next_x<<16)|0x8000u,
+                   (route.next_y<<16)|0x8000u,tx,ty)<danger)memory->refuge_valid=0u;
+        }else memory->refuge_valid=0u;
+        if(!memory->refuge_valid && avp_mp_bot_pick_refuge(&v->map,sx,sy,tx>>16,ty>>16,&gx,&gy)){
+            memory->refuge_valid=1u;memory->refuge_level=level;
+            memory->refuge_x=gx;memory->refuge_y=gy;memory->refuge_until=v->tick+32u;
+        }
+        if(memory->refuge_valid){
+            v->goal=AVP_MP_BOT_PATROL;v->has_target=1u;v->hostile_target=0u;
+            v->target_visible=v->tracker_only_target=0u;
+            v->target_x=(memory->refuge_x<<16)|0x8000u;
+            v->target_y=(memory->refuge_y<<16)|0x8000u;return;
+        }
+        /* No safe route: invoke the planner's direct retreat guard. */
+        v->goal=AVP_MP_BOT_HOSTILE;v->has_target=v->hostile_target=1u;
+        v->target_x=tx;v->target_y=ty;v->target_visible=0u;
+        v->tracker_only_target=0u;v->target_slot=AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS;
+        return;
+    }
+    /* No immediate threat: keep searching real supplies, cards and exits.
+     * Never keep a stale hostile investigation as an empty Marine. */
+    /* R495: the generic early pickup scan accepts cards and incompatible
+     * reserves, while the empty-Marine scan requires a usable supply. Do
+     * not restore a rejected generic pickup during the remote scan's retry
+     * interval. Explore or pursue a legitimate travel goal instead. */
+    if(t->dm.enabled && v->goal==AVP_MP_BOT_SUPPLY){
+        v->goal=AVP_MP_BOT_PATROL;v->has_target=v->hostile_target=0u;
+        v->target_visible=v->tracker_only_target=0u;
+        v->target_slot=AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS;
+        walk_bot_patrol(t,p,v,level);
+    }else if(v->hostile_target || v->goal==AVP_MP_BOT_INVESTIGATE || v->goal==AVP_MP_BOT_FOLLOW){
+        v->goal=AVP_MP_BOT_PATROL;v->has_target=v->hostile_target=0u;
+        v->target_visible=v->tracker_only_target=0u;
+    }
+}
+/* Authored Level-5 escape pod: the original panel resides in cell (17,53).
+ * The actual reachable chamber is east of the panel at x=19..23,
+ * y=51..54; adjacent floor-looking tiles are disconnected by walls.
+ * Seat candidates are the floor cells immediately inside its NORTH or EAST
+ * walls. Face inward, away from the wall behind the actor. Each bot claims
+ * a stable different place (independent of changing human positions). The
+ * collision/route verification below is authoritative; no cell is fabricated.
+ * For more bots than distinct valid seats, use remaining authentic floor
+ * cells within the chamber instead of piling on the launch panel. */
+static int walk_bot_escape_seat(const AvpMpBotObservation *v,
+    unsigned bot_order,unsigned *seat_x,unsigned *seat_y,unsigned *face)
+{
+    static const struct {uint8_t x,y,dir;} seats[]={
+        /* All first ten places are adjacent to an authentic solid wall,
+         * and source-path-reachable from the real control at (17,53).
+         * 0=west,1=north,2=east,3=south: look AWAY from wall behind. */
+        {19,52,3},{19,54,1},{20,52,3},{20,54,1},
+        {22,52,3},{22,54,1},{23,52,0},{23,54,0},
+        {21,53,0},{21,54,1},
+        {19,53,2},{20,53,3} /* overflow places inside authentic capsule */
+    };
+    const unsigned n=(unsigned)(sizeof seats/sizeof seats[0]);
+    if(!v || !v->map.cells || !seat_x || !seat_y || !face ||
+       v->observed_world_level!=5u)return 0;
+    for(unsigned k=0;k<n;k++){
+        const unsigned index=(bot_order+k)%n;
+        const unsigned x=seats[index].x,y=seats[index].y;
+        AvpMpBotRoute route={0};
+        if(!avp_mp_bot_playable_position(v->map.cells,v->map.width,
+                v->map.height,(x<<16)|0x8000u,(y<<16)|0x8000u) ||
+           !avp_mp_bot_route(&v->map,v->x>>16,v->y>>16,x,y,&route))continue;
+        *seat_x=x;*seat_y=y;*face=seats[index].dir;
+        return 1;
+    }
+    return 0;
+}
+
+/* Elect exactly one living bot in a bots-only session. The random draw is
+ * made ONCE at the start or after losing the leader, never in the hot route
+ * loop; the original campaign RNG remains the source of randomness. */
+static unsigned walk_bot_evacuation_leader(AvpMpWalkHost *t)
+{
+    unsigned candidates[AVP_LOCAL_MP_MAX_ACTORS],n=0u;
+    if(!t)return AVP_LOCAL_MP_MAX_ACTORS;
+    for(unsigned p=0;p<t->actors;p++){
+        const AvpMpActorNativeState *a=
+            (const AvpMpActorNativeState *)t->session.player[p];
+        if(a && !t->session.setup.bot_enabled[p] &&
+           !avp_mp_life_busy(&t->player_life[p]) &&
+           a->player.player_energy>0 && !a->player.game_over)
+            return AVP_LOCAL_MP_MAX_ACTORS; /* humans remain in command */
+        if(a && t->session.setup.bot_enabled[p] &&
+           !avp_mp_life_busy(&t->player_life[p]) &&
+           a->player.player_energy>0 && !a->player.game_over)
+            candidates[n++]=p;
+    }
+    if(t->evacuation_leader<t->actors)
+        for(unsigned i=0;i<n;i++)if(candidates[i]==t->evacuation_leader)
+            return t->evacuation_leader;
+    return n?candidates[(unsigned)avp_random()%n]:AVP_LOCAL_MP_MAX_ACTORS;
+}
+
+/* The capsule's original boarding chamber occupies x=19..23/y=51..54,
+ * beyond the authentic launch panel at (17,53). Do not grant escape for
+ * bots still in another world, in the access corridor, or respawning. */
+static int walk_bot_escape_all_boarded(const AvpMpWalkHost *t,unsigned leader)
+{
+    if(!t || leader>=t->actors)return 0;
+    for(unsigned p=0;p<t->actors;p++)if(p!=leader){
+        const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
+        const AvpMpActiveWorld *w=avp_mp_session_player_world(&t->session,p);
+        unsigned x,y;
+        if(!a || !t->session.setup.bot_enabled[p] ||
+           avp_mp_life_busy(&t->player_life[p]) ||
+           a->player.player_energy<=0 || a->player.game_over)continue;
+        x=a->player.x_pos>>16;y=a->player.y_pos>>16;
+        if(!w || w->level!=5u || x<19u || x>23u || y<51u || y>54u)
+            return 0;
+    }
+    return 1; /* A lone surviving bot can launch once at the real panel. */
+}
+
+/* An armed self-destruct is the same global campaign event for every Marine,
+ * even if they are currently on different levels. Reaching Level 5 must use
+ * the original authored route of DOORS.S panels, lifts and vents. */
+static int walk_bot_evacuation_goal(AvpMpWalkHost *t,unsigned p,
+    const AvpMpNativeWorld *world,unsigned species,AvpMpBotObservation *v)
+{
+    unsigned x=0u,y=0u,face=0u,ordinal=0u;
+    if(!t || !v || !v->map.cells || !world || !world->map ||
+       !t->evacuation_active || t->dm.enabled || species!=AVP_MP_MARINE)
+        return 0;
+    v->evacuation_active=1u;
+    if(world->map->level!=5u){
+        if(!walk_bot_choose_level_route(t,p,world,5u,AVP_MP_MARINE,
+             v->x>>16,v->y>>16,&v->map,v,20u,53u,1))return 0;
+        v->target_visible=0u;v->tracker_only_target=0u;
+        return 1;
+    }
+    /* In a bots-only game the elected leader is responsible for REAL
+     * launch-panel Use, but only AFTER every other living bot has boarded.
+     * The bot does not call the pod script from a distance or invent launch. */
+    if(p==t->evacuation_leader &&
+       walk_bot_escape_all_boarded(t,p) &&
+       avp_mp_bot_playable_position(v->map.cells,v->map.width,
+          v->map.height,(17u<<16)|0x8000u,(53u<<16)|0x8000u)){
+        AvpMpBotRoute route={0};
+        if(avp_mp_bot_route(&v->map,v->x>>16,v->y>>16,17u,53u,&route)){
+            v->goal=AVP_MP_BOT_ESCAPE_LAUNCH;
+            v->has_target=1u;v->hostile_target=0u;
+            v->target_visible=0u;v->tracker_only_target=0u;
+            v->target_x=(17u<<16)|0x8000u;
+            v->target_y=(53u<<16)|0x8000u;
+            v->target_side=0u; /* original panel offset 27272: west face */
+            return 1;
+        }
+    }
+    for(unsigned q=0;q<p;q++)if(t->session.setup.bot_enabled[q])ordinal++;
+    if(!walk_bot_escape_seat(v,ordinal,&x,&y,&face))return 0;
+    v->goal=AVP_MP_BOT_ESCAPE_SEAT;
+    v->has_target=1u;v->hostile_target=0u;
+    v->target_visible=0u;v->tracker_only_target=0u;
+    v->target_x=(x<<16)|0x8000u;v->target_y=(y<<16)|0x8000u;
+    v->airlock_face_side=face;
+    return 1;
+}
+
 static void walk_bot_commands(AvpMpWalkHost *t,
                               AvpMpPlayerCommand cmds[AVP_LOCAL_MP_MAX_ACTORS],
                               uint64_t tick)
 {
+    /* Native HP is read each bot-input tick; reserve damage among bots
+     * choosing the same enemy so their combined shots are not all granted
+     * against the same last few health points. */
+    unsigned choke_reserved[AVP_NUM_AMPS]={0};
+    t->lift_board_tick=tick;
     for(unsigned p=0;p<t->actors;p++)if(t->session.setup.bot_enabled[p]){
         const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[p];
         const AvpMpActiveWorld *here=avp_mp_session_player_world(&t->session,p);
@@ -2756,15 +4960,43 @@ static void walk_bot_commands(AvpMpWalkHost *t,
         uint8_t acid_risk[4096],prop_risk[4096];
         uint64_t best=UINT64_MAX;
         unsigned species;
-        int marine_empty=0;
+        int marine_empty=0,healing_travel=0;
+        unsigned acid_chokes=0u,acid_retarget=0u;
+        uint16_t marine_caps[4]={0};
         memset(&cmds[p],0,sizeof(cmds[p]));
         if(!a||!world||avp_mp_life_busy(&t->player_life[p])||
-           a->player.player_energy<=0 || a->player.game_over)continue;
+           !walk_vent_world_present(t,p)||
+           a->player.player_energy<=0 || a->player.game_over){
+            /* Damage memory belongs to one life, not a previous corpse.
+             * Keep route, AI profile and source respawn semantics intact. */
+            t->bots[p].physical_valid=0u;
+            t->bots[p].physical_stall=0u;
+            if(a && (a->player.player_energy<=0 || a->player.game_over)){
+                memset(&t->bots[p].duct_arrival,0,sizeof t->bots[p].duct_arrival);
+                t->bots[p].resupply_valid=0u;t->bots[p].resupply_retry_tick=0u;
+                if(t->dm.enabled)t->pickup_memory[p].active=0u;
+                t->bots[p].resupply_scan_level=t->bots[p].resupply_scan_cursor=0u;
+                t->bots[p].healing_valid=0u;t->bots[p].healing_retry_tick=0u;
+                t->bots[p].healing_scan_level=t->bots[p].healing_scan_cursor=0u;
+            }
+            t->bots[p].damage_observed=0u;
+            t->bots[p].damage_react_until=0u;
+            t->lift_intent[p].level=0u;
+            t->lift_arrival_pending[p]=0u;
+            t->lift_egress_valid[p]=0u;
+            for(unsigned i=0u;i<AVP_MP_BOT_LIFT_CLAIMS;i++)
+                if(t->shared_lift_claims.entries[i].active &&
+                   t->shared_lift_claims.entries[i].leader==p)
+                    t->shared_lift_claims.entries[i].active=0u;
+            continue;
+        }
         species=(unsigned)a->player.player_type>>2;
         view.x=a->player.x_pos;view.y=a->player.y_pos;
         view.behavior=p<t->players?AVP_MP_BOT_BALANCED:
             t->session.setup.bot_behavior[p-t->players];
         view.heading=a->player.centre_angle;view.player_index=p;view.tick=tick;
+        view.player_collision_disabled=!t->session.setup.player_collisions;
+        view.observed_world_level=here->level;
         view.door_claims=&t->shared_door_claims;
         /* Read the ORIGINAL currently animated doors, not only their maze
          * opening bytes. A door may be active with byte zero for one tick
@@ -2788,13 +5020,25 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             marine_empty=1;
             for(unsigned i=0;i<4u;i++){
                 view.marine_ammo[i]=a->weapon.ammo_info[i].cur;
+                marine_caps[i]=a->weapon.ammo_info[i].max;
                 if((view.marine_owned&(1u<<(i+1u))) && view.marine_ammo[i])
                     marine_empty=0;
             }
         }
+        view.marine_unarmed=species==AVP_MP_MARINE && marine_empty;
+        view.marine_low_ammo=species==AVP_MP_MARINE && !t->dm.enabled &&
+            avp_mp_bot_marine_needs_resupply(view.marine_owned,
+                                             view.marine_ammo,marine_caps);
+        if(!view.marine_low_ammo && !view.marine_unarmed)
+            t->bots[p].resupply_valid=0u;
         view.player_energy=a->player.player_energy;
         view.max_energy=a->player.max_energy;
         view.medpak=a->weapon.medpak;
+        view.health_low=!t->dm.enabled && species!=AVP_MP_ALIEN &&
+            avp_mp_bot_health_low(view.player_energy,view.max_energy);
+        if(!view.health_low)t->bots[p].healing_valid=0u;
+        view.health_critical=view.health_low &&
+            avp_mp_bot_health_critical(view.player_energy,view.max_energy);
         view.invis_act=a->player.invis_act;
         view.invis_stat=a->player.invis_stat;
         view.invisflag=a->player.invisflag;
@@ -2814,7 +5058,64 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             view.map=(AvpMpBotMap){
                 world->map->bytes+8u,world->map->width,world->map->height,
                 world->doors.wall_flags,world->doors.current_meta,
-                a->access_level,acid_risk,prop_risk};
+                a->access_level,acid_risk,prop_risk,0u};
+            acid_chokes=avp_mp_bot_acid_route_memory(&t->bots[p],&view,acid_risk);
+        }
+        /* Player collision exemptions match the SAME per-actor original
+         * SafePos peer view. Do not steer around teammates if collisions
+         * are disabled, on another level, dead or spawn-grace exempt. */
+        if(t->session.setup.player_collisions && view.map.cells){
+            uint64_t nearest=UINT64_MAX;
+            for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                avp_mp_session_player_world(&t->session,q)==here &&
+                !avp_mp_peer_grace_exempt(&t->peer_spawn_grace,p,q) &&
+                !walk_bot_shared_lift_pair(t,p,q) &&
+                !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
+                const AvpMpActorNativeState *peer=
+                    (const AvpMpActorNativeState *)t->session.player[q];
+                if(!peer || peer->player.player_energy<=0)continue;
+                const uint64_t distance=walk_bot_distance(view.x,view.y,
+                    peer->player.x_pos,peer->player.y_pos);
+                if(distance>=((uint64_t)3u<<16)*((uint64_t)3u<<16))continue;
+                if(view.prop_count<AVP_MP_BOT_MAX_NEAR_PROPS){
+                    AvpMpBotProp *block=&view.props[view.prop_count++];
+                    block->x=peer->player.x_pos;
+                    block->y=peer->player.y_pos;
+                    block->halfwidth=AVP_MP_PEER_CLEARANCE;
+                }
+                if(distance<nearest){
+                    nearest=distance;
+                    view.nearby_peer_valid=1u;
+                    view.nearby_peer_index=q;
+                    view.nearby_peer_x=peer->player.x_pos;
+                    view.nearby_peer_y=peer->player.y_pos;
+                    view.nearby_peer_heading=peer->player.centre_angle;
+                }
+            }
+        }
+        /* Persist abandoned pickups across tick-level goal reselection.
+         * A corpse on the opposite side of a wall is not a reachable item
+         * simply because its maze CELL is connected. */
+        {
+            AvpMpBotPickupMemory *memory=&t->pickup_memory[p];
+            uint32_t cost=UINT32_MAX;
+            const unsigned cell=(view.y>>16)*64u+(view.x>>16);
+            if(memory->active && memory->level==world->map->level &&
+               ((memory->slot<AVP_NUM_AMPS &&
+                world->amp.slot_generation[memory->slot]==memory->generation) ||
+                (memory->slot>=WALK_BOT_CORPSE_SLOT_BASE &&
+                 walk_bot_corpse_available(t,p,world->map->level,
+                     memory->slot-WALK_BOT_CORPSE_SLOT_BASE) &&
+                 (unsigned)t->corpses.records[memory->slot-WALK_BOT_CORPSE_SLOT_BASE].death_tick==memory->generation)) &&
+               view.map.cells && (tick&3u)==0u &&
+               cell!=memory->last_route_cell){
+                AvpMpBotRoute path={0};
+                if(avp_mp_bot_route(&view.map,view.x>>16,view.y>>16,
+                     memory->target_x>>16,memory->target_y>>16,&path))
+                    cost=path.cost;
+            }
+            avp_mp_bot_pickup_observe(memory,world->map->level,tick,
+                                     view.x,view.y,cost,cell);
         }
         walk_bot_scan_contacts(t,p,world,a,&view);
         /* Cloak policy may use only OBSERVED or remembered Marine AMPs,
@@ -2826,7 +5127,8 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             const AvpMpBotContact *contact=&t->contacts[p][i];
             if(!walk_bot_hostile(amp) || !contact->known)continue;
             if(amp->creature==AC_HUMAN)view.marines_on_level++;
-            if(!contact->sight && !contact->tracker)continue;
+            if(!contact->sight && (!contact->tracker ||
+               (species==AVP_MP_MARINE && !marine_empty)))continue;
             distance=walk_bot_distance(view.x,view.y,contact->x,contact->y);
             if(distance<=((uint64_t)6u<<16)*((uint64_t)6u<<16))
                 view.combat_enemies_nearby++;
@@ -2836,7 +5138,7 @@ static void walk_bot_commands(AvpMpWalkHost *t,
          * another original scanner contact (no all-map opponent census). */
         if(t->dm.enabled)for(unsigned q=0;q<t->actors;q++)if(q!=p &&
             avp_mp_session_player_world(&t->session,q)==here &&
-            !avp_mp_life_busy(&t->player_life[q])){
+            !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
             const AvpMpActorNativeState *opponent=(const AvpMpActorNativeState *)t->session.player[q];
             const AvpMpBotContact *contact=&t->contacts[p][AVP_NUM_AMPS+q];
             if(!opponent || opponent->player.player_energy<=0)continue;
@@ -2846,7 +5148,8 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             view.dm_opponents_on_level++;
             if(!contact->known)continue;
             if(opponent->player.player_type==PT_HUMAN)view.marines_on_level++;
-            if((contact->sight||contact->tracker) &&
+            if((contact->sight||(contact->tracker &&
+                 (species!=AVP_MP_MARINE || marine_empty))) &&
                walk_bot_distance(view.x,view.y,contact->x,contact->y)<=
                    ((uint64_t)6u<<16)*((uint64_t)6u<<16))
                 view.combat_enemies_nearby++;
@@ -2899,11 +5202,11 @@ static void walk_bot_commands(AvpMpWalkHost *t,
         }else if(species==AVP_MP_ALIEN){
             t->bots[p].cocoon_locked=0u;t->bots[p].cocoon_phase=0u;
         }
-        /* Health search for Marines and Predators at <=45% health; normal
+        /* Health search for Marines and Predators at <=60% health; normal
          * pickups MUST be uncollected and still active in the source world.
          * Alien survival never chases a health item it cannot use. */
         if(!view.has_target && species!=AVP_MP_ALIEN &&
-           view.max_energy>0 && view.player_energy*100<view.max_energy*45 &&
+           view.health_low &&
            (species!=AVP_MP_PREDATOR || view.medpak<=0)){
             for(unsigned i=0;i<AVP_NUM_AMPS;i++){
                 const AvpAmp *amp=&world->amp.actors[i];
@@ -2912,7 +5215,9 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 unsigned gx=(u32)amp->xpos>>16,gy=(u32)amp->ypos>>16;
                 if(!amp->mode && !amp->host_static)continue;
                 if(amp->flags&(1u<<AMP_COLLECT) ||
-                   !walk_mp_item_available(t,p,world->map->level,i,amp))continue;
+                   !walk_mp_item_available(t,p,world->map->level,i,amp) ||
+                   avp_mp_bot_pickup_avoided(&t->pickup_memory[p],
+                       world->map->level,i,world->amp.slot_generation[i],tick))continue;
                 if(amp->astype!=11 && amp->astype!=21 && amp->astype!=40)continue;
                 /* A nearby health pack behind a locked original door is
                  * not a useful target. Prefer a reachable source path. */
@@ -2924,15 +5229,14 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                                                    (u32)amp->xpos,(u32)amp->ypos);
                 if(distance>=best)continue;
                 best=distance;view.has_target=1;view.hostile_target=0;
-                view.goal=AVP_MP_BOT_HEALTH;
+                view.goal=AVP_MP_BOT_HEALTH;view.target_slot=i;
                 view.target_x=(u32)amp->xpos;view.target_y=(u32)amp->ypos;
             }
         }
         /* Currently sighted enemies should interrupt routine health/supply
          * searches throughout the original ranged engagement envelope,
-         * not only within the old three-tile panic radius. Radar-only
-         * contacts can be approached, but never shot through walls.
-         * Favor visible combat over a closer tracker-only contact. */
+         * not only within the old three-tile panic radius. Scanner-only
+         * contacts do not interrupt supply or health searches. */
         if((species!=AVP_MP_MARINE || !marine_empty) &&
            view.goal!=AVP_MP_BOT_COCOON && t->combat_test){
             uint64_t nearest=UINT64_MAX;
@@ -2943,6 +5247,14 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 uint64_t distance;
                 const AvpMpBotContact *contact=&t->contacts[p][i];
                 if(!walk_bot_hostile(amp) || !contact->known)continue;
+                if(species==AVP_MP_PREDATOR &&
+                   amp->creature==AC_EGG && avp_mp_bot_egg_avoided(&t->bots[p],
+                       world->map->level,i,world->amp.slot_generation[i],tick))continue;
+                if(contact->tracker && !contact->sight &&
+                   (tick<t->bots[p].tracker_cooldown_until ||
+                    avp_mp_bot_tracker_contact_suppressed(&t->bots[p],i,
+                       world->map->level,contact->serial,
+                       contact->x,contact->y,tick)))continue;
                 distance=walk_bot_distance(view.x,view.y,contact->x,contact->y);
                 if(!avp_mp_bot_immediate_contact_prefer(species,
                      contact->sight,contact->tracker,distance,
@@ -2950,7 +5262,15 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 nearest=distance;selected=1u;
                 selected_sight=contact->sight;threat=amp;
             }
-            if(threat){
+            /* R473: only optical confirmation interrupts supplies. The
+             * ordinary pursuit scan below handles reachable scanner clues. */
+            /* Above the last quarter, defend normally. Below it, reserve
+             * rounds for close, actually visible emergencies and leave a
+             * route to real supplies; don't chase a scanner blip to death. */
+            if(threat && avp_mp_bot_contact_interrupts_supply(selected_sight,nearest) &&
+               (!view.marine_low_ammo ||
+                (selected_sight && nearest<
+                   ((uint64_t)2u<<16)*((uint64_t)2u<<16)))){
                 const unsigned idx=(unsigned)(threat-world->amp.actors);
                 const AvpMpBotContact *contact=&t->contacts[p][idx];
                 view.has_target=view.hostile_target=1u;
@@ -2963,11 +5283,24 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 view.target_slot=idx;
             }
         }
-        /* Marine scrounging uses the same read-only authored pickup lookup
-           as Collectables(), including corpse loot and security keycards.
-           Prefer keycards and missing guns, but leave nearly-full ammo
-           pickups until at least the original amount can be used. With no
-           loaded guns, seek supplies rather than waiting to die shooting. */
+        /* Marine scrounging uses the SAME read-only original pickup table
+           for standalone Shotgun Shells (def 25), Pulse Rifle Rounds (16/24),
+           Flamethrower Gas (15), Smart Gun Ammo (12/23), as well as authored
+           corpses including green-uniform pulse-ammo bodies. Even an incomplete magazine can benefit from one pickup:
+           consider it when below its original max, never fabricate ammo or
+           collect an already-claimed body. Combat still overrides detours. */
+        if(!view.has_target && species==AVP_MP_MARINE && view.map.cells &&
+           view.marine_low_ammo && !view.marine_unarmed &&
+           t->bots[p].resupply_level==world->map->level &&
+           walk_bot_resupply_held(t,p,a,world,&view)){
+            AvpMpBotRoute route={0};
+            const unsigned slot=t->bots[p].resupply_slot;
+            const AvpAmp *amp=&world->amp.actors[slot];
+            if(avp_mp_bot_route(&view.map,view.x>>16,view.y>>16,
+                (u32)amp->xpos>>16,(u32)amp->ypos>>16,&route) && route.valid)
+                walk_bot_supply_target(&view,amp,slot);
+            else t->bots[p].resupply_valid=0u;
+        }
         if(!view.has_target && species==AVP_MP_MARINE && view.map.cells){
             unsigned loaded_total=0u,ammo_cap=0u;
             int any_loaded=0;
@@ -2986,7 +5319,9 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 unsigned at;
                 if((!amp->mode && !amp->host_static) ||
                    (amp->flags&(1u<<AMP_COLLECT)) ||
-                   !walk_mp_item_available(t,p,world->map->level,i,amp))continue;
+                   !walk_mp_item_available(t,p,world->map->level,i,amp) ||
+                   avp_mp_bot_pickup_avoided(&t->pickup_memory[p],
+                       world->map->level,i,world->amp.slot_generation[i],tick))continue;
                 if(!avp_collect_peek(world->map->level,(u32)amp->xpos>>16,
                       (u32)amp->ypos>>16,amp->astype,&type,&amount))continue;
                 if(type>=COLL_S1 && type<=COLL_S10){
@@ -3008,10 +5343,18 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                     const int weapon_item=type==COLL_SHOTGUN || type==COLL_PULSERIFLE ||
                         type==COLL_FLAMETHROWER || type==COLL_SMARTGUN;
                     if(weapon_item && !(view.marine_owned&(1u<<weapon)))prio=1u;
-                    else if(!(view.marine_owned&(1u<<weapon)) || missing==0u ||
-                            (missing<(unsigned)amount && cur*4u>=max*3u))continue;
+                    else if(missing==0u)continue;
                     else if(!any_loaded)prio=0u;
-                    else if(ammo_cap && loaded_total*4u>ammo_cap &&
+                    /* An empty reserve is worth fetching even if the bot
+                     * has not found its weapon yet. In the starting Brig,
+                     * authentic green-uniform corpses carry pulse rounds. */
+                    else if(cur==0u)prio=1u;
+                    /* Never reject an EMPTY weapon's compatible ammo
+                     * merely because other guns happen to be well stocked.
+                     * Immediate visually confirmed combat was resolved
+                     * before this passive scavenge step. */
+                    else if(cur>0u && ammo_cap &&
+                            loaded_total*4u>ammo_cap &&
                             view.combat_enemies_nearby)continue;
                     else prio=2u;
                 }
@@ -3034,14 +5377,16 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 uint64_t cost=(uint64_t)route.cost+candidates[i].estimate/2u;
                 /* Fight immediate threats while armed. Desperate, empty-gun
                    Marines may run toward farther supply caches instead. */
-                if(any_loaded && view.combat_enemies_nearby && cost>25u)continue;
+                if(any_loaded && !view.marine_low_ammo &&
+                   view.combat_enemies_nearby && cost>25u)continue;
                 if(cost>=best)continue;
                 best=cost;view.has_target=1;view.hostile_target=0;
                 view.goal=AVP_MP_BOT_SUPPLY;
+                view.target_slot=(unsigned)(amp-world->amp.actors);
                 view.target_x=(u32)amp->xpos;view.target_y=(u32)amp->ypos;
             }
         }
-        if(!view.has_target && !marine_empty){
+        if(!view.has_target && !marine_empty && !view.marine_low_ammo){
             /* Evaluate at most eight nearest source enemies with the real
              * grid planner. An AMP behind a locked wall must not suppress a
              * reachable enemy. Limit Dijkstra calls at the 10 Hz tick. */
@@ -3055,6 +5400,14 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 unsigned at;
                 const AvpMpBotContact *contact=&t->contacts[p][i];
                 if(!walk_bot_hostile(amp)||!contact->known)continue;
+                if(species==AVP_MP_PREDATOR &&
+                   amp->creature==AC_EGG && avp_mp_bot_egg_avoided(&t->bots[p],
+                       world->map->level,i,world->amp.slot_generation[i],tick))continue;
+                if(contact->tracker && !contact->sight &&
+                   (tick<t->bots[p].tracker_cooldown_until ||
+                    avp_mp_bot_tracker_contact_suppressed(&t->bots[p],i,
+                       world->map->level,contact->serial,
+                       contact->x,contact->y,tick)))continue;
                 distance=walk_bot_distance(view.x,view.y,contact->x,contact->y);
                 if(species==AVP_MP_ALIEN && amp->creature==AC_HUMAN &&
                    view.max_energy>0 && view.player_energy*100<view.max_energy*45)
@@ -3076,8 +5429,10 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                          contact->x>>16,contact->y>>16,&route)){
                         /* A currently seen AMP can be shot even if its cell
                          * cannot be navigated into, never through a wall. */
-                        if(!contact->sight)continue;
-                        distance=2u+(distance>>32);
+                        if(!contact->sight){
+                            /* Hidden contacts must have a local route. */
+                            continue;
+                        }else distance=2u+(distance>>32);
                     }else distance=(uint64_t)route.cost+1u;
                     if(species==AVP_MP_ALIEN && amp->creature==AC_HUMAN &&
                        view.max_energy>0 && view.player_energy*100<view.max_energy*45)
@@ -3196,7 +5551,7 @@ static void walk_bot_commands(AvpMpWalkHost *t,
              * each bot chase another bot in a circular dependency. */
             for(unsigned q=0;q<t->actors;q++)if(q!=p &&
                 (!t->session.setup.bot_enabled[q] || (p!=0u && q==0u)) &&
-                !avp_mp_life_busy(&t->player_life[q]) &&
+                !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q) &&
                 avp_mp_session_player_world(&t->session,q)==here){
                 const AvpMpActorNativeState *other=(const AvpMpActorNativeState *)t->session.player[q];
                 if(other && other->player.player_energy>0 && !other->player.game_over){
@@ -3220,7 +5575,7 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             best=UINT64_MAX;
             for(unsigned q=0;q<t->actors;q++)if(q!=p &&
                 (!t->session.setup.bot_enabled[q] || (p!=0u && q==0u)) &&
-                !avp_mp_life_busy(&t->player_life[q])){
+                !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
                 const AvpMpActiveWorld *otherworld=
                     avp_mp_session_player_world(&t->session,q);
                 const AvpMpActorNativeState *other=(const AvpMpActorNativeState *)t->session.player[q];
@@ -3253,7 +5608,7 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 uint64_t d;
                 const AvpMpBotContact *contact=&t->contacts[p][i];
                 if(!walk_bot_hostile(amp)||!contact->known ||
-                   (!contact->sight && !contact->tracker))continue;
+                   !contact->sight)continue;
                 switch(amp->creature){
                 case AC_ALIEN:case AC_ACRAWL:threat=AVP_MP_BOT_THREAT_ALIEN;break;
                 case AC_PREDATOR:threat=AVP_MP_BOT_THREAT_PREDATOR;break;
@@ -3293,12 +5648,21 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 UINT64_MAX;
             unsigned best_visible=view.hostile_target && view.target_visible;
             for(unsigned q=0;q<t->actors;q++)if(q!=p &&
-                !avp_mp_life_busy(&t->player_life[q]) &&
+                !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q) &&
                 avp_mp_session_player_world(&t->session,q)==here){
                 const AvpMpActorNativeState *enemy=(const AvpMpActorNativeState *)t->session.player[q];
                 uint64_t d;
                 const AvpMpBotContact *contact=&t->contacts[p][AVP_NUM_AMPS+q];
                 if(!enemy || enemy->player.player_energy<=0 || !contact->known)continue;
+                if(contact->tracker && !contact->sight){
+                    AvpMpBotRoute radar_route={0};
+                    if(tick<t->bots[p].tracker_cooldown_until ||
+                       avp_mp_bot_tracker_contact_suppressed(&t->bots[p],AVP_NUM_AMPS+q,
+                           world->map->level,contact->serial,contact->x,contact->y,tick) ||
+                       (view.has_target && !view.hostile_target) ||
+                       (view.map.cells && !avp_mp_bot_route(&view.map,view.x>>16,view.y>>16,
+                           contact->x>>16,contact->y>>16,&radar_route)))continue;
+                }
                 d=walk_bot_distance(view.x,view.y,contact->x,contact->y);
                 /* Visible contacts defeat stale targets; do not interrupt
                  * combat with an AMP just because a player is known. */
@@ -3330,6 +5694,10 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 view.has_target=view.hostile_target=0u;
             }
         }
+        /* Deathmatch travel is a real goal, not a low-priority random
+         * patrol destination. A known enemy or needed supply wins first. */
+        if(!view.has_target)
+            (void)walk_bot_dm_travel(t,p,world,species,&view);
         if(!view.has_target)walk_bot_patrol(t,p,&view,world->map->level);
         else if(view.map.cells && view.tick%6u==0u){
             unsigned cx=view.x>>16,cy=view.y>>16;
@@ -3338,6 +5706,268 @@ static void walk_bot_commands(AvpMpWalkHost *t,
             if(t->patrol[p].level==world->map->level && cx<64u && cy<64u &&
                t->patrol[p].visits[cy*64u+cx]<65535u)
                 ++t->patrol[p].visits[cy*64u+cx];
+        }
+        /* RE44 R275: an optically visible original Alien physically pinning
+         * another living player takes precedence over ordinary nearest-AMP
+         * targeting. An unrelated closer enemy must not make the bot ignore
+         * a teammate who has no legal escape. Uses this bot's actual
+         * optical contacts and native actors only; no hidden target cheat. */
+        if(!t->dm.enabled && t->combat_test && view.map.cells &&
+           species!=AVP_MP_ALIEN){
+            uint64_t nearest=UINT64_MAX;
+            for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+                const AvpAmp *alien=&world->amp.actors[i];
+                const AvpMpBotContact *contact=&t->contacts[p][i];
+                if(!walk_bot_hostile(alien) ||
+                   (alien->creature!=AC_ALIEN && alien->creature!=AC_ACRAWL) ||
+                   !contact->sight ||
+                   contact->x!=(uint32_t)alien->xpos ||
+                   contact->y!=(uint32_t)alien->ypos)continue;
+                const uint64_t distance=walk_bot_distance(view.x,view.y,
+                    contact->x,contact->y);
+                if(distance>=nearest)continue;
+                for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                    avp_mp_session_player_world(&t->session,q)==here &&
+                    !avp_mp_life_busy(&t->player_life[q]) &&
+                    walk_vent_world_present(t,q)){
+                    const AvpMpActorNativeState *victim=
+                        (const AvpMpActorNativeState *)t->session.player[q];
+                    if(!victim || victim->player.player_energy<=0 ||
+                       victim->player.game_over ||
+                       victim->player.player_type==PT_ALIEN)continue;
+                    if(!avp_mp_bot_alien_traps_player(&view.map,
+                        (uint32_t)alien->xpos,(uint32_t)alien->ypos,
+                        victim->player.x_pos,victim->player.y_pos))continue;
+                    nearest=distance;
+                    view.has_target=view.hostile_target=view.target_visible=1u;
+                    view.goal=AVP_MP_BOT_HOSTILE;
+                    view.target_x=contact->x;view.target_y=contact->y;
+                    view.target_is_alien=1u;
+                    view.target_is_marine=view.target_is_stunned=0u;
+                    view.target_energy_positive=alien->energy>0;
+                    view.target_slot=i;
+                    /* Preserve actual witnessed rescue priority when the
+                     * close-threat selector considers another source AMP. */
+                    view.other_player_alien_trapped=1u;
+                    break;
+                }
+            }
+        }
+        /* R277: multiple close original Aliens are an immediate threat,
+         * not separate harmless encounters. Count ONLY this bot's current
+         * optical observations; ignore scanner-only blips and breadcrumbs.
+         * A visible Alien within melee approach distance must be faced
+         * ahead of an unrelated remembered enemy or routine pickup. */
+        if(t->combat_test && species==AVP_MP_MARINE){
+            uint64_t nearest=UINT64_MAX;
+            unsigned close_slot=AVP_NUM_AMPS;
+            unsigned rescue_selected=view.other_player_alien_trapped;
+            for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+                const AvpAmp *alien=&world->amp.actors[i];
+                const AvpMpBotContact *seen=&t->contacts[p][i];
+                if(!walk_bot_hostile(alien) ||
+                   (alien->creature!=AC_ALIEN && alien->creature!=AC_ACRAWL) ||
+                   !seen->sight)continue;
+                const uint64_t distance=walk_bot_distance(view.x,view.y,
+                    seen->x,seen->y);
+                if(distance<((uint64_t)3u<<16)*((uint64_t)3u<<16))
+                    view.close_alien_contacts++;
+                if(seen->sight && distance<nearest &&
+                   distance<((uint64_t)2u<<16)*((uint64_t)2u<<16)){
+                    nearest=distance;close_slot=i;
+                }
+            }
+            if(close_slot<AVP_NUM_AMPS && !rescue_selected &&
+               (!view.hostile_target || !view.target_visible ||
+                walk_bot_distance(view.x,view.y,view.target_x,view.target_y)>nearest)){
+                const AvpAmp *alien=&world->amp.actors[close_slot];
+                const AvpMpBotContact *seen=&t->contacts[p][close_slot];
+                view.has_target=view.hostile_target=view.target_visible=1u;
+                view.goal=AVP_MP_BOT_HOSTILE;
+                view.target_x=seen->x;view.target_y=seen->y;
+                view.target_is_alien=1u;view.target_is_marine=0u;
+                view.target_is_stunned=0u;
+                view.target_energy_positive=alien->energy>0;
+                view.target_slot=close_slot;
+            }
+            /* Fight AND withdraw toward the closest real teammate when
+             * outnumbered, critically injured, or struck near an Alien.
+             * Prefer the companion farther from the observed main threat;
+             * never chase a player through a locked door, on another
+             * level, inside a vent transition, or already dead. */
+            const int recently_hit=t->bots[p].damage_observed &&
+                (view.player_energy<t->bots[p].last_observed_energy ||
+                 tick<t->bots[p].damage_react_until);
+            const int critical=view.max_energy>0 &&
+                (int64_t)view.player_energy*100<(int64_t)view.max_energy*45;
+            if(!t->dm.enabled && view.map.cells &&
+               view.hostile_target && view.target_is_alien &&
+               view.target_visible && (view.close_alien_contacts>=2u ||
+                  (view.close_alien_contacts && (critical || recently_hit)))){
+                uint64_t best_cost=UINT64_MAX;
+                const uint64_t threat_distance=walk_bot_distance(view.x,view.y,
+                    view.target_x,view.target_y);
+                for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                    avp_mp_session_player_world(&t->session,q)==here &&
+                    !avp_mp_life_busy(&t->player_life[q]) &&
+                    walk_vent_world_present(t,q)){
+                    const AvpMpActorNativeState *friend=
+                        (const AvpMpActorNativeState *)t->session.player[q];
+                    AvpMpBotRoute refuge={0};
+                    if(!friend || friend->player.player_energy<=0 ||
+                       friend->player.game_over ||
+                       friend->player.player_type==PT_ALIEN)continue;
+                    const uint64_t separation=walk_bot_distance(view.x,view.y,
+                        friend->player.x_pos,friend->player.y_pos);
+                    if(separation<((uint64_t)1u<<16)*((uint64_t)1u<<16))continue;
+                    const uint64_t ally_clearance=walk_bot_distance(
+                        friend->player.x_pos,friend->player.y_pos,
+                        view.target_x,view.target_y);
+                    /* A teammate right beside the enemy isn't refuge. */
+                    if(ally_clearance<=threat_distance+
+                        ((uint64_t)32768u*32768u))continue;
+                    if(!avp_mp_bot_route(&view.map,view.x>>16,view.y>>16,
+                        friend->player.x_pos>>16,friend->player.y_pos>>16,
+                        &refuge) || !refuge.valid ||
+                        refuge.requires_door_use || refuge.cost>=best_cost)
+                        continue;
+                    best_cost=refuge.cost;
+                    view.retreat_to_teammate=1u;
+                    view.retreat_teammate_x=friend->player.x_pos;
+                    view.retreat_teammate_y=friend->player.y_pos;
+                }
+            }
+        }
+        /* RE44 R288: a single-Alien "trapped player" probe can miss an
+         * actual sandwich: each Alien leaves one mathematically clear escape
+         * button, but that escape runs directly into the OTHER Alien.
+         * Recognize only TWO currently sighted original
+         * Aliens around a living same-world teammate; their locations must
+         * already belong to this bot's observation (never omniscient AMP
+         * positions). A visibly threatened bot also deserves aid, but
+         * favor a HUMAN teammate when several players are endangered.
+         * This is not a change to native collision, attacks or acid. */
+        if(!t->dm.enabled && t->combat_test &&
+           species==AVP_MP_MARINE && !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           !(view.close_alien_contacts>=2u && view.target_visible)){
+            unsigned choice=AVP_NUM_AMPS;
+            for(unsigned pass=0u;pass<2u && choice>=AVP_NUM_AMPS;pass++)
+            for(unsigned q=0u;q<t->actors;q++)if(q!=p &&
+                (t->session.setup.bot_enabled[q]!=0u)==(pass!=0u) &&
+                avp_mp_session_player_world(&t->session,q)==here &&
+                !avp_mp_life_busy(&t->player_life[q]) &&
+                walk_vent_world_present(t,q)){
+                const AvpMpActorNativeState *friend=(const AvpMpActorNativeState *)
+                    t->session.player[q];
+                unsigned threats=0u,nearest=AVP_NUM_AMPS;
+                uint64_t nearest_d=UINT64_MAX;
+                if(!friend || friend->player.player_energy<=0 ||
+                   friend->player.game_over ||
+                   friend->player.player_type==PT_ALIEN)continue;
+                for(unsigned i=0u;i<AVP_NUM_AMPS;i++){
+                    const AvpAmp *alien=&world->amp.actors[i];
+                    const AvpMpBotContact *seen=&t->contacts[p][i];
+                    const uint64_t range=((uint64_t)98304u*98304u);
+                    if(!walk_bot_hostile(alien) ||
+                       (alien->creature!=AC_ALIEN &&
+                        alien->creature!=AC_ACRAWL) ||
+                       !seen->sight ||
+                       walk_bot_distance(friend->player.x_pos,
+                           friend->player.y_pos,seen->x,seen->y)>range)
+                        continue;
+                    threats++;
+                    /* Prefer the nearest confirmed threat. */
+                    const uint64_t d=walk_bot_distance(view.x,view.y,
+                        seen->x,seen->y);
+                    if(nearest>=AVP_NUM_AMPS ||
+                       (seen->sight && !t->contacts[p][nearest].sight) ||
+                       (seen->sight==t->contacts[p][nearest].sight &&
+                        d<nearest_d)){
+                        nearest=i;nearest_d=d;
+                    }
+                }
+                if(threats>=2u && nearest<AVP_NUM_AMPS){
+                    choice=nearest;
+                    break;
+                }
+            }
+            if(choice<AVP_NUM_AMPS){
+                const AvpAmp *alien=&world->amp.actors[choice];
+                const AvpMpBotContact *seen=&t->contacts[p][choice];
+                view.other_player_swarmed=1u;
+                view.has_target=view.hostile_target=1u;
+                view.goal=AVP_MP_BOT_HOSTILE;
+                view.target_slot=choice;
+                view.target_x=seen->x;view.target_y=seen->y;
+                view.target_visible=seen->sight!=0u;
+                view.target_is_alien=1u;
+                view.target_is_marine=view.target_is_stunned=0u;
+                view.target_energy_positive=alien->energy>0;
+            }
+        }
+        /* R278: defend living same-world companions from visually observed
+         * stationary eggs, fast Facehuggers and ranged Predators. The original
+         * egg has NO motion flag, so an egg behind a wall is not a scanner
+         * contact. This priority is based on this bot's actual optical LOS,
+         * not invisible enemy positions, and cannot override the R275
+         * pinned-player rescue or R277 immediate multi-Alien self-defense. */
+        if(!t->dm.enabled && t->combat_test &&
+           species==AVP_MP_MARINE && !marine_empty &&
+           !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           !(view.close_alien_contacts>=2u && view.target_visible)){
+            unsigned chosen=AVP_NUM_AMPS,priority=0u;
+            uint64_t closest=UINT64_MAX;
+            for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+                const AvpAmp *enemy=&world->amp.actors[i];
+                const AvpMpBotContact *seen=&t->contacts[p][i];
+                uint64_t me_d2;
+                if(!walk_bot_hostile(enemy) || !seen->sight)continue;
+                me_d2=walk_bot_distance(view.x,view.y,seen->x,seen->y);
+                for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                    avp_mp_session_player_world(&t->session,q)==here &&
+                    !avp_mp_life_busy(&t->player_life[q]) &&
+                    walk_vent_world_present(t,q)){
+                    const AvpMpActorNativeState *friend=
+                        (const AvpMpActorNativeState *)t->session.player[q];
+                    unsigned urgency;
+                    if(!friend || friend->player.player_energy<=0 ||
+                       friend->player.game_over ||
+                       friend->player.player_type==PT_ALIEN)continue;
+                    urgency=avp_mp_bot_guard_urgency(enemy->creature,
+                        walk_bot_distance(friend->player.x_pos,
+                            friend->player.y_pos,seen->x,seen->y),me_d2);
+                    if(!urgency)continue;
+                    /* Preserve current equally urgent target to prevent
+                     * near-equal hostiles swapping on every scanner tick. */
+                    if(urgency>priority ||
+                       (urgency==priority && i==view.target_slot) ||
+                       (urgency==priority && me_d2<closest &&
+                        chosen!=view.target_slot)){
+                        priority=urgency;closest=me_d2;chosen=i;
+                    }
+                }
+            }
+            if(chosen<AVP_NUM_AMPS){
+                const AvpAmp *enemy=&world->amp.actors[chosen];
+                const AvpMpBotContact *seen=&t->contacts[p][chosen];
+                /* Immediate melee danger to THIS bot always wins over
+                 * guarding a more distant teammate. */
+                if(!(view.melee_visible &&
+                    walk_bot_distance(view.x,view.y,view.melee_x,view.melee_y)<
+                      (uint64_t)65536u*65536u)){
+                    view.has_target=view.hostile_target=view.target_visible=1u;
+                    view.goal=AVP_MP_BOT_HOSTILE;
+                    view.target_x=seen->x;view.target_y=seen->y;
+                    view.target_is_marine=enemy->creature==AC_HUMAN;
+                    view.target_is_alien=enemy->creature==AC_ALIEN ||
+                                         enemy->creature==AC_ACRAWL;
+                    view.target_is_stunned=0u;
+                    view.target_energy_positive=enemy->energy>0;
+                    view.target_slot=chosen;
+                    /* Do not abandon a real retreat route selected while
+                     * escaping several Aliens for an unrelated guard target. */
+                }
+            }
         }
         /* The real current facing of an OPTICALLY SIGHTED opponent can
          * justify a Guerilla flank. Do not disclose a heading for old
@@ -3368,7 +5998,722 @@ static void walk_bot_commands(AvpMpWalkHost *t,
                 }
             }
         }
-        avp_mp_bot_step(&t->bots[p],&view,&cmds[p]);
+        /* R275: source enemy energy is read only for the FINAL, optically
+         * visible target, never for stale breadcrumbs or tracker contacts. */
+        if(view.hostile_target && view.target_visible &&
+           view.target_slot<AVP_NUM_AMPS){
+            const AvpAmp *chosen=&world->amp.actors[view.target_slot];
+            if(walk_bot_hostile(chosen) &&
+               (uint32_t)chosen->xpos==view.target_x &&
+               (uint32_t)chosen->ypos==view.target_y){
+                view.target_health=(int)chosen->energy;
+                view.target_health_valid=1u;
+                /* The source eggwait mode is the only reliable unopened
+                 * state. Shotgun-only bots must not provoke it with an
+                 * early hit, which skips its normal Facehugger delay. */
+                if(chosen->creature==AC_EGG){
+                    view.target_is_egg=1u;
+                    view.target_egg_unopened=(chosen->mode==eggwait);
+                }
+            }
+        }
+        /* R283: at low health, prioritize a legitimate health pickup or
+         * medical terminal even when an old tracker goal exists. Continue
+         * immediate close-range fighting/rescue; do not run into an Alien's
+         * melee reach just to use a panel. */
+        if(!t->dm.enabled && view.health_low && view.map.cells &&
+           species!=AVP_MP_ALIEN && !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           (view.goal!=AVP_MP_BOT_HEALTH ||
+            (t->bots[p].healing_valid && t->bots[p].healing_level==world->map->level)) &&
+           view.goal!=AVP_MP_BOT_MEDICAL){
+            const uint64_t danger=view.hostile_target && view.target_visible?
+                 walk_bot_distance(view.x,view.y,view.target_x,view.target_y):
+                 UINT64_MAX;
+            const int close_facehugger=view.hostile_target &&
+                view.target_visible && view.target_slot<AVP_NUM_AMPS &&
+                world->amp.actors[view.target_slot].creature==AC_FACEHUG &&
+                danger<=((uint64_t)4u<<16)*((uint64_t)4u<<16) &&
+                !view.marine_unarmed;
+            if(!close_facehugger &&
+               danger>=((uint64_t)2u<<16)*((uint64_t)2u<<16)){
+                AvpMpBotObservation to_health=view;
+                if(walk_bot_choose_known_healing(t,p,a,world,&to_health)){
+                    view=to_health;
+                    healing_travel=view.goal==AVP_MP_BOT_EXIT || view.goal==AVP_MP_BOT_LIFT;
+                    t->bots[p].tracker_seek_valid=0u;
+                    t->bots[p].cover_flank_valid=0u;
+                }
+            }
+        }
+        /* Low ammunition is an EARLY survival signal, not merely an all-
+         * weapons-empty state. Don't walk up to another hidden tracker enemy
+         * when there is a reachable source ammo cache on a known level.
+         * Prioritize current-level supply and urgent teammate rescue first.
+         * For other-level pickups, the actual authored portal graph picks
+         * the necessary duct/lift/airlock. Never travel by teleport. */
+        if(!t->dm.enabled && species==AVP_MP_MARINE &&
+           view.marine_low_ammo && view.map.cells && !healing_travel &&
+           !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           view.goal!=AVP_MP_BOT_SUPPLY && view.goal!=AVP_MP_BOT_HEALTH &&
+           view.goal!=AVP_MP_BOT_MEDICAL){
+            const uint64_t d2=view.hostile_target?
+                walk_bot_distance(view.x,view.y,view.target_x,view.target_y):
+                UINT64_MAX;
+            const int close_facehugger=view.hostile_target &&
+                view.target_visible && view.target_slot<AVP_NUM_AMPS &&
+                world->amp.actors[view.target_slot].creature==AC_FACEHUG &&
+                d2<=((uint64_t)4u<<16)*((uint64_t)4u<<16);
+            const int melee_emergency=view.target_visible && !marine_empty &&
+                (d2<((uint64_t)2u<<16)*((uint64_t)2u<<16) ||
+                 close_facehugger);
+            if(!melee_emergency){
+                AvpMpBotObservation supply=view;
+                if(walk_bot_choose_known_resupply(t,p,a,world,&supply)){
+                    view=supply;
+                    t->bots[p].tracker_seek_valid=0u;
+                    t->bots[p].cover_flank_valid=0u;
+                }
+            }
+        }
+        /* If no accessible ammunition has been located, attempt a REAL
+         * map route away from the nearest visually known/own-tracker threat.
+         * Commit to the escape cell to avoid 10-Hz forward/back oscillation.
+         * With no legal path, preserve safe standoff while other players
+         * may rescue this Marine; never order a fake passage through props. */
+        if(!t->dm.enabled && species==AVP_MP_MARINE &&
+           view.marine_low_ammo && view.map.cells &&
+           view.goal!=AVP_MP_BOT_SUPPLY && view.goal!=AVP_MP_BOT_HEALTH &&
+           view.goal!=AVP_MP_BOT_MEDICAL &&
+           view.goal!=AVP_MP_BOT_EXIT && view.goal!=AVP_MP_BOT_LIFT &&
+           !view.retreat_to_teammate && !(view.other_player_alien_trapped || view.other_player_swarmed)){
+            uint64_t distance=UINT64_MAX;
+            unsigned threat_x=0u,threat_y=0u,seen=0u;
+            AvpMpBotState *memory=&t->bots[p];
+            for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+                const AvpAmp *amp=&world->amp.actors[i];
+                const AvpMpBotContact *c=&t->contacts[p][i];
+                uint64_t d;
+                if(!walk_bot_hostile(amp)||(!c->sight &&
+                   (!c->tracker || !marine_empty)))continue;
+                d=walk_bot_distance(view.x,view.y,c->x,c->y);
+                if(d>=((uint64_t)6u<<16)*((uint64_t)6u<<16)||d>=distance)
+                    continue;
+                distance=d;seen=1u;threat_x=c->x>>16;threat_y=c->y>>16;
+            }
+            if(seen){
+                if(memory->refuge_valid &&
+                   (memory->refuge_level!=world->map->level ||
+                    tick>=memory->refuge_until ||
+                    ((view.x>>16)==memory->refuge_x &&
+                     (view.y>>16)==memory->refuge_y)))
+                    memory->refuge_valid=0u;
+                if(!memory->refuge_valid){
+                    unsigned gx,gy;
+                    if(avp_mp_bot_pick_refuge(&view.map,view.x>>16,
+                            view.y>>16,threat_x,threat_y,&gx,&gy)){
+                        memory->refuge_valid=1u;
+                        memory->refuge_level=world->map->level;
+                        memory->refuge_x=gx;memory->refuge_y=gy;
+                        memory->refuge_until=tick+32u;
+                    }
+                }
+                if(memory->refuge_valid){
+                    if(view.hostile_target && view.target_visible &&
+                       !marine_empty){
+                        view.retreat_to_refuge=1u;
+                        view.retreat_refuge_x=
+                           (memory->refuge_x<<16)|0x8000u;
+                        view.retreat_refuge_y=
+                           (memory->refuge_y<<16)|0x8000u;
+                    }else{
+                        view.goal=AVP_MP_BOT_PATROL;
+                        view.has_target=1u;view.hostile_target=0u;
+                        view.target_x=(memory->refuge_x<<16)|0x8000u;
+                        view.target_y=(memory->refuge_y<<16)|0x8000u;
+                        t->bots[p].tracker_seek_valid=0u;
+                    }
+                }
+            }
+        }
+        /* Injured Marines should seek cover even when ammunition remains.
+         * A critical injury overrides Berserker's normal rush behavior.
+         * Reuse the source-legal escape waypoint, not fake invulnerability. */
+        if(!t->dm.enabled && species==AVP_MP_MARINE &&
+           view.health_critical && view.map.cells &&
+           !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           view.goal!=AVP_MP_BOT_HEALTH && view.goal!=AVP_MP_BOT_MEDICAL &&
+           view.goal!=AVP_MP_BOT_EXIT && view.goal!=AVP_MP_BOT_LIFT &&
+           !view.retreat_to_refuge){
+            uint64_t nearest=UINT64_MAX;
+            unsigned tx=0u,ty=0u;
+            for(unsigned i=0u;i<AVP_NUM_AMPS;i++){
+                const AvpMpBotContact *c=&t->contacts[p][i];
+                uint64_t d;
+                if(!walk_bot_hostile(&world->amp.actors[i]) ||
+                   (!c->sight && (!c->tracker || !marine_empty)))continue;
+                d=walk_bot_distance(view.x,view.y,c->x,c->y);
+                if(d<nearest){nearest=d;tx=c->x>>16;ty=c->y>>16;}
+            }
+            if(nearest<((uint64_t)7u<<16)*((uint64_t)7u<<16)){
+                unsigned rx,ry;
+                if(avp_mp_bot_pick_refuge(&view.map,view.x>>16,view.y>>16,
+                        tx,ty,&rx,&ry)){
+                    if(view.hostile_target && view.target_visible){
+                        view.retreat_to_refuge=1u;
+                        view.retreat_refuge_x=(rx<<16)|0x8000u;
+                        view.retreat_refuge_y=(ry<<16)|0x8000u;
+                    }else{
+                        view.goal=AVP_MP_BOT_PATROL;
+                        view.has_target=1u;view.hostile_target=0u;
+                        view.target_x=(rx<<16)|0x8000u;
+                        view.target_y=(ry<<16)|0x8000u;
+                    }
+                }
+            }
+        }
+        /* At critical health, a Marine with no known accessible recovery
+         * point can flee through an AUTHORED vent/lift/airlock even when
+         * it still has ammunition. Do not overwrite the current healing
+         * destination, an urgent rescue, or a legitimate fighting escape. */
+        if(!t->dm.enabled && species==AVP_MP_MARINE &&
+           view.health_critical && view.combat_enemies_nearby &&
+           view.map.cells && !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           view.goal!=AVP_MP_BOT_HEALTH &&
+           view.goal!=AVP_MP_BOT_MEDICAL &&
+           view.goal!=AVP_MP_BOT_EXIT && view.goal!=AVP_MP_BOT_LIFT &&
+           !t->bots[p].healing_valid){
+            AvpMpBotObservation escape=view;
+            if(walk_bot_emergency_exit(t,p,world,&escape)){
+                view=escape;
+                view.retreat_to_refuge=0u;
+                t->bots[p].tracker_seek_valid=0u;
+            }
+        }
+        /* With no rounds left, a safe room alone may merely delay death.
+         * If there is no known supply route, try an actual original vent or
+         * lift out of this threatened level. Do NOT do this in a quiet room,
+         * while a reachable pickup exists, or during player rescue. */
+        if(!t->dm.enabled && species==AVP_MP_MARINE &&
+           view.marine_unarmed && view.map.cells &&
+           view.combat_enemies_nearby &&
+           !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+           view.goal!=AVP_MP_BOT_SUPPLY && view.goal!=AVP_MP_BOT_HEALTH &&
+           view.goal!=AVP_MP_BOT_EXIT && view.goal!=AVP_MP_BOT_LIFT){
+            AvpMpBotObservation escaping=view;
+            if(walk_bot_emergency_exit(t,p,world,&escaping)){
+                view=escaping;
+                view.retreat_to_refuge=0u;
+                view.retreat_to_teammate=0u;
+                t->bots[p].tracker_seek_valid=0u;
+            }
+        }
+        /* R473: scanner-only contacts never initiate interlevel travel.
+         * A hidden contact behind an isolated region is not a mission goal.
+         * Local search uses reachable cells; authored exits still serve real
+         * teammate, supply, evacuation and other navigation goals. */
+        /* Co-op boarding may interrupt routine travel or unseen remembered
+         * contacts, but NEVER a current optical fight or a seen melee threat.
+         * R275's unconditional invitation erased an already-selected
+         * source Alien (including a pinned-player rescue), suppressing FIRE
+         * even though the bot had line of sight. Actual elevator mechanics,
+         * shared claims and native collision remain unchanged. */
+        if(!t->dm.enabled && avp_mp_bot_lift_invitation_allowed(&view) &&
+           /* Critical recovery travel must not be replaced by an unrelated
+            * co-op elevator invitation at the next 10-Hz bot tick. */
+           !(view.health_low &&
+             (view.goal==AVP_MP_BOT_HEALTH ||
+              view.goal==AVP_MP_BOT_MEDICAL ||
+              view.goal==AVP_MP_BOT_EXIT || view.goal==AVP_MP_BOT_LIFT)) &&
+           !(view.marine_low_ammo &&
+             (view.goal==AVP_MP_BOT_EXIT || view.goal==AVP_MP_BOT_LIFT)))
+            walk_bot_invite_lift(t,p,world,&view);
+        if(view.marine_unarmed && !t->evacuation_active)
+            walk_bot_empty_marine(t,p,a,world,&view,walk_bot_trail_los,world);
+        walk_bot_coordinate_lift(t,p,world,&view,tick);
+        /* R278 scanner-only tracking must not rewrite the movement goal
+         * with a new hidden target coordinate each 10-Hz tick. Retain the
+         * previous LIVE scanner contact and its waypoint for a short search
+         * commitment. A visible fight, player rescue or elevator trip
+         * immediately cancels the commitment. */
+        {
+            AvpMpBotState *memory=&t->bots[p];
+            if(!view.marine_unarmed && view.goal==AVP_MP_BOT_HOSTILE && view.hostile_target &&
+               !view.target_visible && !(view.other_player_alien_trapped || view.other_player_swarmed) &&
+               !view.melee_visible && memory->tracker_seek_valid &&
+               tick<memory->tracker_seek_until &&
+               memory->tracker_seek_level==world->map->level &&
+               memory->tracker_seek_slot<AVP_NUM_AMPS){
+                const unsigned i=memory->tracker_seek_slot;
+                const AvpMpBotContact *previous=&t->contacts[p][i];
+                const AvpAmp *enemy=&world->amp.actors[i];
+                if(previous->known && previous->tracker && !previous->sight &&
+                   previous->serial==memory->tracker_seek_serial &&
+                   !avp_mp_bot_tracker_contact_suppressed(memory,i,
+                       world->map->level,previous->serial,
+                       previous->x,previous->y,tick) &&
+                   walk_bot_hostile(enemy)){
+                    view.has_target=view.hostile_target=1u;
+                    view.goal=AVP_MP_BOT_HOSTILE;
+                    view.target_slot=i;
+                    view.target_x=previous->x;view.target_y=previous->y;
+                    view.target_is_alien=enemy->creature==AC_ALIEN ||
+                                         enemy->creature==AC_ACRAWL;
+                    view.target_is_marine=enemy->creature==AC_HUMAN;
+                    view.target_is_stunned=0u;
+                    view.target_energy_positive=enemy->energy>0;
+                }
+            }
+            view.tracker_only_target=0u;
+            if(view.goal==AVP_MP_BOT_HOSTILE && view.hostile_target &&
+               !view.target_visible && view.target_slot<AVP_NUM_AMPS+AVP_LOCAL_MP_MAX_ACTORS){
+                const AvpMpBotContact *seen=&t->contacts[p][view.target_slot];
+                if(seen->tracker && !seen->sight){
+                    view.tracker_only_target=1u;
+                    avp_mp_bot_tracker_hold(memory,&view,seen->serial);
+                    if(view.has_target && view.tracker_only_target && t->dm.enabled){
+                        view.goal=AVP_MP_BOT_INVESTIGATE;
+                        view.hostile_target=0u;
+                    }
+                    if(!view.has_target){
+                        /* Abandoning a blocked radar objective must also
+                         * cancel recovery spins from that old wall push.
+                         * A FOLLOW goal should move on the very next tick. */
+                        memory->evade_ticks=0u;
+                        memory->immobile_ticks=0u;
+                        memory->last_motion=0u;
+                    }
+                }
+            }
+            if(!view.tracker_only_target)
+                avp_mp_bot_tracker_hold(memory,&view,0u);
+            if(!view.has_target && !t->dm.enabled && !view.marine_unarmed){
+                /* After discarding a stalled RADAR-ONLY contact, do not
+                 * stand in place or wander past the co-op team. Return
+                 * to ordinary same-level human following when reachable. */
+                uint64_t follow_dist=UINT64_MAX;
+                for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                    !t->session.setup.bot_enabled[q] &&
+                    !avp_mp_life_busy(&t->player_life[q]) &&
+                    walk_vent_world_present(t,q) &&
+                    avp_mp_session_player_world(&t->session,q)==here){
+                    const AvpMpActorNativeState *leader=
+                        (const AvpMpActorNativeState *)t->session.player[q];
+                    uint64_t distance;
+                    if(!leader || leader->player.player_energy<=0 ||
+                       leader->player.game_over)continue;
+                    distance=walk_bot_distance(view.x,view.y,
+                        leader->player.x_pos,leader->player.y_pos);
+                    if(distance>=follow_dist ||
+                       !avp_mp_bot_follow_target_possible(species,here->level,
+                         here->level,&view.map,view.x>>16,view.y>>16,
+                         (u32)leader->player.x_pos>>16,
+                         (u32)leader->player.y_pos>>16))continue;
+                    follow_dist=distance;
+                    view.has_target=1u;
+                    view.goal=AVP_MP_BOT_FOLLOW;
+                    view.hostile_target=0u;
+                    view.target_x=leader->player.x_pos;
+                    view.target_y=leader->player.y_pos;
+                }
+            }
+            if(!view.has_target)
+                walk_bot_patrol(t,p,&view,world->map->level);
+        }
+        /* Do not shoot a living enemy Alien if its ORIGINAL 96<<9
+         * death spray could reach another non-Alien player. Read every
+         * living actor in this same world (including bots), independent
+         * of LOS, collision settings or friend steering. Do not use stale
+         * contact positions or apply this to PvP Alien avatars. */
+        if(view.hostile_target && view.target_is_alien &&
+           view.target_slot<AVP_NUM_AMPS){
+            const AvpAmp *target=&world->amp.actors[view.target_slot];
+            if(walk_bot_hostile(target) &&
+               (target->creature==AC_ALIEN || target->creature==AC_ACRAWL)){
+                for(unsigned q=0;q<t->actors;q++)if(q!=p &&
+                    avp_mp_session_player_world(&t->session,q)==here &&
+                    !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
+                    const AvpMpActorNativeState *other=
+                        (const AvpMpActorNativeState *)t->session.player[q];
+                    if(!other || other->player.player_energy<=0 ||
+                       other->player.game_over ||
+                       other->player.player_type==PT_ALIEN)continue;
+                    if(avp_mp_bot_death_spray_near_player(
+                           (uint32_t)target->xpos,(uint32_t)target->ypos,
+                           other->player.x_pos,other->player.y_pos)){
+                        view.other_player_splash_unsafe=1u;
+                        if(avp_mp_bot_alien_traps_player(&view.map,
+                            (uint32_t)target->xpos,(uint32_t)target->ypos,
+                            other->player.x_pos,other->player.y_pos))
+                            view.other_player_alien_trapped=1u;
+                        /* Inspect all endangered players; a second one
+                         * might be pinned even if the first is mobile. */
+                    }
+                }
+            }
+        }
+        /* R275: Allow *nonlethal* weakening before luring a source Alien
+         * away from a one-cell corridor. Never permit this for projectiles:
+         * their delayed/explosive damage cannot be predicted here. Use the
+         * original loaded Marine hitscan definitions (shotgun 10, pulse 5,
+         * smartgun 60) rather than guessed weapon power. The two-shot headroom
+         * reserves for an already animating shot; same-tick bot reservations
+         * prevent a pack of bots from all consuming the same HP margin.
+         * No source weapon/damage/acid or human input is modified. */
+        unsigned choke_wanted=0u;
+        unsigned choke_slot=AVP_NUM_AMPS;
+        if(!t->dm.enabled && view.goal==AVP_MP_BOT_HOSTILE &&
+           view.target_visible && view.target_is_alien &&
+           view.target_slot<AVP_NUM_AMPS && view.map.cells &&
+           view.player_species==AVP_MP_MARINE &&
+           !avp_mp_bot_alien_death_passable(&view.map,
+               view.target_x,view.target_y) &&
+           (view.current_weapon==1u || view.current_weapon==2u ||
+            view.current_weapon==4u) &&
+           (view.marine_owned&(1u<<view.current_weapon)) &&
+           view.marine_ammo[view.current_weapon-1u]){
+            const AvpAmp *alien=&world->amp.actors[view.target_slot];
+            const AvpWeaponDef *weapon=avp_weapon_def(PT_HUMAN,
+                                                  (s16)view.current_weapon);
+            if(walk_bot_hostile(alien) &&
+               (alien->creature==AC_ALIEN || alien->creature==AC_ACRAWL) &&
+               weapon && weapon->damage>0){
+                const unsigned damage=(unsigned)weapon->damage;
+                /* Strict > leaves at least one real HP after the expected
+                 * shot and two further scheduled/straggler shots. */
+                if(avp_mp_bot_weakening_allowed(alien->energy,damage,
+                    choke_reserved[view.target_slot])){
+                    view.nonlethal_choke_fire=1u;
+                    choke_wanted=damage;
+                    choke_slot=view.target_slot;
+                }
+            }
+        }
+        /* R277: Tables can hide an observed Alien's firing lane even
+         * though its map CELL is reachable. Pick an actual floor cell with
+         * original source LOS and an unobstructed collmap-prop line, then
+         * navigate there without discarding the hostile contact or aim.
+         * Only observed/tracked enemy coordinates are passed to this probe.
+         * Cache per-target waypoints to avoid 10-Hz path oscillation. */
+        if(view.player_species==AVP_MP_MARINE && !view.marine_unarmed &&
+           view.goal==AVP_MP_BOT_HOSTILE && view.hostile_target &&
+           view.target_is_alien && view.target_slot<AVP_NUM_AMPS &&
+           view.map.cells && !view.retreat_to_teammate &&
+           !view.close_alien_contacts){
+            AvpMpBotState *memory=&t->bots[p];
+            WalkBotLaneProbe probe={world,view.target_slot};
+            const int clear=view.target_visible &&
+                walk_bot_firing_lane_probe(&probe,view.x,view.y,
+                                           view.target_x,view.target_y);
+            if(clear){
+                memory->cover_flank_valid=0u;
+                memory->cover_retry_tick=0u;
+            }else{
+                if(memory->cover_flank_valid &&
+                   (memory->cover_flank_slot!=view.target_slot ||
+                    memory->cover_flank_level!=world->map->level ||
+                    ((view.x>>16)==memory->cover_flank_x &&
+                     (view.y>>16)==memory->cover_flank_y &&
+                     llabs((int64_t)view.x-(((int64_t)memory->cover_flank_x<<16)+0x8000))<11000 &&
+                     llabs((int64_t)view.y-(((int64_t)memory->cover_flank_y<<16)+0x8000))<11000 &&
+                     tick+12u>=memory->cover_flank_until) ||
+                    tick>=memory->cover_flank_until ||
+                    (memory->immobile_ticks>=5u &&
+                     tick+10u>=memory->cover_flank_until)))
+                    memory->cover_flank_valid=0u;
+                if(!memory->cover_flank_valid && tick>=memory->cover_retry_tick){
+                    unsigned fx,fy;
+                    if(avp_mp_bot_pick_firing_lane(&view.map,view.x,view.y,
+                            view.target_x,view.target_y,
+                            walk_bot_firing_lane_probe,&probe,&fx,&fy)){
+                        memory->cover_flank_valid=1u;
+                        memory->cover_flank_slot=view.target_slot;
+                        memory->cover_flank_level=world->map->level;
+                        memory->cover_flank_x=fx;
+                        memory->cover_flank_y=fy;
+                        memory->cover_flank_until=tick+35u;
+                    }
+                    /* A target behind a wall cannot force a full search
+                     * every original tick, including with twelve bots. */
+                    memory->cover_retry_tick=tick+15u;
+                }
+                if(memory->cover_flank_valid){
+                    view.cover_flank_valid=1u;
+                    view.cover_flank_x=memory->cover_flank_x;
+                    view.cover_flank_y=memory->cover_flank_y;
+                }
+            }
+        }else t->bots[p].cover_flank_valid=0u;
+        /* A Marine's original motion tracker informs WHERE to investigate,
+         * never WHO is in clear sight. No firing, melee targeting, damage
+         * estimates or combat stance based solely on a scanner blip or old
+         * optical memory. Revalidate original LOS/FOV every observation;
+         * visually confirmed targets remain HOSTILE without interruption.
+         * Keep R290's held waypoints and unreachable-contact watchdog. */
+        avp_mp_bot_coop_contact_as_memory(&view);
+        /* R295: co-op formation is evaluated after rescue, cover, scanner,
+         * native elevator and survival decisions. Prefer a living human
+         * leader, otherwise the lowest-index living bot. Only real player
+         * state and original reachable routes are used. A failed direct
+         * route may use a real authored vent/lift hop, never a teleport.
+         * Optional distant loot and unseen hostiles no longer outrank the
+         * squad. Nearby ammo rooms remain valid short excursions. */
+        if(!t->dm.enabled && view.map.cells){
+            unsigned anchor=t->actors;
+            unsigned anchor_is_human=0u;
+            for(unsigned q=0u;q<t->actors;q++)if(q!=p &&
+                !avp_mp_life_busy(&t->player_life[q]) &&
+                walk_vent_world_present(t,q)){
+                const AvpMpActorNativeState *peer=
+                    (const AvpMpActorNativeState *)t->session.player[q];
+                if(!peer || peer->player.player_energy<=0 ||
+                   peer->player.game_over)continue;
+                if(!t->session.setup.bot_enabled[q]){
+                    anchor=q;anchor_is_human=1u;break;
+                }
+                if(!anchor_is_human && anchor==t->actors)anchor=q;
+            }
+            if(!anchor_is_human){
+                unsigned chosen=walk_bot_evacuation_leader(t);
+                t->evacuation_leader=chosen;
+                if(chosen<t->actors)anchor=chosen!=p?chosen:t->actors;
+            }
+            if(anchor<t->actors){
+                const AvpMpActorNativeState *leader=
+                    (const AvpMpActorNativeState *)t->session.player[anchor];
+                const AvpMpActiveWorld *leader_world=
+                    avp_mp_session_player_world(&t->session,anchor);
+                const uint64_t separation=walk_bot_distance(view.x,view.y,
+                    leader->player.x_pos,leader->player.y_pos);
+                const uint64_t objective=view.has_target?
+                    walk_bot_distance(view.target_x,view.target_y,
+                        leader->player.x_pos,leader->player.y_pos):0u;
+                unsigned empty_supply=0u;
+                if(view.goal==AVP_MP_BOT_SUPPLY &&
+                   view.target_slot<AVP_NUM_AMPS){
+                    const AvpAmp *stock=&world->amp.actors[view.target_slot];
+                    s16 kind=COLL_NONE,amount=0;
+                    unsigned weapon=0u;
+                    if(avp_collect_peek(world->map->level,
+                         (u32)stock->xpos>>16,(u32)stock->ypos>>16,
+                         stock->astype,&kind,&amount)){
+                        switch(kind){
+                        case COLL_SHOTAMMO:weapon=1u;break;
+                        case COLL_PULSEAMMO:weapon=2u;break;
+                        case COLL_FLAMEAMMO:weapon=3u;break;
+                        case COLL_SMARTAMMO:weapon=4u;break;
+                        default:break;
+                        }
+                        /* The original Marine can collect rounds into a
+                         * completely empty reserve without owning its gun.
+                         * An actual authored cache like the Brig pulse-ammo
+                         * corpse is a needed supply, not optional wandering. */
+                        if(weapon && !view.marine_ammo[weapon-1u])
+                            empty_supply=1u;
+                    }
+                }
+                if(leader_world &&
+                   avp_mp_bot_team_regroup_priority(&view,separation,
+                                                     objective,empty_supply)){
+                    AvpMpBotObservation together=view;
+                    int reachable=0;
+                    if(leader_world==here){
+                        if(avp_mp_bot_follow_target_possible(species,here->level,
+                              here->level,&view.map,view.x>>16,view.y>>16,
+                              leader->player.x_pos>>16,leader->player.y_pos>>16)){
+                            together.goal=AVP_MP_BOT_FOLLOW;
+                            together.has_target=1u;
+                            together.hostile_target=0u;
+                            together.target_x=leader->player.x_pos;
+                            together.target_y=leader->player.y_pos;
+                            reachable=1;
+                        }
+                    }else if(world->doors.level_meta &&
+                             world->doors.level_meta_count>=AVP_MAX_LEVEL){
+                        reachable=walk_bot_choose_level_route(t,p,world,
+                            leader_world->level,species,
+                            view.x>>16,view.y>>16,&view.map,&together,
+                            leader->player.x_pos>>16,
+                            leader->player.y_pos>>16,1);
+                    }
+                    if(reachable){
+                        view=together;
+                        t->bots[p].tracker_seek_valid=0u;
+                    }
+                }
+            }
+        }
+        if(t->evacuation_active && species==AVP_MP_MARINE && !t->dm.enabled){
+            const uint64_t close=(uint64_t)(3u<<16)*(uint64_t)(3u<<16);
+            const unsigned urgent_hostile=view.goal==AVP_MP_BOT_HOSTILE &&
+                view.hostile_target && view.target_visible &&
+                walk_bot_distance(view.x,view.y,
+                                  view.target_x,view.target_y)<=close;
+            /* Evacuate first; turn and fight only verified enemies directly
+             * blocking this bot's departure. No radar-only hostile fire. */
+            view.evacuation_active=1u;
+            if(!urgent_hostile) {
+                if(walk_bot_evacuation_goal(t,p,world,species,&view)){
+                    t->bots[p].tracker_seek_valid=0u;
+                    t->bots[p].cover_flank_valid=0u;
+                }
+            }
+        }
+        if(!t->evacuation_active || view.goal!=AVP_MP_BOT_ESCAPE_SEAT)
+            walk_bot_coordinate_airlock(t,p,world,&view);
+        /* R497: a tactically blocked travel route is not a generic patrol
+         * retry. Preserve normal panel/arrival/airlock handling. */
+        if(!t->lift_arrival_pending[p] && avp_mp_bot_tactical_travel(&t->bots[p],&view)){
+            t->bots[p].travel_valid=t->bots[p].resupply_valid=0u;
+            t->bots[p].tracker_seek_valid=0u;
+        }
+        /* R484: a short source-reachable patrol retry after persistent
+         * inactivity. Do not replace combat, airlock or lift egress goals. */
+        if(avp_mp_bot_objective_recoverable(&view) && !t->lift_arrival_pending[p]){
+            AvpMpBotState *memory=&t->bots[p];
+            if(memory->physical_valid && memory->physical_level==world->map->level &&
+               tick==memory->physical_tick+1u &&
+               (memory->objective_stall>=20u || avp_mp_bot_loop_ready(memory,&view)) &&
+               tick>=memory->objective_recovery_until){
+                if(avp_mp_bot_loop_ready(memory,&view)){
+                    if(memory->loop_recoveries<UINT32_MAX)memory->loop_recoveries++;
+                    memory->loop_valid=memory->loop_ready=0u;
+                }
+                memory->objective_recovery_until=tick+30u;
+                memory->objective_stall=0u;
+                memory->nav_retarget_patrol=1u;
+                memory->travel_valid=0u;
+                memory->resupply_valid=0u;
+                memory->healing_valid=0u;
+                memory->tracker_seek_valid=0u;
+            }
+            if(memory->physical_level==world->map->level &&
+               tick==memory->physical_tick+1u && tick<memory->objective_recovery_until){
+                AvpMpBotObservation retry=view;
+                retry.has_target=retry.hostile_target=retry.target_visible=0u;
+                retry.cover_flank_valid=retry.retreat_to_refuge=retry.retreat_to_teammate=0u;
+                walk_bot_patrol(t,p,&retry,world->map->level);
+                if(retry.has_target)view=retry;
+            }
+        }
+        /* R487: an objective behind a remembered choke is not a movement
+         * retry. The early risk grid filters candidate scans; this final
+         * check catches cached objectives or explicit portal overrides. */
+        if(!t->lift_arrival_pending[p] &&
+           (avp_mp_bot_acid_goal_unsafe(&t->bots[p],&view) ||
+            (acid_chokes && avp_mp_bot_acid_goal_blocked(&view)))){
+            AvpMpBotObservation retry=view;
+            AvpMpBotState *memory=&t->bots[p];
+            acid_retarget=1u;
+            memory->travel_valid=memory->resupply_valid=memory->healing_valid=0u;
+            memory->tracker_seek_valid=0u;
+            /* Do not permanently blacklist a destination for temporary acid. */
+            if(t->patrol[p].valid){
+                AvpMpBotObservation previous=view;
+                previous.goal=AVP_MP_BOT_PATROL;
+                previous.target_x=t->patrol[p].x;previous.target_y=t->patrol[p].y;
+                if(avp_mp_bot_acid_goal_unsafe(memory,&previous) ||
+                   avp_mp_bot_acid_goal_blocked(&previous))t->patrol[p].valid=0u;
+            }
+            retry.has_target=retry.hostile_target=retry.target_visible=0u;
+            retry.cover_flank_valid=retry.retreat_to_refuge=retry.retreat_to_teammate=0u;
+            walk_bot_patrol(t,p,&retry,world->map->level);
+            if(!retry.has_target){
+                /* No safe-side patrol floor: hold here and rescan rather
+                 * than issue arbitrary motion toward the protected choke. */
+                retry.has_target=1u;retry.goal=AVP_MP_BOT_PATROL;
+                retry.target_x=retry.x;retry.target_y=retry.y;
+            }
+            view=retry;
+        }
+        /* Commit only final pickup targets, not discarded candidate AMPs.
+         * Other goals never inherit a stale pickup failure timer. */
+        if(view.has_target &&
+           (view.goal==AVP_MP_BOT_SUPPLY || view.goal==AVP_MP_BOT_HEALTH) &&
+           view.target_slot<AVP_NUM_AMPS &&
+           (uint32_t)world->amp.actors[view.target_slot].xpos==view.target_x &&
+           (uint32_t)world->amp.actors[view.target_slot].ypos==view.target_y &&
+           walk_mp_item_available(t,p,world->map->level,view.target_slot,
+                                  &world->amp.actors[view.target_slot])){
+            AvpMpBotRoute path={0};
+            uint32_t cost=UINT32_MAX;
+            if(view.map.cells && avp_mp_bot_route(&view.map,
+                view.x>>16,view.y>>16,view.target_x>>16,view.target_y>>16,&path))
+                cost=path.cost;
+            avp_mp_bot_pickup_track(&t->pickup_memory[p],world->map->level,
+                view.target_slot,world->amp.slot_generation[view.target_slot],
+                tick,view.x,view.y,view.target_x,view.target_y,cost,
+                (view.y>>16)*64u+(view.x>>16));
+        }else if(view.has_target && view.goal==AVP_MP_BOT_SUPPLY &&
+                view.target_slot>=WALK_BOT_CORPSE_SLOT_BASE &&
+                walk_bot_corpse_available(t,p,world->map->level,
+                    view.target_slot-WALK_BOT_CORPSE_SLOT_BASE)){
+            const AvpMpCorpse *c=&t->corpses.records[view.target_slot-WALK_BOT_CORPSE_SLOT_BASE];
+            AvpMpBotRoute path={0};
+            uint32_t cost=UINT32_MAX;
+            if(avp_mp_bot_route(&view.map,view.x>>16,view.y>>16,
+                view.target_x>>16,view.target_y>>16,&path))cost=path.cost;
+            avp_mp_bot_pickup_track(&t->pickup_memory[p],world->map->level,
+                view.target_slot,(unsigned)c->death_tick,tick,view.x,view.y,
+                view.target_x,view.target_y,cost,(view.y>>16)*64u+(view.x>>16));
+        }else t->pickup_memory[p].active=0u;
+        /* Only final, currently optically observed egg receives watchdog
+         * updates. A reused AMP slot must never inherit the old cooldown. */
+        avp_mp_bot_egg_watch(&t->bots[p],&view,
+            view.target_slot<AVP_NUM_AMPS?world->amp.slot_generation[view.target_slot]:0u);
+        avp_mp_bot_step_precise(&t->bots[p],&view,a->player.max_avel,&cmds[p]);
+        /* PRIVATE R292 field-test-only diagnostics, NOT a release change. */
+        if(getenv("AVP_BOT_PLAYTEST_TRACE") && (tick%5u==0u || getenv("AVP_BOT_TRACE_EVERY_TICK")))
+            fprintf(stderr,"BOTTRACE tick=%llu p=%u level=%u xy=%08x/%08x hp=%d goal=%u has=%u hostile=%u visible=%u radar=%u target=%u txy=%08x/%08x acts=%08x stuck=%u acid=%u lowammo=%u unarmed=%u ammo=%u,%u,%u,%u follower=%u physical_stall=%u analog=%u/%g/%g doors=%u/%u/%u dest=%u duct=%u idle=%u route=%u wait=%u hug=%u liftwait=%u recovery=%u acid_contact=%u acid_exits=%u acid_returns_blocked=%u acid_chokes=%u acid_retarget=%u loop_ready=%u loop_recoveries=%u peer_melee_align=%u peer_unblock=%u species=%u heading=%08x peer=%u/%u pxy=%08x/%08x props=%u tactical_idle=%u tactical_retargets=%u tactical_active=%u melee=%u/%u mxy=%08x/%08x cloak=%u/%u/%u decloak_wait=%u vent_cross=%u\n",
+                (unsigned long long)tick,p+1u,world->map->level,
+                view.x,view.y,view.player_energy,(unsigned)view.goal,
+                view.has_target,view.hostile_target,view.target_visible,
+                view.tracker_only_target,view.target_slot,view.target_x,view.target_y,
+                (unsigned)cmds[p].actions,t->bots[p].immobile_ticks,
+                view.acid_count,view.marine_low_ammo,view.marine_unarmed,
+                view.marine_ammo[0],view.marine_ammo[1],view.marine_ammo[2],view.marine_ammo[3],
+                t->bots[p].follow_backoff_active,t->bots[p].physical_stall,
+                cmds[p].analog_axis_mask,(double)cmds[p].analog_forward,(double)cmds[p].analog_strafe,
+                view.active_door_count,view.active_door_offsets[0],view.active_door_offsets[1],
+                view.destination_level,view.exit_is_duct,t->bots[p].objective_stall,
+                t->bots[p].objective_route,t->bots[p].objective_wait,view.facehugged,
+                view.lift_wait,(unsigned)(tick<t->bots[p].objective_recovery_until),
+                t->bots[p].acid_contact_count,t->bots[p].acid_exit_count,t->bots[p].acid_return_blocks,acid_chokes,acid_retarget,
+                t->bots[p].loop_ready,t->bots[p].loop_recoveries,t->bots[p].peer_melee_align,t->bots[p].peer_unblock,
+                view.player_species,view.heading,view.nearby_peer_valid,view.nearby_peer_index,
+                view.nearby_peer_x,view.nearby_peer_y,view.prop_count,
+                t->bots[p].tactical_idle,t->bots[p].tactical_retargets,
+                (unsigned)(tick<t->bots[p].tactical_until),
+                view.melee_threat,view.melee_visible,view.melee_x,view.melee_y,
+                view.invis_act,view.invis_stat,view.invisflag,
+                t->bots[p].predator_decloak_wait,(unsigned)(tick<t->bots[p].vent_cross_until));
+        /* R500: retain nearby geometry for reproducible stalled-bot replays.
+         * Opt-in only; no game-state writes and no extra route search. */
+        if(getenv("AVP_BOT_TRACE_GEOMETRY") && tick%10u==0u &&
+           view.marine_unarmed && view.melee_visible &&
+           (!cmds[p].actions || tick<t->bots[p].tactical_until)){
+            fprintf(stderr,"BOTGEOM tick=%llu p=%u level=%u xy=%08x/%08x acid=",
+                (unsigned long long)tick,p+1u,world->map->level,view.x,view.y);
+            for(unsigned i=0;i<view.acid_count;i++){
+                if(llabs((long long)view.acid[i].x-view.x)>3LL*65536 ||
+                   llabs((long long)view.acid[i].y-view.y)>3LL*65536)continue;
+                fprintf(stderr,"%08x/%08x,",view.acid[i].x,view.acid[i].y);
+            }
+            fprintf(stderr," props=");
+            for(unsigned i=0;i<view.prop_count;i++)fprintf(stderr,"%08x/%08x/%u,",
+                view.props[i].x,view.props[i].y,view.props[i].halfwidth);
+            fprintf(stderr," doors=");
+            for(unsigned i=0;i<view.active_door_count && i<2u;i++){
+                unsigned off=view.active_door_offsets[i];
+                if(view.map.cells && off<view.map.width*view.map.height*8u)
+                    fprintf(stderr,"%u/%u,",off,view.map.cells[off]);
+            }
+            fprintf(stderr,"\n");
+        }
+        if(choke_slot<AVP_NUM_AMPS &&
+           (cmds[p].actions&(1u<<AVP_MP_FIRE)))
+            choke_reserved[choke_slot]+=choke_wanted;
+        t->last_bot_world_level[p]=world->map->level;
+        t->last_bot_goal_lift[p]=view.goal==AVP_MP_BOT_LIFT;
     }
 }
 
@@ -3378,31 +6723,47 @@ static void walk_bot_commands(AvpMpWalkHost *t,
  * actor scope capture cannot overwrite its PvP damage. Everyone else is
  * updated in their saved individual snapshot. */
 static void walk_dm_apply_hit(AvpMpWalkHost *t,unsigned shooter,
-                              unsigned target,int damage)
+                              unsigned target,int damage,
+                              unsigned attacker_predator_uncloaked)
 {
     AvpMpActorNativeState *victim;
-    int old_energy,new_energy;
+    int prior_energy,new_energy;
+    AvpNewHealthMode mode;
     int scoped;
     if(!t||!t->dm.enabled||t->dm.finished||shooter>=t->actors||
        target>=t->actors||damage<=0||t->dm_death_credited[target]||
-       avp_mp_life_busy(&t->player_life[target]))return;
+       (avp_mp_life_busy(&t->player_life[target]) ||
+        !walk_vent_world_present(t,target)))return;
     victim=(AvpMpActorNativeState *)t->session.player[target];
     if(!victim)return;
     scoped=avp_mp_actor_scope_active() && t->dm_amp_target==target;
-    old_energy=scoped?player_energy:victim->player.player_energy;
-    if(old_energy<=0)return;
+    prior_energy=scoped?player_energy:victim->player.player_energy;
+    if(prior_energy<=0)return;
+    mode=target<t->players?avp_pc_video_new_health_mode(t->video,target):AVP_NEW_HEALTH_OFF;
+    if(mode==AVP_NEW_HEALTH_INVINCIBLE)return;
+    /* Never modify original AMP/enemy hits. Both optional modifiers are
+     * applied only after we have selected another living player avatar. */
+    damage=avp_mp_dm_predator_attacker_damage(
+        t->dm.predator_uncloaked_damage,
+        shooter!=target && attacker_predator_uncloaked,damage);
     damage=avp_mp_dm_victim_damage(t->dm.cloak_damage,
         victim->player.player_type,
         (unsigned)(scoped?invisflag:victim->player.invisflag),damage);
-    new_energy=old_energy-damage;
-    if(new_energy<-32768)new_energy=-32768;
+    /* Both independent 4x modifiers may be active; avoid signed overflow. */
+    {int64_t remaining=(int64_t)prior_energy-(int64_t)damage;
+     new_energy=remaining<-32768?-32768:(int)remaining;}
     if(scoped)player_energy=(s16)new_energy;
     else victim->player.player_energy=(s16)new_energy;
+    if(mode==AVP_NEW_HEALTH_INFINITE){
+        if(scoped)avp_new_health_apply(mode,&player_energy,&old_energy,max_energy);
+        else avp_new_health_apply(mode,&victim->player.player_energy,&victim->player.old_energy,victim->player.max_energy);
+        return;
+    }
     if(new_energy<=0 && !(target<t->players && avp_pc_video_original_god_player(t->video,target))){
         avp_mp_dm_kill(&t->dm,shooter,target);
         t->dm_death_credited[target]=1u;
         /* Scored PvP event, once per death: show each human participant
-         * their own message. Bot IDs are retained up to player #16. */
+         * their own message. Bot IDs are retained up to player #36. */
         avp_mp_kill_notice_record(t->dm_notices,t->players,t->actors,
                                   shooter,target,t->session.tick);
         fprintf(stderr,"Deathmatch: P%u eliminated P%u, score=%u (P%u deaths=%u).\n",
@@ -3431,11 +6792,13 @@ static int walk_dm_projectile_owner(AvpMpWalkHost *t,const AvpAmp *a)
     return t->dm_projectile_owner[level][slot] ?
         (int)t->dm_projectile_owner[level][slot]-1:-1;
 }
-static void walk_dm_register_projectile(AvpMpWalkHost *t,const AvpAmp *a,unsigned owner)
+static void walk_dm_register_projectile(AvpMpWalkHost *t,const AvpAmp *a,
+                                        unsigned owner,unsigned predator_uncloaked)
 {
     unsigned level,slot;
     if(!t||owner>=t->actors||!walk_dm_projectile_slot(a,&level,&slot))return;
     t->dm_projectile_owner[level][slot]=(uint8_t)(owner+1u);
+    t->dm_projectile_predator_uncloaked[level][slot]=(uint8_t)!!predator_uncloaked;
     t->dm_projectile_gen[level][slot]=avp_amp_slot_generation(slot);
 }
 static void walk_dm_projectile_spawn(void *user,const AvpAmp *a)
@@ -3443,13 +6806,19 @@ static void walk_dm_projectile_spawn(void *user,const AvpAmp *a)
     AvpMpWalkHost *t=(AvpMpWalkHost *)user;
     if(t && a && t->dm_shooter<t->actors &&
        (a->flags&(1u<<AMP_PLAYER)))
-        walk_dm_register_projectile(t,a,t->dm_shooter);
+        walk_dm_register_projectile(t,a,t->dm_shooter,
+            player_type==PT_PREDATOR && !invisflag);
 }
 static void walk_dm_explosion_spawn(void *user,const AvpAmp *bolt,const AvpAmp *explosion_amp)
 {
     AvpMpWalkHost *t=(AvpMpWalkHost *)user;
     int owner=walk_dm_projectile_owner(t,bolt);
-    if(owner>=0)walk_dm_register_projectile(t,explosion_amp,(unsigned)owner);
+    if(owner>=0){
+        unsigned level,slot,uncloaked=0u;
+        if(walk_dm_projectile_slot(bolt,&level,&slot))
+            uncloaked=t->dm_projectile_predator_uncloaked[level][slot];
+        walk_dm_register_projectile(t,explosion_amp,(unsigned)owner,uncloaked);
+    }
 }
 static int walk_dm_projectile_hit(void *user,const AvpAmp *a)
 {
@@ -3465,7 +6834,7 @@ static int walk_dm_projectile_hit(void *user,const AvpAmp *a)
     for(unsigned q=0;q<t->actors;q++)if(q!=(unsigned)owner &&
         avp_mp_session_player_world(&t->session,q) &&
         avp_mp_session_player_world(&t->session,q)->level==(unsigned)cur_level &&
-        !avp_mp_life_busy(&t->player_life[q])){
+        !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
         const AvpMpActorNativeState *victim=(const AvpMpActorNativeState *)t->session.player[q];
         uint64_t dx,dy,dist;
         if(!victim||victim->player.player_energy<=0||
@@ -3478,7 +6847,10 @@ static int walk_dm_projectile_hit(void *user,const AvpAmp *a)
         best=q;best_distance=dist;
     }
     if(best==AVP_LOCAL_MP_MAX_ACTORS)return 0;
-    walk_dm_apply_hit(t,(unsigned)owner,best,damage);
+    {unsigned level,slot,uncloaked=0u;
+     if(walk_dm_projectile_slot(a,&level,&slot))
+         uncloaked=t->dm_projectile_predator_uncloaked[level][slot];
+     walk_dm_apply_hit(t,(unsigned)owner,best,damage,uncloaked);}
     return 1;
 }
 static int walk_dm_explosion_damage(void *user,const AvpAmp *a)
@@ -3489,7 +6861,7 @@ static int walk_dm_explosion_damage(void *user,const AvpAmp *a)
     for(unsigned q=0;q<t->actors;q++)if(
         avp_mp_session_player_world(&t->session,q) &&
         avp_mp_session_player_world(&t->session,q)->level==(unsigned)cur_level &&
-        !avp_mp_life_busy(&t->player_life[q])){
+        !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
         const AvpMpActorNativeState *v=(const AvpMpActorNativeState *)t->session.player[q];
         AvpXY centre={a->xpos,a->ypos},to;
         if(!v||v->player.player_energy<=0||t->dm_death_credited[q])continue;
@@ -3497,7 +6869,10 @@ static int walk_dm_explosion_damage(void *user,const AvpAmp *a)
                 (s32)v->player.y_pos-a->ypos,(u32)a->timer))continue;
         to.x=(s32)v->player.x_pos;to.y=(s32)v->player.y_pos;
         if(LineOfSight(&to,&centre))continue;
-        walk_dm_apply_hit(t,(unsigned)owner,q,200);
+        {unsigned level,slot,uncloaked=0u;
+         if(walk_dm_projectile_slot(a,&level,&slot))
+             uncloaked=t->dm_projectile_predator_uncloaked[level][slot];
+         walk_dm_apply_hit(t,(unsigned)owner,q,200,uncloaked);}
     }
     return 1; /* apply native AreaAmpDamage; skip original current-player damage */
 }
@@ -3521,7 +6896,7 @@ static int walk_dm_shot(void *user,s32 origin_x,s32 origin_y,
     if(!here)return 0;
     for(unsigned q=0;q<t->actors;q++)if(q!=shooter &&
         avp_mp_session_player_world(&t->session,q)==here &&
-        !avp_mp_life_busy(&t->player_life[q])){
+        !avp_mp_life_busy(&t->player_life[q]) && walk_vent_world_present(t,q)){
         AvpMpActorNativeState *a=(AvpMpActorNativeState *)t->session.player[q];
         AvpXY from,to;
         uint32_t depth=0;
@@ -3562,7 +6937,8 @@ static int walk_dm_shot(void *user,s32 origin_x,s32 origin_y,
         }
     }
     walk_dm_apply_hit(t,shooter,selected,
-        avp_mp_dm_direct_damage(player_type,cur_wepno,damage));
+        avp_mp_dm_direct_damage(player_type,cur_wepno,damage),
+        player_type==PT_PREDATOR && !invisflag);
     return 1;
 }
 
@@ -3570,6 +6946,10 @@ static int walk_dm_shot(void *user,s32 origin_x,s32 origin_y,
  * player's native PLAYER/HUD/weapon state and that player's original DOORS/
  * AMP level bound. All other players and worlds are paused until it closes.
  * Do not manufacture aid, clearance, destruct/launch or terminal text. */
+static int last_campaign_pod_launched;
+int avp_mp_walktest_last_campaign_launch(void)
+{return last_campaign_pod_launched;}
+
 static int walk_run_terminal(AvpMpWalkHost *t,unsigned p)
 {
     const AvpMpActiveWorld *active;
@@ -3577,9 +6957,10 @@ static int walk_run_terminal(AvpMpWalkHost *t,unsigned p)
     AvpMpActorNativeState *actor;
     AvpMpNativeScope scope={0};
     int world_entered=0,actor_entered=0,ok=1,launched=0,destructed=0;
+    int terminal_ui_unavailable=0;
     const AvpRuntimeOps *runtime=avp_runtime_ops();
     unsigned offset;
-    if(!t||p>=t->players||!(t->terminal_pending_mask&(1u<<p)))return 0;
+    if(!t||p>=t->actors||!(t->terminal_pending_mask&(1u<<p)))return 0;
     offset=t->terminal_pending_offset[p];
     t->terminal_pending_mask&=~(1u<<p);
     if(t->dm.enabled)return 1; /* Never enter a terminal UI in Deathmatch. */
@@ -3587,12 +6968,62 @@ static int walk_run_terminal(AvpMpWalkHost *t,unsigned p)
     actor=(AvpMpActorNativeState *)t->session.player[p];
     if(!active || !active->context || !actor ||
        actor->player.player_type!=PT_HUMAN)return 0;
-    /* Bot navigation may press Use at a terminal while pathfinding. Until a
-     * separate bot computer-menu planner exists, never enter an unbounded
-     * synchronous UI that has no human input owner. The original terminal
-     * and all world state remain untouched in that case. */
+    /* R283: AI can select the original medical terminal's FIRST AID
+     * operation after physically using its source-authored panel. The
+     * synchronous original menu cannot be driven by a bot; bind this actor
+     * and world then invoke the exact COMPUTER.S health operation. Never
+     * use this path for nonmedical panels or story terminals. */
     if(t->session.setup.bot_enabled[p]){
-        fprintf(stderr,"MP P%u AI terminal request deferred: no menu driver.\n",p+1u);
+        int healed=0;
+        /* Bot-only campaign: no human can operate the capsule launch.
+         * Only the elected leader, physically at an AUTHENTIC Level-5
+         * terminal face and with the crew already aboard, may dispatch
+         * COMPUTER.S's own armed pod launch. Other bots never issue it. */
+        if(t->evacuation_active && p==t->evacuation_leader &&
+           active->level==5u && (offset==27272u ||
+              offset==27273u || offset==27275u) &&
+           walk_bot_escape_all_boarded(t,p) &&
+           ((unsigned)actor->player.x_pos>>16)==17u &&
+           ((unsigned)actor->player.y_pos>>16)==53u){
+            int bot_launch=0;
+            world=(AvpMpNativeWorld *)active->context;
+            if(!avp_mp_native_world_enter(&scope,world))return 0;
+            if(!avp_mp_native_actor_enter(&scope,actor)){
+                (void)avp_mp_native_world_leave(&scope,world);return 0;
+            }
+            /* Calls the original COMPUTER.S script action, with the
+             * real shared destruct_flag from the bound Marine actor. */
+            bot_launch=avp_computer_launch_pod();
+            if(!avp_mp_native_actor_leave(&scope,actor) ||
+               !avp_mp_native_world_leave(&scope,world))return 0;
+            if(bot_launch){
+                last_campaign_pod_launched=1;
+                for(unsigned q=0;q<t->actors;q++){
+                    AvpMpActorNativeState *other=
+                        (AvpMpActorNativeState *)t->session.player[q];
+                    if(other)other->player.launch_flag=1;
+                }
+                fprintf(stderr,"MP bots-only pod launched by bot leader P%u using original COMPUTER.S.\n",p+1u);
+                return 2;
+            }
+            return 1;
+        }
+        if(!avp_computer_is_medical_terminal(active->level,(u16)offset) ||
+           actor->access_level<4u || actor->access_level>10u ||
+           avp_computer_first_aid_ceiling(actor->access_level)<=
+             actor->player.player_energy)return 1;
+        world=(AvpMpNativeWorld *)active->context;
+        if(!avp_mp_native_world_enter(&scope,world))return 0;
+        if(!avp_mp_native_actor_enter(&scope,actor)){
+            (void)avp_mp_native_world_leave(&scope,world);return 0;
+        }
+        /* Pure original COMPUTER.S effect, no artificial health write. */
+        healed=avp_computer_first_aid()==1;
+        if(!avp_mp_native_actor_leave(&scope,actor) ||
+           !avp_mp_native_world_leave(&scope,world))return 0;
+        if(healed)fprintf(stderr,
+           "MP P%u bot used original medical first aid on level %u.\n",
+           p+1u,active->level);
         return 1;
     }
     world=(AvpMpNativeWorld *)active->context;
@@ -3609,7 +7040,11 @@ static int walk_run_terminal(AvpMpWalkHost *t,unsigned p)
     for(unsigned q=0;q<t->actors;q++)
         avp_pc_live_heading_reset(&t->live_heading[q]);
     if(!avp_pc_video_local_mp_terminal_begin(t->video,p,t->players)){
-        ok=0;goto done;
+        /* A failed host presentation allocation/mode must not terminate an
+         * otherwise healthy co-op campaign. No COMPUTER.S action has begun;
+         * unwind the native scopes and allow another Use attempt later. */
+        fprintf(stderr,"MP P%u terminal presentation unavailable; returning to game.\n",p+1u);
+        terminal_ui_unavailable=1;goto done;
     }
     avp_pc_runtime_set_mp_terminal((int)p,t->players);
     if(runtime && runtime->play_sfx)runtime->play_sfx(runtime->user,AVP_FX_COMPE);
@@ -3619,6 +7054,16 @@ static int walk_run_terminal(AvpMpWalkHost *t,unsigned p)
     if(runtime && runtime->play_sfx)runtime->play_sfx(runtime->user,AVP_FX_COMPD);
     destructed=destruct_flag!=0;
     launched=launch_flag!=0;
+    /* Arm the ORIGINAL HUD.S countdown against the global MP tick clock,
+     * not against whichever player later happens to open a HUD viewport.
+     * This is performed once for the authenticated source COMPUTER.S arm. */
+    if(destructed && !t->evacuation_active && t->species==AVP_MP_MARINE){
+        avp_hud_set_clock((u32)t->session.tick,10u);
+        counting=-1;
+        InitCountdown();
+        (void)avp_mp_hudworld_native_capture(&t->shared_countdown);
+        t->shared_countdown_valid=1u;
+    }
     fprintf(stderr,"MP original terminal: P%u level %u panel %u offset %u (destruct=%d launch=%d).\n",
             p+1u,active->level,(unsigned)comp_panel,offset,destructed,launched);
 done:
@@ -3630,15 +7075,70 @@ done:
     /* The Jaguar destruction sequence is one campaign condition. Our actor
      * scope stores it per actor for co-op isolation; publish the script's
      * real result to ALL players, not just the computer operator. */
+    if(ok && launched)last_campaign_pod_launched=1;
+    if(ok && destructed && !t->evacuation_active &&
+       t->species==AVP_MP_MARINE){
+        t->evacuation_active=1u;
+        t->evacuation_start_tick=t->session.tick;
+        t->evacuation_leader=walk_bot_evacuation_leader(t);
+        fprintf(stderr,"MP self-destruct armed: emergency evacuation to Level 5; bot leader=%u.\n",
+                t->evacuation_leader< t->actors?t->evacuation_leader+1u:0u);
+    }
     if(ok && (destructed||launched))for(unsigned q=0;q<t->actors;q++){
         AvpMpActorNativeState *a=(AvpMpActorNativeState *)t->session.player[q];
         if(a){if(destructed)a->player.destruct_flag=1;
               if(launched)a->player.launch_flag=1;}
     }
     avp_pc_video_reset_presentation(t->video);
+    if(terminal_ui_unavailable && ok)return 1;
     return ok? (launched?2:1):0;
 }
 
+/* Select one of the fifteen source-authored level worlds, without bias to
+ * campaign start, and join at a source-valid randomized floor coordinate.
+ * Each failed transaction leaves the source world/actor untouched. This is
+ * PC-only spawning; no Jaguar door, player or map logic is modified. */
+static int walk_random_level_spawn(AvpMpWalkHost *t,unsigned p)
+{
+    unsigned candidates[AVP_MP_RETAIL_LEVELS];
+    if(!t || p>=t->actors || !t->retail_catalog_ready ||
+       t->session.setup.custom_session_id==AVP_MP_CUSTOM_LEVEL)return 0;
+    for(unsigned i=0;i<AVP_MP_RETAIL_LEVELS;i++)candidates[i]=i+1u;
+    for(unsigned i=AVP_MP_RETAIL_LEVELS-1u;i>0;i--){
+        unsigned j=(unsigned)(avp_random()%(i+1u));
+        unsigned tmp=candidates[i];candidates[i]=candidates[j];candidates[j]=tmp;
+    }
+    for(unsigned i=0;i<AVP_MP_RETAIL_LEVELS;i++){
+        const unsigned level=candidates[i];
+        /* Do not choose duct levels for Predator first-spawn OR respawn.
+         * Keep the original shuffled candidate order for all species. */
+        if(!avp_mp_spawn_level_allowed(t->session.setup.species[p],level))
+            continue;
+        const AvpMpActiveWorld *current=avp_mp_session_player_world(&t->session,p);
+        int ok=0;
+        if(!current)return 0;
+        memset(&t->entering[p],0,sizeof t->entering[p]);
+        t->entering[p].valid=1;
+        t->entering[p].target_level=(s16)level;
+        t->entering[p].new_x=t->entering[p].new_y=-1;
+        t->entering_reset[p]=1;
+        t->random_level_entry[p]=1;
+        if(current->level==level){
+            AvpMpActorNativeState *actor=(AvpMpActorNativeState *)t->session.player[p];
+            if(actor)ok=walk_join(t,(AvpMpNativeWorld *)current->context,p,actor);
+        }else ok=avp_mp_session_move(&t->session,p,level);
+        t->random_level_entry[p]=0;
+        t->entering_reset[p]=0;
+        memset(&t->entering[p],0,sizeof t->entering[p]);
+        if(ok){
+            AvpMpActorNativeState *actor=(AvpMpActorNativeState *)t->session.player[p];
+            if(!walk_clear_arrival_enemies(t,AVP_MP_ACTOR_BIT(p)))return 0;
+            if(actor){t->spawn_x[p]=actor->player.x_pos;t->spawn_y[p]=actor->player.y_pos;}
+            return 1;
+        }
+    }
+    return 0;
+}
 static int walk_respawn(AvpMpWalkHost *t,unsigned p)
 {
     AvpMpActorNativeState *a=(AvpMpActorNativeState *)t->session.player[p];
@@ -3661,7 +7161,36 @@ static int walk_respawn(AvpMpWalkHost *t,unsigned p)
         if(!t->session.setup.respawn_campaign_start && !t->dm.enabled)
             plan.target_level=species_level[next];
     }
-    if(t->dm.enabled){
+    /* Independent random-level respawn takes priority over the normal
+     * co-op campaign-start choice and DM same-world rule. A selected level
+     * may be a duct or ship; only legal floor/engine-safe poses are accepted. */
+    /* DM and random-first-level sessions otherwise restart on their CURRENT
+     * level. If a Predator dies while already in a duct, move the respawn to
+     * a legal surface level instead of looping into that same duct. */
+    const AvpMpActiveWorld *death_world=avp_mp_session_player_world(&t->session,p);
+    const int predator_duct_restart=death_world &&
+        (t->dm.enabled || t->session.setup.spawn_in_random_level) &&
+        !avp_mp_spawn_level_allowed(t->session.setup.species[p],death_world->level);
+    if((t->session.setup.respawn_on_random_level || predator_duct_restart) &&
+       t->session.setup.custom_session_id!=AVP_MP_CUSTOM_LEVEL){
+        if(!walk_random_level_spawn(t,p))return 0;
+        a=(AvpMpActorNativeState *)t->session.player[p];
+        t->prev_x[p]=a->player.x_pos;t->prev_y[p]=a->player.y_pos;
+        t->prev_angle[p]=a->player.centre_angle;
+        if(t->dm.enabled && t->dm.fast_movement)
+            avp_mp_dm_speed(1,&a->player.max_speed,&a->player.acc_shift);
+        t->dm_death_credited[p]=0u;
+        avp_pc_live_heading_reset(&t->live_heading[p]);
+        t->live_last_game_angle[p]=a->player.centre_angle;
+        avp_mp_death_camera_end(&t->death_camera[p]);
+        walk_shared_arrival_refresh(t,AVP_MP_ACTOR_BIT(p));
+        t->collected_keycards[p]=0;
+        walk_reset_mp_item_claims(t,p);
+        memset(t->contacts[p],0,sizeof t->contacts[p]);
+        ++t->completed_respawns;
+        return 1;
+    }
+    if(t->dm.enabled || t->session.setup.spawn_in_random_level){
         const AvpMpActiveWorld *current=avp_mp_session_player_world(&t->session,p);
         if(!current)return 0;
         plan.kind=AVP_MP_RESPAWN_SPECIES_START;
@@ -3693,13 +7222,14 @@ static int walk_respawn(AvpMpWalkHost *t,unsigned p)
          t->entering_reset[p]=0;
          if(!moved)return 0;}
         a=(AvpMpActorNativeState *)t->session.player[p];
+        if(!walk_clear_arrival_enemies(t,AVP_MP_ACTOR_BIT(p)))return 0;
         t->prev_x[p]=a->player.x_pos;t->prev_y[p]=a->player.y_pos;
         t->prev_angle[p]=a->player.centre_angle;
         /* The death fade is allowed to hold the camera only until the
          * transactional destination join has completed. Previously this
          * cross-world return skipped the release, permanently freezing view. */
         avp_mp_death_camera_end(&t->death_camera[p]);
-        walk_shared_arrival_refresh(t,1u<<p);
+        walk_shared_arrival_refresh(t,AVP_MP_ACTOR_BIT(p));
         t->collected_keycards[p]=0;
         walk_reset_mp_item_claims(t,p);
         memset(t->contacts[p],0,sizeof t->contacts[p]);
@@ -3715,7 +7245,7 @@ static int walk_respawn(AvpMpWalkHost *t,unsigned p)
         s32 saved_new_x=new_x,saved_new_y=new_y;
         for(unsigned w=0;w<AVP_LOCAL_MP_MAX_ACTORS;w++)
             if(t->session.worlds[w].context &&
-               (t->session.worlds[w].member_mask&(1u<<p))) {
+               (t->session.worlds[w].member_mask&(AVP_MP_ACTOR_BIT(p)))) {
                 world=(AvpMpNativeWorld *)t->session.worlds[w].context;break;
             }
         if(!world || !avp_mp_native_world_enter(&scope,world))return 0;
@@ -3750,6 +7280,7 @@ static int walk_respawn(AvpMpWalkHost *t,unsigned p)
         t->entering_reset[p]=0;
         if(!ok)return 0;
     }
+    if(!walk_clear_arrival_enemies(t,AVP_MP_ACTOR_BIT(p)))return 0;
     t->prev_x[p]=a->player.x_pos;t->prev_y[p]=a->player.y_pos;
     t->prev_angle[p]=a->player.centre_angle;
     if(t->dm.enabled && t->dm.fast_movement)
@@ -3760,7 +7291,7 @@ static int walk_respawn(AvpMpWalkHost *t,unsigned p)
     /* Release the frozen camera only after the destination join succeeds.
      * If it fails, the dead player remains safely frozen and black. */
     avp_mp_death_camera_end(&t->death_camera[p]);
-    walk_shared_arrival_refresh(t,1u<<p);
+    walk_shared_arrival_refresh(t,AVP_MP_ACTOR_BIT(p));
     t->collected_keycards[p]=0;
     walk_reset_mp_item_claims(t,p);
     memset(t->contacts[p],0,sizeof t->contacts[p]);
@@ -3791,13 +7322,11 @@ static void walk_dm_publish(AvpMpWalkHost *t)
                               seconds/60u,seconds%60u);
     }else used=(size_t)snprintf(status,sizeof(status),"DEATHMATCH - Unlimited Time");
     if(used>=sizeof(status))used=sizeof(status)-1u;
-    for(unsigned p=0;p<t->actors && used+18u<sizeof(status);p++){
-        int n=snprintf(status+used,sizeof(status)-used," | P%u %u/%u",
-                       p+1u,t->dm.kills[p],t->dm.deaths[p]);
-        if(n<0)break;
-        used+=(size_t)n;
-    }
     avp_pc_video_local_mp_deathmatch_status(t->video,status);
+    /* R204: export every player score as data. The X11/GDI presentation
+     * arranges these into as many visible rows as the window permits. */
+    avp_pc_video_local_mp_deathmatch_scores(t->video,t->actors,
+        t->dm.kills,t->dm.deaths,t->dm.elapsed_ticks);
 }
 
 static int walk_is_duct_transfer(unsigned from,const AvpMpTransitionRequest *r)
@@ -3827,7 +7356,9 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
     unsigned render_hz=60u;
     uint64_t render_period=1000000000ull/60ull;
     AvpMpPause pause_state={0};
+    last_campaign_pod_launched=0;
     if(!t)return 1;
+    t->evacuation_leader=AVP_LOCAL_MP_MAX_ACTORS;
     if(!avp_pc_video_local_mp_walktest_mode(video,1)||
        !walk_init(t,video,level,retail_level,all_mazes,maze_count,
                   rom,combat_test,players,requested)){
@@ -3835,6 +7366,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
         walk_cleanup(t);avp_pc_video_local_mp_walktest_mode(video,0);
         free(t);return 1;
     }
+    avp_hud_set_coop_countdown(1u);
     if(t->dm.enabled){
         fprintf(stderr,"Deathmatch mode: level=%u, NPC enemies=%s, fast-equip=%s, score=%s (%u), time=%s (%u min), 2x movement=%s.\n",
             t->dm.level,t->dm.enemies?"on":"off",t->dm.fast_equip?"on":"off",
@@ -3870,6 +7402,27 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
         uint32_t pad=UINT32_MAX;
         uint64_t now;
         avp_pc_video_poll(video,&pad,&quit);
+        /* Do not route manual spy controls through the 10-Hz Jaguar input
+         * scheduler. Consume all ordered key/button press events on every
+         * host poll, including multiple quick taps between game ticks. */
+        avp_pc_video_local_mp_collect_spy_input(video,t->players);
+        {int changed=0;
+         for(unsigned p=0;p<t->players;p++){
+             int direction;
+             while((direction=avp_pc_video_local_mp_take_spy_press(video,p))!=0){
+                 const unsigned old=t->session.spy_target[p];
+                 const unsigned subject=avp_mp_spycam_cycle(p,old,t->actors,
+                           walk_spy_eligible_mask(t,p),direction);
+                 t->session.spy_target[p]=subject;
+                 if(subject!=old){
+                     changed=1;
+                     fprintf(stderr,"MP P%u spycam: observing P%u (%s).\n",
+                         p+1u,subject+1u,subject==p?"self":"remote");
+                 }
+             }
+         }
+         if(changed)walk_refresh_audio_listeners(t);
+        }
         /* Capture short P2-P4 inputs at host poll cadence, not just the
          * original 10 Hz tick. The normal 10 Hz command path below is
          * completely unchanged when both enhancement switches are OFF.
@@ -4028,7 +7581,11 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                 (void)avp_mp_life_display_step(&t->vent_fade[p]);
             for(unsigned p=0;p<t->actors && !victory_ending;p++){
                 if(avp_mp_life_display_step(&t->player_life[p])){
-                    if(walk_respawn(t,p))avp_mp_life_resumed(&t->player_life[p]);
+                    if(walk_respawn(t,p)){
+                        /* A new life has no outstanding DM travel plan. */
+                        memset(&t->dm_bot_travel[p],0,sizeof t->dm_bot_travel[p]);
+                        avp_mp_life_resumed(&t->player_life[p]);
+                    }
                     else avp_mp_life_wait(&t->player_life[p]);
                 }
             }
@@ -4070,13 +7627,32 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                 t->pending_cheat_actions[p]=avp_pc_video_take_local_mp_cheat_actions(video,p);
             t->p1_weapon_delta=avp_pc_video_take_weapon_delta(video);
             avp_pc_runtime_set_noclip(avp_pc_video_noclip(video));
-            avp_dev_cheats_set_infinite_health(avp_pc_video_infinite_health(video));
+            avp_dev_cheats_set_health_mode(AVP_NEW_HEALTH_OFF);
             avp_dev_cheats_set_infinite_ammo(avp_pc_video_infinite_ammo(video));
             avp_amp_set_enemies_frozen(avp_pc_video_freeze_enemies(video));
             avp_amp_set_attacks_disabled(avp_pc_video_attacks_disabled(video));
+            avp_doors_predator_jammed_attack_enabled(
+                avp_pc_video_predator_attack_opens_jammed_doors(video));
+            avp_player_set_center_aim_options(
+                avp_pc_video_player_melee_center_aim(video),
+                avp_pc_video_player_all_center_aim(video));
+            avp_amp_set_predator_cloak_honor_options(
+                avp_pc_video_predator_cloaked_no_honor_loss(video),
+                avp_pc_video_predator_cloaked_half_honor(video));
             avp_amp_set_marine_pulse_los_hits(avp_pc_video_marine_pulse_los_hits(video));
+            avp_amp_set_persistent_enemy_health(avp_pc_video_persistent_enemy_health(video));
+            avp_amp_set_persistent_hazard_health(avp_pc_video_persistent_hazard_health(video));
+            avp_amp_set_generator_blast_radius(avp_pc_video_generator_blast_radius(video));
+            avp_amp_set_crawl_death_interrupt(avp_pc_video_crawl_death_interrupt(video));
+            avp_amp_set_enemy_number_multiplier(avp_pc_video_enemy_number_multiplier(video));
+            avp_amp_set_vent_facehuggers(avp_pc_video_vent_facehuggers(video));
+            avp_pc_video_apply_enemy_stats(video);
             avp_amp_set_marine_fire_interrupt(avp_pc_video_marine_fire_interrupt(video));
             avp_amp_set_normalize_diagonal_contact_range(avp_pc_video_normalize_diagonal_contact_range(video));
+            avp_amp_set_normalize_diagonal_alien_death_spray_range(
+                avp_pc_video_normalize_diagonal_alien_death_spray_range(video));
+            avp_amp_set_normalize_diagonal_enemy_movement_speed(
+                avp_pc_video_normalize_diagonal_enemy_movement_speed(video));
             avp_amp_set_enemy_activation_distance(avp_pc_video_enemy_activation_distance(video));
             avp_amp_set_facehug_attach_disabled(avp_pc_video_facehug_attach_disabled(video));
             /* Secondary player uses the exact previously saved P2 controls.
@@ -4163,6 +7739,9 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                 }
                 t->quick_held[p]=held;
             }
+            /* Spycam switches on the host input/presentation clock above,
+             * not on this 10-Hz native game tick. Native player controls
+             * remain owned by the input player. */
             /* PC-only per-viewport map magnification. Independent rising
              * edges, separate from the original map toggle/retail raster. */
             for(unsigned p=0;p<t->players;p++){
@@ -4183,7 +7762,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
             /* P1 normally owns the legacy wheel/key delta. When P1 is
              * AI-controlled, its NEXT/PREV command instead needs the same
              * native weapon edge bridge as every other bot. Headless bot
-             * slots P5-P16 are simulation actors, not viewports; R22 only
+             * slots P5-P20 are simulation actors, not viewports; R22 only
              * processed p<t->players here, so their weapon requests never
              * reached avp_weapons_cycle() despite passing the AI unit tests. */
             for(unsigned p=0;p<t->actors;p++){
@@ -4205,8 +7784,33 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                     fprintf(stderr," pad=%08x\n",(unsigned)t->last_pad);
                 }
             }
+            /* Each original level has an independent door/AMP world, but
+             * destruction of Golgotha is one campaign-wide timer. Seed
+             * every occupied world with the SAME previous completed HUD
+             * tick before its normal native simulation. */
+            if(t->shared_countdown_valid)for(unsigned w=0;w<AVP_LOCAL_MP_MAX_ACTORS;w++){
+                AvpMpActiveWorld *active=&t->session.worlds[w];
+                AvpMpNativeWorld *native=(AvpMpNativeWorld *)active->context;
+                if(native && active->member_mask)
+                    native->hud_world=t->shared_countdown;
+            }
             if(!avp_mp_session_tick(&t->session,cmd))failed=1;
+            /* All original world tick paths advanced to the SAME session
+             * time. Snapshot one resulting countdown to seed the next tick.
+             * A later level transition must not restart its 2-minute clock. */
+            if(!failed && t->shared_countdown_valid)
+                for(unsigned w=0;w<AVP_LOCAL_MP_MAX_ACTORS;w++){
+                    const AvpMpActiveWorld *active=&t->session.worlds[w];
+                    const AvpMpNativeWorld *native=(const AvpMpNativeWorld *)active->context;
+                    if(native && active->member_mask &&
+                       avp_mp_hudworld_native_valid(&native->hud_world)){
+                        t->shared_countdown=native->hud_world;
+                        break;
+                    }
+                }
             if(!failed){
+                /* Do not switch the camera when the subject dies. Follow
+                 * their original death fade and subsequent respawn. */
                 walk_refresh_audio_listeners(t);
                 avp_mp_dm_tick(&t->dm);
             }
@@ -4254,7 +7858,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
              * simulation while the operator browses. Process simultaneous
              * actors deterministically in player order. */
             if(!failed && t->terminal_pending_mask){
-                for(unsigned p=0;p<t->players;p++)if(t->terminal_pending_mask&(1u<<p)){
+                for(unsigned p=0;p<t->actors;p++)if(t->terminal_pending_mask&(1u<<p)){
                     int status=walk_run_terminal(t,p);
                     if(!status){failed=1;break;}
                     if(status==2){
@@ -4292,11 +7896,18 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                 old_level=old_world->level;
                 if(walk_is_duct_transfer(old_level,&request)){
                     AvpMpLife *fade=&t->vent_fade[p];
-                    if(fade->phase==AVP_MP_LIFE_ALIVE){
+                    if(fade->phase==AVP_MP_LIFE_ALIVE ||
+                       (fade->phase==AVP_MP_LIFE_FADE_OUT && fade->fade==0u)){
                         const AvpRuntimeOps *runtime=avp_runtime_ops();
                         avp_mp_life_begin(fade);
-                        if(runtime && runtime->play_sfx)
+                        if(runtime && runtime->play_sfx){
+                            const AvpMpActorNativeState *a=
+                                (const AvpMpActorNativeState *)t->session.player[p];
+                            if(a)avp_jaguar_fullsynth_mp_set_sound_source(p,old_level,
+                                        (s32)a->player.x_pos,(s32)a->player.y_pos);
                             runtime->play_sfx(runtime->user,AVP_FX_DUCT1);
+                            if(a)avp_jaguar_fullsynth_mp_clear_sound_source();
+                        }
                         fprintf(stderr,"MP P%u original duct transfer fade-out: %u -> %u.\n",
                             p+1u,old_level,(unsigned)request.target_level);
                     }
@@ -4311,10 +7922,19 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                 t->entering_reset[p]=0;
                 /* Only real original airlock/lift exits pick up other players.
                  * Ducts, cocoon escapes and other transitions remain solo. */
-                unsigned passengers=walk_room_passengers(t,p,&request);
+                const int bot_interlock=t->session.setup.bot_enabled[p] &&
+                    t->exit_kind[p]==AVP_DOORS_EXIT_AIRLOCK;
+                unsigned passengers=(!bot_interlock ||
+                    walk_bot_airlock_commit_ready(
+                        (const AvpMpNativeWorld *)old_world->context,
+                        (const AvpMpActorNativeState *)t->session.player[p],&request))?
+                    walk_room_passengers(t,p,&request):0u;
+                /* Existing refusal path consumes the stale request and
+                 * releases its pressure cue. Next tick the bot replans
+                 * the closing sequence instead of teleporting. */
                 if(!passengers){
                     moved=0;
-                }else if(passengers!=(1u<<p) &&
+                }else if(passengers!=(AVP_MP_ACTOR_BIT(p)) &&
                    old_world->level!=(unsigned)request.target_level){
                     moved=avp_mp_session_move_group(&t->session,passengers,
                                                     (unsigned)request.target_level);
@@ -4324,8 +7944,62 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                     AvpMpNativeWorld *ctx=(AvpMpNativeWorld *)old_world->context;
                     moved=walk_join(t,ctx,p,(AvpMpActorNativeState *)t->session.player[p]);
                 }else moved=avp_mp_session_move(&t->session,p,(unsigned)request.target_level);
-                for(unsigned q=0;q<t->actors;q++)if(q==p || (passengers&(1u<<q)))
+                for(unsigned q=0;q<t->actors;q++)if(q==p || (passengers&(AVP_MP_ACTOR_BIT(q))))
                     memset(&t->entering[q],0,sizeof(t->entering[q]));
+                if(moved && !walk_clear_arrival_enemies(t,passengers)){
+                    fprintf(stderr,"MP committed destination AMP entry cleanup failed.\n");
+                    failed=1;break;
+                }
+                if(moved && old_level!=(unsigned)request.target_level){
+                    for(unsigned q=0u;q<t->actors;q++)
+                        if((passengers&AVP_MP_ACTOR_BIT(q)) && t->session.setup.bot_enabled[q]){
+                            const AvpMpActorNativeState *passenger=t->session.player[q];
+                            if(passenger)avp_mp_bot_duct_arrived(&t->bots[q].duct_arrival,
+                                old_level,(unsigned)request.target_level,
+                                passenger->player.x_pos,passenger->player.y_pos,t->session.tick);
+                        }
+                }
+                if(moved && old_level!=(unsigned)request.target_level &&
+                   t->exit_kind[p]==AVP_DOORS_EXIT_AIRLOCK){
+                    /* R299: an entire co-op transfer is one transaction.
+                     * Latch EVERY transported bot (including passengers
+                     * who never pressed Use) against immediately operating
+                     * the reverse portal on the destination side. */
+                    for(unsigned q=0u;q<t->actors;q++)
+                        if((passengers&AVP_MP_ACTOR_BIT(q)) &&
+                           t->session.setup.bot_enabled[q]){
+                            AvpMpBotState *memory=&t->bots[q];
+                            avp_mp_airlock_cycle_arrived(&memory->airlock_cycle,
+                                old_level,(unsigned)request.target_level,
+                                t->session.tick);
+                            memory->airlock_level=0u;
+                            memory->airlock_panel_offset=0u;
+                            memory->airlock_destination=0u;
+                            memory->airlock_since=0u;
+                            memory->airlock_last_intent=0u;
+                            t->bot_level_cache[q].valid=0u;
+                        }
+                }
+                if(moved && old_level!=(unsigned)request.target_level &&
+                   t->exit_kind[p]==AVP_DOORS_EXIT_LIFT){
+                    /* The source transition clears exit_kind for every
+                     * passenger before the next bot observation. A bot
+                     * carried as a passenger may never have set its own
+                     * last_bot_goal_lift, so latch each transferred bot's
+                     * destination arrival NOW, from its actual new-world
+                     * position. Do not infer it later from a new goal. */
+                    for(unsigned q=0u;q<t->actors;q++)
+                        if((passengers&AVP_MP_ACTOR_BIT(q)) &&
+                           t->session.setup.bot_enabled[q]){
+                            const AvpMpActorNativeState *passenger=
+                                (const AvpMpActorNativeState*)t->session.player[q];
+                            if(!passenger)continue;
+                            t->lift_arrival_pending[q]=1u;
+                            t->lift_arrival_x[q]=passenger->player.x_pos>>16;
+                            t->lift_arrival_y[q]=passenger->player.y_pos>>16;
+                            t->lift_egress_valid[q]=0u;
+                        }
+                }
                 if(moved)walk_shared_arrival_refresh(t,passengers);
                 if(moved && !walk_arm_alien_end_queen(t,(unsigned)request.target_level)){
                     fprintf(stderr,"MP deferred campaign objective arm failed; preserving fatal error.\n");
@@ -4343,11 +8017,11 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
                      * or the second actor would immediately exit AGAIN using
                      * the stale request on the next host tick. Passengers
                      * who did not press Use have no queue entry to consume. */
-                    for(unsigned q=0;q<t->actors;q++)if(passengers&(1u<<q)){
+                    for(unsigned q=0;q<t->actors;q++)if(passengers&(AVP_MP_ACTOR_BIT(q))){
                         AvpMpTransitionRequest consumed;
                         (void)avp_mp_transition_commit(&t->transitions,q,&consumed);
                     }
-                    for(unsigned q=0;q<t->actors;q++)if(passengers&(1u<<q)){
+                    for(unsigned q=0;q<t->actors;q++)if(passengers&(AVP_MP_ACTOR_BIT(q))){
                         avp_pc_quick_turn_cancel(&t->quick_turn[q]);
                         t->exit_kind[q]=AVP_DOORS_EXIT_NONE;
                         const AvpMpActorNativeState *a=(const AvpMpActorNativeState *)t->session.player[q];
@@ -4393,6 +8067,19 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
             ++ticks;
             next_tick+=sim_period;
             if(now>=next_tick && now-next_tick>sim_period)next_tick=now+sim_period;
+            if(getenv("AVP_BOT_PLAYTEST_TRACE") && ticks%5u==0u){
+                for(unsigned bp=0u;bp<t->actors;bp++){
+                    const AvpMpActorNativeState *ba=(const AvpMpActorNativeState *)t->session.player[bp];
+                    const AvpMpActiveWorld *bw=avp_mp_session_player_world(&t->session,bp);
+                    if(ba)fprintf(stderr,"BOTSTATE tick=%llu p=%u bot=%u level=%u xy=%08x/%08x hp=%d heading=%08x weapon=%d ammo=%u,%u,%u,%u\n",
+                        (unsigned long long)ticks,bp+1u,
+                        t->session.setup.bot_enabled[bp],bw?bw->level:0u,
+                        ba->player.x_pos,ba->player.y_pos,ba->player.player_energy,
+                        ba->player.centre_angle,ba->weapon.cur_wepno,
+                        ba->weapon.ammo_info[0].cur,ba->weapon.ammo_info[1].cur,
+                        ba->weapon.ammo_info[2].cur,ba->weapon.ammo_info[3].cur);
+                }
+            }
             if(ticks==1u || ticks%20u==0u){
                 fprintf(stderr,"MP original tick %lu:",ticks);
                 for(unsigned p=0;p<t->players;p++){
@@ -4436,6 +8123,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
             const double since=render_now>next_tick-sim_period?
                 (double)(render_now-(next_tick-sim_period))/(double)sim_period:0.0;
             t->presentation_alpha=since>1.0?1.0:since;
+            /* Preserve a dying subject's original 60-Hz fade. */
             avp_pc_video_local_mp_render_alpha(video,t->presentation_alpha);
             if(!avp_pc_video_present_local_mp(video,&t->session))failed=1;
             next_render=avp_presentation_next_display_deadline(
@@ -4463,6 +8151,7 @@ int avp_mp_walktest_run(AvpPcVideo *video,unsigned level,
     avp_pc_video_local_mp_set_paused(video,0);
     avp_pc_video_local_mp_deathmatch_status(video,NULL);
     walk_cleanup(t);
+    avp_hud_set_coop_countdown(0u);
     player_type=host_campaign_type;
     avp_pc_video_local_mp_walktest_mode(video,0);
     free(t);

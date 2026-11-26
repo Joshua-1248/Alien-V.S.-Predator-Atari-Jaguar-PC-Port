@@ -111,12 +111,61 @@ int main(void)
         avp_mp_peer_grace_update(&grace,3u,world,x,y,3u);
         assert(!avp_mp_peer_grace_exempt(&grace,0u,1u));
         world[1]=1u;
-        /* All 16 actors use the same pair rule; bot P5 vs P16. */
+        /* All actors use the same pair rule; bot P5 vs P16. */
         world[4]=world[15]=1u;x[4]=x[15]=5u<<16;
         y[4]=y[15]=3u<<16;
         avp_mp_peer_grace_update(&grace,(1u<<4)|(1u<<15),world,x,y,
                                  (1u<<4)|(1u<<15));
         assert(avp_mp_peer_grace_exempt(&grace,4u,15u));
+        world[16]=world[19]=1u;x[16]=x[19]=5u<<16;
+        y[16]=y[19]=3u<<16;
+        avp_mp_peer_grace_update(&grace,(1u<<16)|(1u<<19),world,x,y,
+                                 (1u<<16)|(1u<<19));
+        assert(avp_mp_peer_grace_exempt(&grace,16u,19u));
+        assert(!avp_mp_peer_grace_exempt(&grace,16u,15u));
+        /* The old 16-slot peer roster silently skipped the final four
+         * participants. Check actual movement collision against P20. */
+        {AvpMpPeerCollisionView peers={0};
+         peers.count=AVP_MP_PEER_COUNT;
+         peers.active[19]=1u;
+         peers.x[19]=x[19];peers.y[19]=y[19];
+         peers.from_x=(int32_t)(x[19]+0x7000u);
+         peers.from_y=(int32_t)y[19];
+         assert(!avp_mp_move_guard_peers(&peers,(int32_t)x[19],(int32_t)y[19]));
+        }
+        x[19]+=AVP_MP_PEER_CLEARANCE;
+        avp_mp_peer_grace_update(&grace,(1u<<16)|(1u<<19),world,x,y,0u);
+        assert(!avp_mp_peer_grace_exempt(&grace,16u,19u));
+        /* R131: Bot 29 and Bot 32 (P33 and P36) must have independent
+         * collision masks above the 32-bit boundary, including spawning
+         * overlap exemption, solid separation, and cross-world isolation. */
+        world[32]=world[35]=3u;
+        x[32]=x[35]=8u<<16;
+        y[32]=y[35]=4u<<16;
+        avp_mp_peer_grace_update(&grace,AVP_MP_ACTOR_BIT(32)|AVP_MP_ACTOR_BIT(35),
+                                 world,x,y,AVP_MP_ACTOR_BIT(32)|AVP_MP_ACTOR_BIT(35));
+        assert(avp_mp_peer_grace_exempt(&grace,32u,35u));
+        assert(!avp_mp_peer_grace_exempt(&grace,19u,35u));
+        {AvpMpPeerCollisionView peers={0};
+         peers.count=AVP_MP_PEER_COUNT;
+         peers.active[35]=1u;
+         peers.x[35]=x[35];peers.y[35]=y[35];
+         peers.from_x=(int32_t)(x[35]+0x7000u);
+         peers.from_y=(int32_t)y[35];
+         assert(!avp_mp_move_guard_peers(&peers,(int32_t)x[35],(int32_t)y[35]));
+        }
+        x[35]+=AVP_MP_PEER_CLEARANCE;
+        avp_mp_peer_grace_update(&grace,AVP_MP_ACTOR_BIT(32)|AVP_MP_ACTOR_BIT(35),
+                                 world,x,y,0u);
+        assert(!avp_mp_peer_grace_exempt(&grace,32u,35u));
+        x[35]=x[32];
+        avp_mp_peer_grace_update(&grace,AVP_MP_ACTOR_BIT(32)|AVP_MP_ACTOR_BIT(35),
+                                 world,x,y,AVP_MP_ACTOR_BIT(35));
+        assert(avp_mp_peer_grace_exempt(&grace,32u,35u));
+        world[35]=4u;
+        avp_mp_peer_grace_update(&grace,AVP_MP_ACTOR_BIT(32)|AVP_MP_ACTOR_BIT(35),
+                                 world,x,y,0u);
+        assert(!avp_mp_peer_grace_exempt(&grace,32u,35u));
     }
     puts("PASS: player footprint, void cell, outside bounds, fast swept wall/void, safe diagonal");
     return 0;

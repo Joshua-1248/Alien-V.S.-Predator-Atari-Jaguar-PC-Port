@@ -1,0 +1,57 @@
+{
+  "path": "src/game/hud_message.c",
+  "base_sha256": "370879aca05e55482497e141dd955da6fcbc7f9c4a301b4b868740c0598135f6",
+  "output_sha256": "e725b65b4a2bdd8f2a047054dd59a1c404836efb996726a03fc64e850b6c1048",
+  "edits": [
+    {
+      "start": 8,
+      "end": 8,
+      "replacement": "#include \"collectables.h\"\n#include <stdio.h>\n"
+    },
+    {
+      "start": 18,
+      "end": 18,
+      "replacement": "static const AvpHudMessageStep *msg_source;\n"
+    },
+    {
+      "start": 19,
+      "end": 19,
+      "replacement": "static AvpHudMessageClearFn clear_message;\nstatic char pickup_card[16]=\"CARD #10\";\nstatic AvpHudMessageStep pickup_msg[7];\n\nu32 avp_hudmsg_rgb24(void)\n{\n    return (msg_info >> 8) & 0x00ffffffu;\n}\n"
+    },
+    {
+      "start": 35,
+      "end": 35,
+      "replacement": "void avp_hudmsg_set_clear_callback(AvpHudMessageClearFn fn) { clear_message=fn; }\n"
+    },
+    {
+      "start": 36,
+      "end": 36,
+      "replacement": "int avp_hudmsg_critical_active(void)\n{\n    return new_message==avp_msg_dead || new_message==avp_msg_countdown ||\n           (msg_status!=AVP_HUDMSG_STOP &&\n            (msg_source==avp_msg_dead || msg_source==avp_msg_countdown));\n}\n\n/* The message pointer advances through the countdown's timing/colour\n * records after its opening text step. The source record identity does\n * not change until the sequence is replaced or completes. */\nint avp_hudmsg_countdown_active(void)\n{\n    /* HUD.S:405 CMP.L #cdm_stop,msg_ptr.  Retail msg_ptr points past the\n     * current record, so this is true only while the $0000FF00|$7f record\n     * is counting; this port's msg_ptr addresses that record itself. */\n    return msg_ptr==avp_msg_countdown+2;\n}\n"
+    },
+    {
+      "start": 41,
+      "end": 41,
+      "replacement": "    msg_source=NULL;\n    if(clear_message) clear_message();\n"
+    },
+    {
+      "start": 56,
+      "end": 56,
+      "replacement": "        msg_source=new_message;\n"
+    },
+    {
+      "start": 78,
+      "end": 78,
+      "replacement": "    /* A new HUD_MSG command clears the full text brush, including lines\n       unused by the replacement message. Do not depend on pointer identity:\n       countdown and repeated card pickups reuse the same command record. */\n    if(clear_message) clear_message();\n"
+    },
+    {
+      "start": 141,
+      "end": 141,
+      "replacement": "\nconst AvpHudMessageStep avp_msg_usecocoon[]={\n    {INFO_NEW(0xffff0000u),{\"COCOON\",\"HATCHING\",NULL}},\n    {INFO_WAIT(0xffff0000u,9),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,10),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,10),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,10),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,10),{NULL,NULL,NULL}}, END_STEP\n};\n\n/* HUD_MSG.S: source-authoritative species and Predator-honour notices.\n * The repeated wait/blank/color intervals are game ticks, not host frames. */\n#define COCOON_FLASH(text) \\\n    {INFO_NEW(0xffff0000u),{\"COCOON\",text,NULL}}, \\\n    {INFO_WAIT(0xffff0000u,4),{NULL,NULL,NULL}}, \\\n    {5,{NULL,NULL,NULL}},{INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}}, \\\n    {5,{NULL,NULL,NULL}},{INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}}, END_STEP\nconst AvpHudMessageStep avp_msg_stun[]={COCOON_FLASH(\"THE ENEMY\")};\nconst AvpHudMessageStep avp_msg_cocooned[]={COCOON_FLASH(\"COMPLETED\")};\nconst AvpHudMessageStep avp_msg_ccnfail[]={COCOON_FLASH(\"FAILED\")};\n#undef COCOON_FLASH\nconst AvpHudMessageStep avp_msg_cheat_on[]={\n    {INFO_NEW(0x00ff0000u),{NULL,\"CHEAT ON\",NULL}},\n    {INFO_WAIT(0x00ff0000u,5),{NULL,NULL,NULL}},END_STEP\n};\nconst AvpHudMessageStep avp_msg_cheat_off[]={\n    {INFO_NEW(0x00ff0000u),{NULL,\"CHEAT OFF\",NULL}},\n    {INFO_WAIT(0x00ff0000u,5),{NULL,NULL,NULL}},END_STEP\n};\n#define PRED_FLASH(color,first,second,third) \\\n    {INFO_NEW(color),{first,second,third}}, \\\n    {INFO_WAIT(color,6),{NULL,NULL,NULL}}, \\\n    {7,{NULL,NULL,NULL}},{INFO_WAIT(color,7),{NULL,NULL,NULL}}, \\\n    {7,{NULL,NULL,NULL}},{INFO_WAIT(color,7),{NULL,NULL,NULL}},END_STEP\nconst AvpHudMessageStep avp_msg_gain_combi[]={PRED_FLASH(0xffff0000u,\"COMBI STICK\",\"ATTAINED\",NULL)};\nconst AvpHudMessageStep avp_msg_lose_combi[]={PRED_FLASH(0xffff0000u,\"COMBI STICK\",\"LOST\",NULL)};\nconst AvpHudMessageStep avp_msg_gain_disc[]={PRED_FLASH(0xffff0000u,\"SMART DISC\",\"ATTAINED\",NULL)};\nconst AvpHudMessageStep avp_msg_lose_disc[]={PRED_FLASH(0xffff0000u,\"SMART DISC\",\"LOST\",NULL)};\nconst AvpHudMessageStep avp_msg_gain_cannon[]={PRED_FLASH(0xffffff00u,\"SHOULDER\",\"CANNON\",\"ATTAINED\")};\nconst AvpHudMessageStep avp_msg_lose_cannon[]={PRED_FLASH(0xffffff00u,\"SHOULDER\",\"CANNON\",\"LOST\")};\n#undef PRED_FLASH\n\nstatic char avp_newlevel_text[]=\"SUBLEVEL ?\";\nstatic char avp_newduct_text[]=\"AIRDUCT ??\";\nAvpHudMessageStep avp_msg_newlevel[]={\n    {INFO_NEW(0xffff0000u),{\"ENTERING\",avp_newlevel_text,NULL}},\n    {INFO_WAIT(0xffff0000u,4),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}}, END_STEP\n};\nAvpHudMessageStep avp_msg_newduct[]={\n    {INFO_NEW(0xffff0000u),{\"ENTERING\",avp_newduct_text,NULL}},\n    {INFO_WAIT(0xffff0000u,4),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0x00000000u,5),{NULL,NULL,NULL}},\n    {INFO_WAIT(0xffff0000u,5),{NULL,NULL,NULL}}, END_STEP\n};\nvoid avp_hudmsg_set_destination_level(unsigned level)\n{\n    static const char duct_ids[8][2]={{'1','B'},{'2','B'},{'3','B'},{'3','C'},{'4','B'},{'4','C'},{'5','B'},{'5','C'}};\n    if(level>=6u && level<=13u){\n        avp_newduct_text[8]=duct_ids[level-6u][0];\n        avp_newduct_text[9]=duct_ids[level-6u][1];\n    }else{\n        unsigned n=level>9u?9u:level;\n        avp_newlevel_text[9]=(char)('0'+n);\n    }\n}\n\n"
+    },
+    {
+      "start": 154,
+      "end": 154,
+      "replacement": "\n/* Pickup HUD_MSG records are reconstructed from the cartridge's compressed\n   RDB.DTA, loaded at $20300.  The 12 distinct command streams occupy\n   $25086..$25265; their length-prefixed strings are at $25266..$252D7.\n   Their three-line layouts and 4/5-tick colour/blank sequence are part of the\n   original presentation, not a generic host pickup banner. */\nvoid avp_hudmsg_pickup(enum AvpCollectNotice notice,unsigned detail)\n{\n    const char *line0=NULL,*line1=NULL,*line2=NULL;\n    u32 ink=0xffffff00u,hold=0xffffff00u;\n    switch(notice){\n    case AVP_CNOTICE_CARD:\n        if(detail<1u||detail>10u)return;\n        (void)snprintf(pickup_card,sizeof(pickup_card),\"CARD #%02u\",detail);\n        line0=\"SECURITY\";line1=pickup_card;line2=\"COLLECTED\";ink=hold=0xffffff00u;break;\n    case AVP_CNOTICE_SHOTGUN:\n        line0=\"SHOTGUN\";line1=\"COLLECTED\";ink=hold=0xffff0000u;break;\n    case AVP_CNOTICE_SHOT_AMMO:\n        line0=\"SHOTGUN\";line1=\"ROUNDS\";line2=\"COLLECTED\";break;\n    case AVP_CNOTICE_PULSE:\n        line0=\"PULSE RIFLE\";line1=\"COLLECTED\";ink=hold=0xffff0000u;break;\n    case AVP_CNOTICE_PULSE_AMMO:\n        line0=\"PULSE RIFLE\";line1=\"ROUNDS\";line2=\"COLLECTED\";break;\n    case AVP_CNOTICE_FLAME:\n        line0=\"FLAME\";line1=\"THROWER\";line2=\"COLLECTED\";break;\n    case AVP_CNOTICE_FLAME_AMMO:\n        line0=\"GAS\";line1=\"COLLECTED\";ink=hold=0xffff0000u;break;\n    case AVP_CNOTICE_SMART:\n        line0=\"SMARTGUN\";line1=\"COLLECTED\";ink=hold=0xffff0000u;break;\n    case AVP_CNOTICE_SMART_AMMO:\n        line0=\"SMARTGUN\";line1=\"AMMO\";line2=\"COLLECTED\";break;\n    case AVP_CNOTICE_MTRACKER:\n        line0=\"MOTION\";line1=\"TRACKER\";line2=\"COLLECTED\";break;\n    case AVP_CNOTICE_FOOD:\n        line0=\"FOOD\";line1=\"COLLECTED\";ink=0xffff0000u;break;\n    case AVP_CNOTICE_MEDAID:\n        line0=\"MEDKIT\";line1=\"COLLECTED\";ink=hold=0xffff0000u;break;\n    default:return;\n    }\n    /* PLAYER.S give_energy/give_wep/give_ammo and MAZESCRN.S PredAvail write\n     * new_message unconditionally: a pickup replaces even the countdown/dead\n     * message (HUD.S Countdown re-queues only once the pickup finishes). */\n    pickup_msg[0].info=ink|AVP_HUDMSG_NEW;\n    pickup_msg[0].line[0]=line0;\n    pickup_msg[0].line[1]=line1;\n    pickup_msg[0].line[2]=line2;\n    /* Cartridge HUD_MSG: initial bright text, four hold ticks, alternating\n       five dark/bright ticks twice, and one terminating zero command. */\n    pickup_msg[1].info=hold|4u;\n    pickup_msg[2].info=5u;\n    pickup_msg[3].info=hold|5u;\n    pickup_msg[4].info=5u;\n    pickup_msg[5].info=hold|5u;\n    pickup_msg[6].info=AVP_HUDMSG_STOP;\n    for(unsigned i=1u;i<7u;i++)\n        for(unsigned j=0u;j<AVP_HUDMSG_LINES;j++)pickup_msg[i].line[j]=NULL;\n    avp_hudmsg_queue(pickup_msg);\n}\n\n#ifdef AVP_LOCAL_MULTIPLAYER_HUDMSG_BRIDGE\n#include \"../../new/multiplayer/local_mp_hudmsg_native.inc\"\n#endif\n"
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+name: Native AVP Windows and Linux builds
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'cmake/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/windows-release.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-winpthreads
+      - name: Compile, startup-check and package the Windows executable
+        shell: msys2 {0}
+        run: bash tools/package_windows_ucrt64.sh build-win dist/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avp-windows
+          path: dist/windows/*
+          if-no-files-found: error
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxext-dev libssl-dev zlib1g-dev ninja-build
+      - name: Build Linux executable and run regression suite
+        run: |
+          cmake -S . -B build-linux -G Ninja -DAVP_STRICT=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-linux -j4
+          bash tools/validate.sh
+          mkdir -p dist/linux
+          cp build-linux/avp_pc dist/linux/avp_pc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avp-linux
+          path: dist/linux/*
+          if-no-files-found: error
+  bundle:
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: avp-*
+          path: bundle
+          merge-multiple: false
+      - name: Create dual-platform archive
+        run: cd bundle && zip -r ../AVP_Windows_Linux.zip avp-windows avp-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Windows-and-Linux
+          path: AVP_Windows_Linux.zip
+          if-no-files-found: error

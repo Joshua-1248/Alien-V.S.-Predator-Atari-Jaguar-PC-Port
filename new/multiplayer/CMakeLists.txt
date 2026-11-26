@@ -1,6 +1,8 @@
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 add_library(avp_local_multiplayer STATIC local_mp.c local_mp_input.c local_mp_mice.c local_mp_compositor.c local_mp_worlds.c local_mp_retail_maps.c local_mp_collision.c local_mp_move_guard.c local_mp_doors_native.c local_mp_player_native.c local_mp_weapon_native.c local_mp_actor_native.c local_mp_amp_native.c local_mp_amp_targets.c local_mp_native_context.c local_mp_native_input.c local_mp_commands.c local_mp_respawn_policy.c local_mp_life.c local_mp_deathmatch.c local_mp_dm_loot.c local_mp_corpses.c local_mp_transition.c local_mp_chamber.c local_mp_native_backend.c local_mp_gamepads.c local_mp_bot.c local_mp_bot_levels.c local_mp_walktest.c)
 target_compile_definitions(avp_local_multiplayer PRIVATE AVP_LOCAL_MULTIPLAYER=1 AVP_LOCAL_MULTIPLAYER_AUDIO_BRIDGE=1)
-target_include_directories(avp_local_multiplayer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(avp_local_multiplayer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(avp_local_multiplayer PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -10,9 +12,22 @@ if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_multiplayer_setup PRIVATE -Wall -Wextra -Werror)
 endif()
 
+add_executable(test_local_mp_spy_entity_history tests/test_local_mp_spy_entity_history.c)
+target_include_directories(test_local_mp_spy_entity_history PRIVATE
+  ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+if(AVP_STRICT)
+  target_compile_options(test_local_mp_spy_entity_history PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
+add_executable(test_local_mp_spycam tests/test_local_mp_spycam.c)
+target_link_libraries(test_local_mp_spycam PRIVATE avp_local_multiplayer)
+if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(test_local_mp_spycam PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
 add_executable(test_local_multiplayer_input tests/test_local_mp_input.c)
 target_link_libraries(test_local_multiplayer_input PRIVATE avp_local_multiplayer)
-target_include_directories(test_local_multiplayer_input PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_multiplayer_input PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_multiplayer_input PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -70,24 +85,30 @@ if(UNIX AND NOT APPLE AND TARGET X11::X11)
   # just those above 60 Hz); no retail ROM or physical display is needed.
   if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_executable(test_pc_f12_atomic_route
-      ${CMAKE_SOURCE_DIR}/tests/test_pc_show_fps_menu.c
-      ${CMAKE_SOURCE_DIR}/src/platform/pc/pc_original_cheat_input.c
-      ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/automap.c
-      ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/state.c
-      ${CMAKE_SOURCE_DIR}/new/map_maker/map_maker.c
-      ${CMAKE_SOURCE_DIR}/new/map_maker/map_maker_scripts.c
-      ${CMAKE_SOURCE_DIR}/new/map_maker/map_maker_objects.c)
+      ${PROJECT_SOURCE_DIR}/tests/test_pc_show_fps_menu.c
+      ${PROJECT_SOURCE_DIR}/new/pc_host/src/pc_vignette.c
+      ${PROJECT_SOURCE_DIR}/new/pc_host/src/pc_original_cheat_input.c
+      ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/automap.c
+      ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/state.c
+      ${PROJECT_SOURCE_DIR}/new/map_maker/map_maker.c
+      ${PROJECT_SOURCE_DIR}/new/map_maker/map_maker_scripts.c
+      ${PROJECT_SOURCE_DIR}/new/map_maker/map_maker_objects.c
+      # RE47 R342: the source-inclusion F12 test uses the host's current
+      # texture-filter and Vulkan GPU-selection helpers.
+      ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/texture_filter.c
+      ${PROJECT_SOURCE_DIR}/new/pc_host/src/pc_vulkan_probe.c)
     target_include_directories(test_pc_f12_atomic_route PRIVATE
-      ${CMAKE_SOURCE_DIR}/include
-      ${CMAKE_SOURCE_DIR}/new/multiplayer
-      ${CMAKE_SOURCE_DIR}/new/game_micro_optimization
-      ${CMAKE_SOURCE_DIR}/new/map_maker)
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/new/multiplayer
+      ${PROJECT_SOURCE_DIR}/new/game_micro_optimization
+      ${PROJECT_SOURCE_DIR}/new/map_maker)
     target_compile_definitions(test_pc_f12_atomic_route PRIVATE
       _POSIX_C_SOURCE=200809L AVP_LOCAL_MULTIPLAYER=1 AVP_LOCAL_MULTIPLAYER_AUDIO_BRIDGE=1)
     target_compile_options(test_pc_f12_atomic_route PRIVATE
       -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
     target_link_options(test_pc_f12_atomic_route PRIVATE -Wl,--gc-sections)
     target_link_libraries(test_pc_f12_atomic_route PRIVATE X11::X11 m ${CMAKE_DL_LIBS})
+    add_test(NAME pc_f12_atomic_route COMMAND test_pc_f12_atomic_route)
   endif()
   # R12: real X11 XShm parity for the deathmatch banner on direct/window
   # versus the R11 full back-pixmap presentation, with FPS text overlap.
@@ -111,11 +132,11 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_retail_rom
     tests/test_local_mp_retail_rom.c
-    ${CMAKE_SOURCE_DIR}/src/jaguar/avp_resources/retail_resources.c
-    ${CMAKE_SOURCE_DIR}/src/game/collision.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c
-    ${CMAKE_SOURCE_DIR}/src/game/levels.c)
-  target_include_directories(test_local_mp_retail_rom PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_resources/retail_resources.c
+    ${PROJECT_SOURCE_DIR}/src/game/collision.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c
+    ${PROJECT_SOURCE_DIR}/src/game/levels.c)
+  target_include_directories(test_local_mp_retail_rom PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_retail_rom PRIVATE avp_local_multiplayer ZLIB::ZLIB)
   target_compile_options(test_local_mp_retail_rom PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_retail_rom PRIVATE -Wl,--gc-sections)
@@ -127,9 +148,9 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_collision_original
     tests/test_local_mp_collision_original.c
-    ${CMAKE_SOURCE_DIR}/src/game/collision.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c)
-  target_include_directories(test_local_mp_collision_original PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/collision.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c)
+  target_include_directories(test_local_mp_collision_original PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_collision_original PRIVATE avp_local_multiplayer m)
   target_compile_options(test_local_mp_collision_original PRIVATE
     -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
@@ -141,8 +162,8 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_doors_native
     tests/test_local_mp_doors_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c)
-  target_include_directories(test_local_mp_doors_native PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c)
+  target_include_directories(test_local_mp_doors_native PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_doors_native PRIVATE avp_local_multiplayer)
   target_compile_definitions(test_local_mp_doors_native PRIVATE AVP_LOCAL_MULTIPLAYER_DOOR_BRIDGE=1)
   target_compile_options(test_local_mp_doors_native PRIVATE
@@ -155,8 +176,8 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_player_native
     tests/test_local_mp_player_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/player.c)
-  target_include_directories(test_local_mp_player_native PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/player.c)
+  target_include_directories(test_local_mp_player_native PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_player_native PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_player_native PRIVATE AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE=1)
   target_compile_options(test_local_mp_player_native PRIVATE
@@ -169,9 +190,9 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_weapon_native
     tests/test_local_mp_weapon_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/mazescrn.c
-    ${CMAKE_SOURCE_DIR}/src/game/weapons.c)
-  target_include_directories(test_local_mp_weapon_native PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/mazescrn.c
+    ${PROJECT_SOURCE_DIR}/src/game/weapons.c)
+  target_include_directories(test_local_mp_weapon_native PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_weapon_native PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_weapon_native PRIVATE AVP_LOCAL_MULTIPLAYER_WEAPON_BRIDGE=1)
   target_compile_options(test_local_mp_weapon_native PRIVATE
@@ -184,12 +205,12 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_actor_native
     tests/test_local_mp_actor_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/player.c
-    ${CMAKE_SOURCE_DIR}/src/game/mazescrn.c
-    ${CMAKE_SOURCE_DIR}/src/game/weapons.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud_message.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud.c)
-  target_include_directories(test_local_mp_actor_native PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/player.c
+    ${PROJECT_SOURCE_DIR}/src/game/mazescrn.c
+    ${PROJECT_SOURCE_DIR}/src/game/weapons.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud_message.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud.c)
+  target_include_directories(test_local_mp_actor_native PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_actor_native PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_actor_native PRIVATE
     AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE=1
@@ -206,8 +227,9 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_amp_native
     tests/test_local_mp_amp_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c)
-  target_include_directories(test_local_mp_amp_native PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    tests/test_amp_link_stubs_r253.c
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c)
+  target_include_directories(test_local_mp_amp_native PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_amp_native PRIVATE avp_local_multiplayer)
   target_compile_definitions(test_local_mp_amp_native PRIVATE AVP_LOCAL_MULTIPLAYER_AMP_BRIDGE=1)
   target_compile_options(test_local_mp_amp_native PRIVATE
@@ -217,10 +239,11 @@ if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   # with the optional read-only bitmap validator wired in, and then removed.
   add_executable(test_game_micro_amp_scope
     tests/test_local_mp_amp_native.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c
-    ${CMAKE_SOURCE_DIR}/new/game_micro_optimization/amp_free_list.c)
+    tests/test_amp_link_stubs_r253.c
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c
+    ${PROJECT_SOURCE_DIR}/new/game_micro_optimization/amp_free_list.c)
   target_include_directories(test_game_micro_amp_scope PRIVATE
-    ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/new/game_micro_optimization)
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/game_micro_optimization)
   target_link_libraries(test_game_micro_amp_scope PRIVATE avp_local_multiplayer)
   target_compile_definitions(test_game_micro_amp_scope PRIVATE
     AVP_LOCAL_MULTIPLAYER_AMP_BRIDGE=1 AVP_TEST_FAST_AMP_VALIDATOR=1)
@@ -230,12 +253,13 @@ if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   # R14: benchmark actual original AMP capture with R13 bitmap validation
   # and new opt-in direct destination capture, on the same live state.
   add_executable(bench_game_micro_amp_capture
-    ${CMAKE_SOURCE_DIR}/new/game_micro_optimization/tests/bench_amp_capture.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c
-    ${CMAKE_SOURCE_DIR}/new/game_micro_optimization/amp_free_list.c)
+    ${PROJECT_SOURCE_DIR}/new/game_micro_optimization/tests/bench_amp_capture.c
+    tests/test_amp_link_stubs_r253.c
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c
+    ${PROJECT_SOURCE_DIR}/new/game_micro_optimization/amp_free_list.c)
   target_include_directories(bench_game_micro_amp_capture PRIVATE
-    ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/new/multiplayer
-    ${CMAKE_SOURCE_DIR}/new/game_micro_optimization)
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/multiplayer
+    ${PROJECT_SOURCE_DIR}/new/game_micro_optimization)
   target_link_libraries(bench_game_micro_amp_capture PRIVATE avp_local_multiplayer)
   target_compile_definitions(bench_game_micro_amp_capture PRIVATE
     AVP_LOCAL_MULTIPLAYER_AMP_BRIDGE=1)
@@ -252,15 +276,15 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_native_context
     tests/test_local_mp_native_context.c
-    ${CMAKE_SOURCE_DIR}/src/game/player.c
-    ${CMAKE_SOURCE_DIR}/src/game/mazescrn.c
-    ${CMAKE_SOURCE_DIR}/src/game/weapons.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c
-    ${CMAKE_SOURCE_DIR}/src/game/collision.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud_message.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud.c)
-  target_include_directories(test_local_mp_native_context PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/player.c
+    ${PROJECT_SOURCE_DIR}/src/game/mazescrn.c
+    ${PROJECT_SOURCE_DIR}/src/game/weapons.c
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c
+    ${PROJECT_SOURCE_DIR}/src/game/collision.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud_message.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud.c)
+  target_include_directories(test_local_mp_native_context PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_native_context PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_native_context PRIVATE
     AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE=1
@@ -279,15 +303,15 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_native_backend
     tests/test_local_mp_native_backend.c
-    ${CMAKE_SOURCE_DIR}/src/game/player.c
-    ${CMAKE_SOURCE_DIR}/src/game/mazescrn.c
-    ${CMAKE_SOURCE_DIR}/src/game/weapons.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c
-    ${CMAKE_SOURCE_DIR}/src/game/collision.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud_message.c
-    ${CMAKE_SOURCE_DIR}/src/game/hud.c)
-  target_include_directories(test_local_mp_native_backend PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/player.c
+    ${PROJECT_SOURCE_DIR}/src/game/mazescrn.c
+    ${PROJECT_SOURCE_DIR}/src/game/weapons.c
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c
+    ${PROJECT_SOURCE_DIR}/src/game/collision.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud_message.c
+    ${PROJECT_SOURCE_DIR}/src/game/hud.c)
+  target_include_directories(test_local_mp_native_backend PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_native_backend PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_native_backend PRIVATE
     AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE=1
@@ -306,8 +330,8 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_player_step
     tests/test_local_mp_player_step.c
-    ${CMAKE_SOURCE_DIR}/src/game/player.c)
-  target_include_directories(test_local_mp_player_step PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/player.c)
+  target_include_directories(test_local_mp_player_step PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_link_libraries(test_local_mp_player_step PRIVATE avp_local_multiplayer m)
   target_compile_definitions(test_local_mp_player_step PRIVATE AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE=1)
   target_compile_options(test_local_mp_player_step PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
@@ -316,7 +340,7 @@ endif()
 
 # RE26 S68: option-scoped Marine shotgun starting loadout (no ROM needed).
 add_executable(test_pc_marine_start_shotgun tests/test_pc_marine_start_shotgun.c)
-target_include_directories(test_pc_marine_start_shotgun PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(test_pc_marine_start_shotgun PRIVATE ${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_pc_marine_start_shotgun PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -329,7 +353,7 @@ if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 add_executable(test_local_mp_respawn_policy tests/test_local_mp_respawn_policy.c local_mp_respawn_policy.c)
-target_include_directories(test_local_mp_respawn_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_respawn_policy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_respawn_policy PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -346,7 +370,7 @@ endif()
 # and that the exact existing single-player analog lift chord is preserved.
 add_executable(test_local_mp_ambient_policy tests/test_local_mp_ambient_policy.c)
 target_include_directories(test_local_mp_ambient_policy PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_ambient_policy PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -354,7 +378,7 @@ endif()
 # Corpse artwork, death-SFX identity and isolated-world persistence contract.
 add_executable(test_local_mp_corpses tests/test_local_mp_corpses.c)
 target_link_libraries(test_local_mp_corpses PRIVATE avp_local_multiplayer)
-target_include_directories(test_local_mp_corpses PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_corpses PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_corpses PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -364,8 +388,10 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_queen_campaign
     tests/test_local_mp_queen_campaign.c
-    ${CMAKE_SOURCE_DIR}/src/game/amp.c)
-  target_include_directories(test_local_mp_queen_campaign PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/amp.c
+    tests/test_amp_link_stubs_r253.c
+    tests/test_local_mp_queen_link_stubs_r254.c)
+  target_include_directories(test_local_mp_queen_campaign PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_queen_campaign PRIVATE
     -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_queen_campaign PRIVATE -Wl,--gc-sections)
@@ -373,7 +399,7 @@ endif()
 
 # S81: visual-only native Jaguar AMP attack frame selection; no physics changes.
 add_executable(test_local_mp_sprite_pose tests/test_local_mp_sprite_pose.c)
-target_include_directories(test_local_mp_sprite_pose PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_sprite_pose PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_sprite_pose PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -382,8 +408,8 @@ endif()
 # GC discards unrelated GPU entry points from this no-ROM source unit.
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_marine_sprite_facing
-    ${CMAKE_SOURCE_DIR}/tests/test_marine_run_facing.c)
-  target_include_directories(test_local_mp_marine_sprite_facing PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/tests/test_marine_run_facing.c)
+  target_include_directories(test_local_mp_marine_sprite_facing PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_marine_sprite_facing PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_marine_sprite_facing PRIVATE -Wl,--gc-sections)
   target_link_libraries(test_local_mp_marine_sprite_facing PRIVATE m)
@@ -393,15 +419,15 @@ endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_automap_history
     tests/test_local_mp_automap_history.c
-    ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/automap.c
-    ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/state.c)
-  target_include_directories(test_local_mp_automap_history PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/automap.c
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/state.c)
+  target_include_directories(test_local_mp_automap_history PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_automap_history PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_automap_history PRIVATE -Wl,--gc-sections)
 endif()
 
 add_executable(test_local_mp_waveform_proximity tests/test_local_mp_waveform_proximity.c)
-target_include_directories(test_local_mp_waveform_proximity PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_waveform_proximity PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_waveform_proximity PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -409,7 +435,7 @@ endif()
 # Real host projection geometry: default 4:3 path stays original; wide modes
 # increase sampled ray columns while keeping the authored Jaguar HUD centered.
 add_executable(test_widescreen_geometry tests/test_widescreen_geometry.c)
-target_include_directories(test_widescreen_geometry PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_widescreen_geometry PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_widescreen_geometry PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -423,8 +449,8 @@ endif()
 
 # Exercise the original collectible engine with stale world-table selection.
 add_executable(test_local_mp_pickup_levels tests/test_local_mp_pickup_levels.c
-    ${CMAKE_SOURCE_DIR}/src/game/collectables.c)
-target_include_directories(test_local_mp_pickup_levels PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/src/game/collectables.c)
+target_include_directories(test_local_mp_pickup_levels PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_pickup_levels PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -432,7 +458,7 @@ endif()
 # RE28: four independently selected source-command AI slots.
 add_executable(test_local_mp_bot tests/test_local_mp_bot.c)
 target_link_libraries(test_local_mp_bot PRIVATE avp_local_multiplayer)
-target_include_directories(test_local_mp_bot PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_bot PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(NOT WIN32)
   target_link_libraries(test_local_mp_bot PRIVATE m)
 endif()
@@ -440,6 +466,22 @@ if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   # R115: Release builds set NDEBUG; keep routing/door test assertions live.
   target_compile_options(test_local_mp_bot PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 endif()
+
+# RE44 R293: negative-on-R292 reproduction of the acid-adjacent blind
+# recovery spin and of an original wall-margin escape at measured bot XY.
+foreach(case IN ITEMS acid_steering acid_margin)
+  add_executable(test_re44_r293_${case}
+    tests/test_re44_r293_${case}.c)
+  target_link_libraries(test_re44_r293_${case} PRIVATE avp_local_multiplayer)
+  target_include_directories(test_re44_r293_${case} PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  if(NOT WIN32)
+    target_link_libraries(test_re44_r293_${case} PRIVATE m)
+  endif()
+  if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_re44_r293_${case} PRIVATE
+      -Wall -Wextra -Werror -UNDEBUG)
+  endif()
+endforeach()
 
 # RE30 R8: sensory acquisition, 15-m motion tracker and finite contact memory.
 add_executable(test_local_mp_bot_awareness tests/test_local_mp_bot_awareness.c)
@@ -455,15 +497,15 @@ endif()
 # interpolation, never the original 10-Hz Marine scanner coordinates.
 add_executable(test_local_mp_automap_dots_smooth
   tests/test_local_mp_automap_dots_smooth.c
-  ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/presentation_interp.c)
-target_include_directories(test_local_mp_automap_dots_smooth PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/presentation_interp.c)
+target_include_directories(test_local_mp_automap_dots_smooth PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_automap_dots_smooth PRIVATE -Wall -Wextra -Werror)
 endif()
 
 # RE30 R16: player contacts on the original Marine scanner in all local modes.
 add_executable(test_local_mp_tracker_peers tests/test_local_mp_tracker_peers.c)
-target_include_directories(test_local_mp_tracker_peers PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_tracker_peers PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(NOT WIN32)
   target_link_libraries(test_local_mp_tracker_peers PRIVATE m)
 endif()
@@ -475,7 +517,7 @@ endif()
 # Discard unrelated renderer sections to keep the test self-contained.
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_tracker_renderer tests/test_local_mp_tracker_renderer.c)
-  target_include_directories(test_local_mp_tracker_renderer PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  target_include_directories(test_local_mp_tracker_renderer PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_tracker_renderer PRIVATE
     -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_tracker_renderer PRIVATE -Wl,--gc-sections)
@@ -485,17 +527,17 @@ endif()
 # RE29 S112: authored vent/lift world-graph routing and jammed storage escape.
 add_executable(test_local_mp_bot_levels tests/test_local_mp_bot_levels.c)
 target_link_libraries(test_local_mp_bot_levels PRIVATE avp_local_multiplayer m)
-target_include_directories(test_local_mp_bot_levels PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_bot_levels PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_bot_levels PRIVATE -Wall -Wextra -Werror)
 endif()
 if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_bot_retail_graph
     tests/test_local_mp_bot_retail_graph.c
-    ${CMAKE_SOURCE_DIR}/src/jaguar/avp_resources/retail_resources.c
-    ${CMAKE_SOURCE_DIR}/src/game/doors.c)
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_resources/retail_resources.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c)
   target_link_libraries(test_local_mp_bot_retail_graph PRIVATE avp_local_multiplayer ZLIB::ZLIB m)
-  target_include_directories(test_local_mp_bot_retail_graph PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  target_include_directories(test_local_mp_bot_retail_graph PRIVATE ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_bot_retail_graph PRIVATE
     -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_bot_retail_graph PRIVATE -Wl,--gc-sections)
@@ -503,7 +545,7 @@ endif()
 
 add_executable(test_local_mp_dm_loot tests/test_local_mp_dm_loot.c)
 target_link_libraries(test_local_mp_dm_loot PRIVATE avp_local_multiplayer)
-target_include_directories(test_local_mp_dm_loot PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_dm_loot PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_dm_loot PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -520,9 +562,9 @@ endif()
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_executable(test_local_mp_kill_notice_raster
     tests/test_local_mp_kill_notice_raster.c
-    ${CMAKE_SOURCE_DIR}/src/jaguar/avp_gpu/software_renderer.c)
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_gpu/software_renderer.c)
   target_include_directories(test_local_mp_kill_notice_raster PRIVATE
-    ${CMAKE_SOURCE_DIR}/include)
+    ${PROJECT_SOURCE_DIR}/include)
   target_compile_options(test_local_mp_kill_notice_raster PRIVATE
     -ffunction-sections -fdata-sections -Wall -Wextra -Werror)
   target_link_options(test_local_mp_kill_notice_raster PRIVATE -Wl,--gc-sections)
@@ -532,13 +574,13 @@ endif()
 # R42: species-dependent ink applies to ALL original HUD_MSG popups;
 # their original zero-ink blink phases are never colored over.
 add_executable(test_local_mp_popup_ink tests/test_local_mp_popup_ink.c)
-target_include_directories(test_local_mp_popup_ink PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_popup_ink PRIVATE ${PROJECT_SOURCE_DIR}/include)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_popup_ink PRIVATE -Wall -Wextra -Werror)
 endif()
 
 add_executable(test_local_mp_deathmatch tests/test_local_mp_deathmatch.c)
-target_include_directories(test_local_mp_deathmatch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_deathmatch PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(test_local_mp_deathmatch PRIVATE avp_local_multiplayer)
 if(AVP_STRICT)
   target_compile_options(test_local_mp_deathmatch PRIVATE -Wall -Wextra -Werror)
@@ -546,7 +588,7 @@ endif()
 
 # PC-only bot stereo spatialization contract (uses the original contact range).
 add_executable(test_local_mp_spatial_audio tests/test_local_mp_spatial_audio.c)
-target_include_directories(test_local_mp_spatial_audio PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_local_mp_spatial_audio PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(test_local_mp_spatial_audio PRIVATE m)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_spatial_audio PRIVATE -Wall -Wextra -Werror)
@@ -556,7 +598,7 @@ endif()
 # its original path; P2-P4 use the same buffered tick semantics).
 add_executable(test_local_mp_enhancement_buffer tests/test_enhancement_buffer.c)
 target_include_directories(test_local_mp_enhancement_buffer PRIVATE
-    ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/new/multiplayer)
+    ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/multiplayer)
 if(NOT MSVC)
   target_compile_options(test_local_mp_enhancement_buffer PRIVATE -Wall -Wextra -Werror)
 endif()
@@ -574,4 +616,80 @@ add_executable(test_local_mp_guerilla_fire_r84 tests/test_local_mp_guerilla_fire
 target_link_libraries(test_local_mp_guerilla_fire_r84 PRIVATE avp_local_multiplayer m)
 if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(test_local_mp_guerilla_fire_r84 PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
+# RE37 R122 research-only experiment: remove original retail padding from
+# temporary in-memory COPIES; original ROM and decoded source stay untouched.
+if(UNIX AND NOT APPLE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  add_executable(test_re37_border_removal
+    tests/test_re37_border_removal.c
+    ${PROJECT_SOURCE_DIR}/new/jaguar/avp_resources/retail_resources.c
+    ${PROJECT_SOURCE_DIR}/src/game/collision.c
+    ${PROJECT_SOURCE_DIR}/src/game/doors.c
+    ${PROJECT_SOURCE_DIR}/src/game/levels.c)
+  target_include_directories(test_re37_border_removal PRIVATE ${PROJECT_SOURCE_DIR}/include)
+  target_link_libraries(test_re37_border_removal PRIVATE avp_local_multiplayer ZLIB::ZLIB)
+  target_compile_options(test_re37_border_removal PRIVATE -ffunction-sections -fdata-sections -Wall -Wextra -Werror -UNDEBUG)
+  target_link_options(test_re37_border_removal PRIVATE -Wl,--gc-sections)
+endif()
+
+# R204: ensure P1..P36 scoreboard rows never disappear offscreen.
+add_executable(test_local_mp_scoreboard_layout_r204
+  tests/test_local_mp_scoreboard_layout_r204.c)
+target_include_directories(test_local_mp_scoreboard_layout_r204 PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})
+if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(test_local_mp_scoreboard_layout_r204 PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME local_mp_scoreboard_layout_r204
+  COMMAND test_local_mp_scoreboard_layout_r204)
+
+# RE44 R288: 3,952 multi-tick acid corridor / co-op rescue route trials.
+# Uses a command-to-position proxy; native collision/damage are not replaced.
+add_executable(test_r288_acid_crossing tests/test_r288_acid_crossing.c)
+target_link_libraries(test_r288_acid_crossing PRIVATE avp_local_multiplayer)
+target_include_directories(test_r288_acid_crossing PRIVATE ${PROJECT_SOURCE_DIR}/include)
+if(NOT WIN32)
+  target_link_libraries(test_r288_acid_crossing PRIVATE m)
+endif()
+if(AVP_STRICT AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(test_r288_acid_crossing PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
+# R481: include the recent focused bot fixtures in the normal CTest sweep.
+if(UNIX AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  foreach(bot_test IN ITEMS r478_peer_precision r479_progress_duct r480_travel_detour r484_objective_idle r487_acid_objective r488_acid_destination r489_objective_loop r492_peer_melee r497_tactical_travel r500_tactical_acid r501_tactical_progress r502_predator_cloak)
+    add_executable(test_${bot_test} tests/test_${bot_test}.c local_mp_bot.c)
+    target_include_directories(test_${bot_test} PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/pc_host/include ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(test_${bot_test} PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
+    target_link_options(test_${bot_test} PRIVATE -Wl,--gc-sections)
+    target_link_libraries(test_${bot_test} PRIVATE m)
+    add_test(NAME ${bot_test} COMMAND test_${bot_test})
+  endforeach()
+  add_executable(test_r494_peer_unblock tests/test_r494_peer_unblock.c)
+  target_include_directories(test_r494_peer_unblock PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/pc_host/include ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_options(test_r494_peer_unblock PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
+  target_link_options(test_r494_peer_unblock PRIVATE -Wl,--gc-sections)
+  target_link_libraries(test_r494_peer_unblock PRIVATE m)
+  add_test(NAME r494_peer_unblock COMMAND test_r494_peer_unblock)
+  add_executable(test_r478_peer_clearance tests/test_r478_peer_clearance.c)
+  target_include_directories(test_r478_peer_clearance PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/pc_host/include ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_options(test_r478_peer_clearance PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
+  target_link_options(test_r478_peer_clearance PRIVATE -Wl,--gc-sections)
+  target_link_libraries(test_r478_peer_clearance PRIVATE m)
+  add_test(NAME r478_peer_clearance COMMAND test_r478_peer_clearance)
+  foreach(host_test IN ITEMS r479_dm_airlock r480_supply_arrival r482_healing r493_corpse_supply r495_supply_commit r499_door_occupancy)
+    add_executable(test_${host_test} tests/test_${host_test}.c)
+    target_include_directories(test_${host_test} PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/new/pc_host/include ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(test_${host_test} PRIVATE AVP_LOCAL_MULTIPLAYER=1 AVP_LOCAL_MULTIPLAYER_AUDIO_BRIDGE=1 AVP_LOCAL_MULTIPLAYER_DOOR_BRIDGE=1)
+    target_compile_options(test_${host_test} PRIVATE -UNDEBUG -ffunction-sections -fdata-sections)
+    target_link_options(test_${host_test} PRIVATE -Wl,--gc-sections)
+    target_link_libraries(test_${host_test} PRIVATE avp_local_multiplayer m)
+    add_test(NAME ${host_test} COMMAND test_${host_test})
+  endforeach()
+  target_sources(test_r480_supply_arrival PRIVATE ${PROJECT_SOURCE_DIR}/src/game/collectables.c)
+  target_sources(test_r493_corpse_supply PRIVATE ${PROJECT_SOURCE_DIR}/src/game/collectables.c)
+  target_sources(test_r495_supply_commit PRIVATE ${PROJECT_SOURCE_DIR}/src/game/collectables.c)
 endif()

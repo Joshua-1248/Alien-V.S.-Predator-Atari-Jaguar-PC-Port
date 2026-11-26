@@ -16,11 +16,7 @@ typedef void (*AvpWeaponNoticeFn)(enum AvpWeaponNotice notice);
 typedef void (*AvpWeaponSfxFn)(unsigned cue);
 
 void InitPredAvail(void);
-void avp_weapons_cycle(int direction,int maxslot);
 void PredAvail(void);
-/* Deathmatch-only loadout: disable honour-based combat weapon revocation
- * while this Predator actor is scoped; NULL/default preserves retail logic. */
-void avp_weapons_mp_predator_deathmatch(int enabled);
 void avp_weapons_set_callbacks(AvpWeaponNoticeFn notice,AvpWeaponSfxFn sfx);
 
 extern u8 cur_weps,old_weps;

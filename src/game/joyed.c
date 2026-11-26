@@ -9,15 +9,12 @@ void MoveData(JoyEditRecord *item,const void *edited_object) {
     u32 step=(u16)item->magnitude;
     unsigned shift=(unsigned)((u8)(6u-((const u8*)item)[control_off])) & 31u;
     step=(step>>shift)<<3;
-    /* The original 68000 ADD/SUB operations on the editor's longword
-     * wrap modulo 2^32.  Keep that register behavior without signed-C
-     * overflow at the extremes of the editable value. */
-    u32 v=(u32)item->value; u32 edge=joy_edge;
-    if ((edge&(1u<<20))==0u) v-=step;
-    if ((edge&(1u<<21))==0u) v+=step;
+    s32 v=item->value; u32 edge=joy_edge;
+    if ((edge&(1u<<20))==0u) v-=(s32)step;
+    if ((edge&(1u<<21))==0u) v+=(s32)step;
     if ((edge&(1u<<22))==0u) --v;
     if ((edge&(1u<<23))==0u) ++v;
-    item->value=v<=INT32_MAX?(s32)v:(s32)((int64_t)v-INT64_C(4294967296));
+    item->value=v;
 }
 void MoveXYFromJoy(JoyEditRecord *item) {
     u32 cur=joy_cur; s16 x=item->x,y=item->y;

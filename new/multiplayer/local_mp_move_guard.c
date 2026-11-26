@@ -33,23 +33,23 @@ int avp_mp_move_guard_peers(const AvpMpPeerCollisionView *view,
     return 1;
 }
 void avp_mp_peer_grace_update(AvpMpPeerGrace *grace,
-    uint32_t present_mask,const uintptr_t worlds[AVP_MP_PEER_COUNT],
+    AvpMpActorMask present_mask,const uintptr_t worlds[AVP_MP_PEER_COUNT],
     const uint32_t x[AVP_MP_PEER_COUNT],const uint32_t y[AVP_MP_PEER_COUNT],
-    uint32_t arriving_mask)
+    AvpMpActorMask arriving_mask)
 {
     if(!grace||!worlds||!x||!y)return;
     for(unsigned p=0;p<AVP_MP_PEER_COUNT;p++)
       for(unsigned q=p+1u;q<AVP_MP_PEER_COUNT;q++){
-        const int both=(present_mask&(1u<<p)) && (present_mask&(1u<<q));
+        const int both=(present_mask&(AVP_MP_ACTOR_BIT(p))) && (present_mask&(AVP_MP_ACTOR_BIT(q)));
         const int nearby=both && worlds[p] && worlds[p]==worlds[q] &&
             (int64_t)llabs((long long)(int32_t)x[p]-(int32_t)x[q])<AVP_MP_PEER_CLEARANCE &&
             (int64_t)llabs((long long)(int32_t)y[p]-(int32_t)y[q])<AVP_MP_PEER_CLEARANCE;
         if(!nearby){
-            grace->ignore[p]&=(uint16_t)~(1u<<q);
-            grace->ignore[q]&=(uint16_t)~(1u<<p);
-        }else if(arriving_mask&((1u<<p)|(1u<<q))){
-            grace->ignore[p]|=(uint16_t)(1u<<q);
-            grace->ignore[q]|=(uint16_t)(1u<<p);
+            grace->ignore[p]&=~(AVP_MP_ACTOR_BIT(q));
+            grace->ignore[q]&=~(AVP_MP_ACTOR_BIT(p));
+        }else if(arriving_mask&((AVP_MP_ACTOR_BIT(p))|(AVP_MP_ACTOR_BIT(q)))){
+            grace->ignore[p]|=(AVP_MP_ACTOR_BIT(q));
+            grace->ignore[q]|=(AVP_MP_ACTOR_BIT(p));
         }
       }
 }
@@ -57,7 +57,7 @@ int avp_mp_peer_grace_exempt(const AvpMpPeerGrace *g,
                              unsigned p,unsigned q)
 {
     return g&&p<AVP_MP_PEER_COUNT&&q<AVP_MP_PEER_COUNT&&p!=q&&
-      (g->ignore[p]&(1u<<q)) && (g->ignore[q]&(1u<<p));
+      (g->ignore[p]&(AVP_MP_ACTOR_BIT(q))) && (g->ignore[q]&(AVP_MP_ACTOR_BIT(p)));
 }
 static int floor_cell(const uint8_t *cells,unsigned width,unsigned height,
                       int64_t x,int64_t y)

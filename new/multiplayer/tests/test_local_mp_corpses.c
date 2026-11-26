@@ -36,7 +36,17 @@ int main(void)
     CHECK(!avp_mp_corpse_claim_at(c,14,8u,0x12340000,0x56780000));
     CHECK(avp_mp_corpse_claim_at(c,14,15u,0x12340000,0x56780000));
     CHECK(!avp_mp_corpse_claim_at(c,14,15u,0x12340000,0x56780000));
+    CHECK(avp_mp_corpse_claim_at(c,14,16u,0x12340000,0x56780000));
     CHECK(!avp_mp_corpse_claim_at(c,14,16u,0x12340000,0x56780000));
+    CHECK(avp_mp_corpse_claim_at(c,14,19u,0x12340000,0x56780000));
+    CHECK(!avp_mp_corpse_claim_at(c,14,19u,0x12340000,0x56780000));
+    CHECK(avp_mp_corpse_claim_at(c,14,20u,0x12340000,0x56780000));
+    CHECK(!avp_mp_corpse_claim_at(c,14,20u,0x12340000,0x56780000));
+    CHECK(avp_mp_corpse_claim_at(c,14,32u,0x12340000,0x56780000));
+    CHECK(!avp_mp_corpse_claim_at(c,14,32u,0x12340000,0x56780000));
+    CHECK(avp_mp_corpse_claim_at(c,14,35u,0x12340000,0x56780000));
+    CHECK(!avp_mp_corpse_claim_at(c,14,35u,0x12340000,0x56780000));
+    CHECK(!avp_mp_corpse_claim_at(c,14,36u,0x12340000,0x56780000));
     CHECK(!avp_mp_corpse_claim_at(c,15,0u,0x12340000,0x56780000));
     CHECK(avp_mp_corpses_for_level(c,14,10,draw,AVP_GPU_OTHER_PLAYERS_MAX)==2);
     CHECK(draw[0].creature==AC_HUMAN && draw[0].animation==AS_DEATH && draw[0].frame==0);

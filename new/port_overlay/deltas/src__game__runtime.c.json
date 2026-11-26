@@ -1,0 +1,12 @@
+{
+  "path": "src/game/runtime.c",
+  "base_sha256": "96d4db4c854c18f5f3bc1dfd3a70fb3c15f002581ee9e12833cc1162a2784ee5",
+  "output_sha256": "750bede79b8ee95d3141e3eb1181e25ba026c903308af3bc2c9b4a048ea35dee",
+  "edits": [
+    {
+      "start": 6,
+      "end": 6,
+      "replacement": "/* MUSIC.o FXFadeDo/FXFadeUp ($9A5C/$9A80) chain their step routine into the\n * VBlank handler ($2EE80): the master-volume fade advances on EVERY VBlank,\n * concurrently with whatever the 68000 is doing, not only inside WaitFXFa. */\nstatic void (*g_fx_vblank)(void);\nvoid avp_runtime_set_fx_vblank(void (*fn)(void)){ g_fx_vblank=fn; }\nvoid avp_runtime_fx_vblank(void){ if(g_fx_vblank) g_fx_vblank(); }\n"
+    }
+  ]
+}

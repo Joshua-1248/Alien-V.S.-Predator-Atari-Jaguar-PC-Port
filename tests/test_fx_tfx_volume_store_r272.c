@@ -3,7 +3,7 @@
  * (MJP Do_Escape passes $2600) replaces a sampler's module volume word.
  * Synthetic descriptors only; no retail ROM or audio data. */
 #define _DEFAULT_SOURCE 1
-#include "../src/jaguar/host/fullsynth_host.c"
+#include "../new/jaguar/host/fullsynth_host.c"
 #include <assert.h>
 
 static u8 rdb[16384],dsp_text[0x4000];

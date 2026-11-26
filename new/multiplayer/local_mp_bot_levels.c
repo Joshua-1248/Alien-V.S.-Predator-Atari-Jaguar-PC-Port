@@ -68,7 +68,8 @@ static int source_airlock(const AvpMpBotLevelLayout *l,
         if(y+1u>=m->height)return 0;
         offset=((y+1u)*m->width+x)*8u+7u;break;
     }
-    if(m->cells[offset])return 0; /* access_ok bypasses closed-door test. */
+    /* A currently open door is still a VALID authored transition for
+     * planning. Source DOORS.S enforces CLOSED interlocks at actual Use. */
     for(size_t j=0;j<l->meta->access_count;j++)
         if(l->meta->access[j].door_offset==offset &&
            l->meta->access[j].code==AVP_ACC_EXIT){found_exit=1;break;}
@@ -77,8 +78,7 @@ static int source_airlock(const AvpMpBotLevelLayout *l,
         const AvpDoorInterlockEntry *ie=&l->meta->interlocks[j];
         if(ie->door_offset!=offset)continue;
         for(size_t k=0;k<ie->required_count;k++)
-            if(ie->required_offsets[k]>=m->width*m->height*8u ||
-               m->cells[ie->required_offsets[k]])return 0;
+            if(ie->required_offsets[k]>=m->width*m->height*8u)return 0;
         return 1;
     }
     return 0; /* airlock_exit rejects a missing authored interlock. */
@@ -105,20 +105,23 @@ static int add_portal(BotPortal *p,unsigned *count,
     return 1;
 }
 
-int avp_mp_bot_plan_levels(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
+int avp_mp_bot_plan_levels_avoiding(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
     unsigned species,unsigned current,unsigned sx,unsigned sy,
     unsigned goal_level,unsigned gx,unsigned gy,int goal_known,
-    AvpMpBotLevelPlan *out)
+    const AvpMpBotLevelPlan *avoid_first,AvpMpBotLevelPlan *out)
 {
     uint16_t *components=NULL;
     BotPortal *portals=NULL;
     BotVisit visits[PORTAL_LIMIT+1u];
     unsigned portal_count=0,head=0,tail=0,first=UINT16_MAX;
+    uint32_t best_direct_cost=UINT32_MAX;
+    unsigned matched_goal=0u;
     uint16_t begin,goal=0u;
     int success=0;
     if(out)memset(out,0,sizeof *out);
     if(!out||!layouts||species>2u||current<1u||current>AVP_MAX_LEVEL||
-       goal_level<1u||goal_level>AVP_MAX_LEVEL)return 0;
+       goal_level>AVP_MAX_LEVEL ||
+       (!goal_level && (goal_known || current<6u || current>13u)))return 0;
     components=(uint16_t*)calloc((size_t)AVP_MAX_LEVEL*CELLS,sizeof *components);
     portals=(BotPortal*)calloc(PORTAL_LIMIT,sizeof *portals);
     if(!components||!portals)goto done;
@@ -133,7 +136,7 @@ int avp_mp_bot_plan_levels(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
     if(!begin||(goal_known&&!goal))goto done;
     /* This is a cross-region/level planner, not a replacement for the
      * ordinary single-level costed route. */
-    if(current==goal_level&&(!goal_known||begin==goal))goto done;
+    if(goal_level && current==goal_level&&(!goal_known||begin==goal))goto done;
     for(unsigned level=1u;level<=AVP_MAX_LEVEL;level++){
         const AvpMpBotLevelLayout *l=&layouts[level-1u];
         const AvpMpBotMap *m=&l->map;
@@ -186,10 +189,33 @@ int avp_mp_bot_plan_levels(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
             unsigned j,seen=0;
             uint16_t route_first;
             if(p->from!=state.level||p->src_comp!=state.component)continue;
+            /* A failed door or jammed route gets one alternative. This is a
+             * PC bot path exclusion, not an override of Jaguar DOORS.S. */
+            if(state.first==UINT16_MAX && avoid_first &&
+               p->from==avoid_first->from_level &&
+               p->to==avoid_first->to_level && p->x==avoid_first->x &&
+               p->y==avoid_first->y && p->side==avoid_first->side)continue;
             route_first=state.first==UINT16_MAX?(uint16_t)i:state.first;
-            if(p->to==goal_level&&(!goal_known||p->dst_comp==goal)){
+            if((goal_level ? p->to==goal_level &&
+                    (!goal_known||p->dst_comp==goal) :
+                    (p->to<=5u || p->to>=14u))){
+                if(!goal_level && state.first==UINT16_MAX){
+                    AvpMpBotRoute local={0};
+                    /* For several exits from the SAME vent choose the
+                     * shortest source-legal walking route, not whichever
+                     * LEVDOOR record happens to occur first in the ROM. */
+                    if(!avp_mp_bot_route(&layouts[current-1u].map,
+                                      sx,sy,p->x,p->y,&local))continue;
+                    if(local.cost<best_direct_cost){
+                        best_direct_cost=local.cost;
+                        first=route_first;matched_goal=p->to;
+                        out->hops=1u;success=1;
+                    }
+                    continue;
+                }
+                if(success && !goal_level)continue; /* Prefer a direct exit. */
                 first=route_first;out->hops=(unsigned)state.hops+1u;
-                success=1;goto done;
+                matched_goal=p->to;success=1;goto done;
             }
             for(j=0;j<tail;j++)if(visits[j].level==p->to &&
                                        visits[j].component==p->dst_comp){seen=1;break;}
@@ -206,7 +232,19 @@ done:
         out->x=p->x;out->y=p->y;out->side=p->side;
         out->landing_x=p->landing_x;out->landing_y=p->landing_y;
         out->kind=(enum AvpMpBotTransitionKind)p->kind;
+        out->goal_level=matched_goal;
     }else success=0;
     free(components);free(portals);
     return success;
+}
+
+/* Existing campaign/co-op callers keep their original signature and
+ * behavior. Only R125 Deathmatch travel uses the optional failed exit. */
+int avp_mp_bot_plan_levels(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
+    unsigned species,unsigned current,unsigned sx,unsigned sy,
+    unsigned goal_level,unsigned gx,unsigned gy,int goal_known,
+    AvpMpBotLevelPlan *out)
+{
+    return avp_mp_bot_plan_levels_avoiding(layouts,species,current,
+         sx,sy,goal_level,gx,gy,goal_known,NULL,out);
 }

@@ -20,6 +20,26 @@ int main(void)
     assert(avp_computer_first_aid()==1 && player_energy==750);
     player_energy=300;acs_level=4;
     assert(avp_computer_first_aid()==1 && player_energy==500);
+    /* R283: source-authored medical panels exist on Levels 2 and 4.
+     * General/armoury/pod panels must never be eligible for bot aid. */
+    avp_computer_bind_retail_terminals();
+    assert(avp_computer_medical_terminals(1u,NULL,0u)==0u);
+    assert(avp_computer_medical_terminals(2u,NULL,0u)==4u);
+    assert(avp_computer_medical_terminals(3u,NULL,0u)==0u);
+    assert(avp_computer_medical_terminals(4u,NULL,0u)==7u);
+    assert(avp_computer_medical_terminals(5u,NULL,0u)==0u);
+    assert(avp_computer_is_medical_terminal(2u,4113u));
+    assert(avp_computer_is_medical_terminal(4u,12873u));
+    assert(!avp_computer_is_medical_terminal(2u,4200u));
+    assert(!avp_computer_is_medical_terminal(5u,27275u));
+    assert(!avp_computer_is_medical_terminal(1u,4113u));
+    assert(avp_computer_first_aid_ceiling(3u)==0);
+    assert(avp_computer_first_aid_ceiling(4u)==500);
+    assert(avp_computer_first_aid_ceiling(7u)==750);
+    assert(avp_computer_first_aid_ceiling(10u)==1000);
+    assert(avp_computer_first_aid_ceiling(11u)==0);
+    player_energy=550;acs_level=4;
+    assert(avp_computer_first_aid()==0 && player_energy==550);
     acs_level=10;
     assert(avp_computer_can_destruct(&content));
     avp_computer_arm_destruct();

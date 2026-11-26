@@ -69,6 +69,33 @@ int main(void)
     assert(avp_mp_kill_notice_active(&notices[2],635u,&other)==AVP_MP_NOTICE_NONE);
     avp_mp_kill_notice_reset(&notices[2]);
     assert(avp_mp_kill_notice_active(&notices[2],1u,&other)==AVP_MP_NOTICE_NONE);
-    puts("R42 local deathmatch 2-way flashing HUD notifications: PASS");
+    /* R204: real 36-slot bot victims must not be rejected before rendering. */
+    for(unsigned victim=16u;victim<36u;victim++){
+        avp_mp_kill_notice_record(notices,4u,36u,0u,victim,650u);
+        assert(avp_mp_kill_notice_active(&notices[0],650u,&other)==
+               AVP_MP_NOTICE_KILLED && other==victim+1u);
+    }
+    /* R204: with P1 spying on P3, P1's HUD must still show P1's kill
+     * against P2, not P3's independent kill notice or a blank P3 HUD. */
+    memset(notices,0,sizeof notices);
+    avp_mp_kill_notice_record(notices,4u,16u,0u,1u,700u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,0u,700u,&other)==
+           AVP_MP_NOTICE_KILLED && other==2u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,2u,700u,&other)==
+           AVP_MP_NOTICE_NONE); /* viewed P3 has no notification */
+    avp_mp_kill_notice_record(notices,4u,16u,2u,3u,701u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,0u,702u,&other)==
+           AVP_MP_NOTICE_KILLED && other==2u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,2u,702u,&other)==
+           AVP_MP_NOTICE_KILLED && other==4u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,0u,705u,&other)==
+           AVP_MP_NOTICE_NONE); /* retain intentional half-second flash */
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,0u,710u,&other)==
+           AVP_MP_NOTICE_KILLED && other==2u);
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,4u,4u,702u,&other)==
+           AVP_MP_NOTICE_NONE); /* headless bot has no human HUD */
+    assert(avp_mp_kill_notice_visible_for_viewer(notices,0u,0u,702u,&other)==
+           AVP_MP_NOTICE_NONE);
+    puts("R204 local deathmatch 2-way flashing HUD notifications: PASS");
     return 0;
 }

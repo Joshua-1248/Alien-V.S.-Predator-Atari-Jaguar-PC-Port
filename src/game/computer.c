@@ -5,7 +5,6 @@
  * bound by the ROM importer.  CTEXT/CLUT/Object-Processor pixel operations are
  * Jaguar/backend services, not missing 68000 game logic. */
 #include "computer.h"
-#include "avp_sfx_ids.h"
 #include "doors.h"
 #include "font.h"
 #include "joypad.h"
@@ -24,8 +23,6 @@ static const AvpComputerContent *base;
 static unsigned overlay1=(unsigned)-1,overlay2=(unsigned)-1;
 static u8 active;
 
-#include "computer_retail_tables.inc"
-
 static const AvpRuntimeOps *ops(void){return avp_runtime_ops();}
 static int pressed(u32 v,unsigned bit){return (v&(1u<<bit))!=0u;}
 static void event(unsigned e,s32 a,s32 b){const AvpRuntimeOps*o=ops();if(o->frontend_event)o->frontend_event(o->user,e,a,b);}
@@ -35,16 +32,6 @@ void avp_computer_bind_level(unsigned level,const AvpComputerTerminal *r,size_t 
     if(level<1u||level>15u)return;
     level_terms[level-1u]=r;level_term_count[level-1u]=n;
 }
-
-void avp_computer_bind_retail_terminals(void)
-{
-    avp_computer_bind_level(1u,retail_level1_terminals,sizeof(retail_level1_terminals)/sizeof(retail_level1_terminals[0]));
-    avp_computer_bind_level(2u,retail_level2_terminals,sizeof(retail_level2_terminals)/sizeof(retail_level2_terminals[0]));
-    avp_computer_bind_level(3u,retail_level3_terminals,sizeof(retail_level3_terminals)/sizeof(retail_level3_terminals[0]));
-    avp_computer_bind_level(4u,retail_level4_terminals,sizeof(retail_level4_terminals)/sizeof(retail_level4_terminals[0]));
-    avp_computer_bind_level(5u,retail_level5_terminals,sizeof(retail_level5_terminals)/sizeof(retail_level5_terminals[0]));
-}
-int avp_computer_active(void){return active?1:0;}
 
 void cls(void){event(0x434c53u,0,0);}
 void InitComp(void){init_font();}
@@ -87,16 +74,8 @@ static void set_obj1(int id){overlay1=(unsigned)id;SetCObj1();}
 static void set_obj2(int id){overlay2=(unsigned)id;SetCObj2();}
 static void print_page(unsigned n)
 {
-    const AvpRuntimeOps *o=ops();
-    const char *encoded;
-    if(!base||n>=base->pages||!base->page_address||!o->frontend_text)return;
-    encoded=o->frontend_text(o->user,base->page_address[n]);
-    if(encoded){
-        pr_string_retail(encoded,base->page_address[n]);
-        /* Retail COMPUTER.S's encoded A/NEXT B/PREVIOUS C/EXIT label.
-         * Emit as an overlay rather than injecting PC-authored wording. */
-        event(0x50474654u,0,0);
-    }
+    if(!base||n>=base->pages||!base->page||!base->page[n])return;
+    pr_string(base->page[n]);
 }
 static void wait_release(unsigned bit)
 {
@@ -137,30 +116,21 @@ static void page_viewer(void)
  * cycling logic but their picture/text tables are authored resources rather
  * than the per-terminal `base` log pages.  The frontend event identifies the
  * exact source table while C preserves the retail cursor/input state machine. */
-static void fixed_viewer_image(unsigned tag,s16 page)
-{
-    static const int weapon[4]={104,105,106,107}; /* COMPUTER.S::weaptab */
-    static const int creature[6]={117,118,119,120,121,123}; /* creatab */
-    static const int star[6]={124,125,126,124,124,126}; /* creatab */
-    if(tag==0x4152534eu&&page>=0&&page<4){set_obj1(weapon[page]);set_obj2(-1);}
-    else if(tag==0x53504543u&&page>=0&&page<6){set_obj1(creature[page]);set_obj2(star[page]);}
-}
 static void fixed_viewer(unsigned tag,s16 count)
 {
     picount=0;
-    set_obj1(-1);set_obj2(-1);
-    cls();fixed_viewer_image(tag,picount);event(tag,picount,count);
+    cls();event(tag,picount,count);
     for(;;){
         VSync();c_readpad();
         if(pressed(c_joy_edge,FIRE_C))return;
         if(pressed(c_joy_edge,FIRE_A)){
             do{c_readpad();}while(pressed(c_joy_cur,FIRE_A));
             ++picount;if(picount==count)picount=0;
-            cls();fixed_viewer_image(tag,picount);event(tag,picount,count);
+            cls();event(tag,picount,count);
         }else if(pressed(c_joy_edge,FIRE_B)){
             do{c_readpad();}while(pressed(c_joy_cur,FIRE_B));
             --picount;if(picount<0)picount=(s16)(count-1);
-            cls();fixed_viewer_image(tag,picount);event(tag,picount,count);
+            cls();event(tag,picount,count);
         }else cursor();
     }
 }
@@ -183,7 +153,7 @@ int avp_computer_can_destruct(const AvpComputerContent *content)
 void avp_computer_arm_destruct(void)
 {
     destruct_flag=1;
-    const AvpRuntimeOps *o=ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_SELFD); /* selfdest */
+    const AvpRuntimeOps *o=ops();if(o->play_sfx)o->play_sfx(o->user,0); /* selfdest */
 }
 int avp_computer_launch_pod(void)
 {
@@ -198,9 +168,6 @@ static void scheme(void)
      * remains until C.  Image lookup itself is resource data. */
     do{c_readpad();}while((c_joy_cur&0xffffu)!=0u);
     cls();
-    /* Shipping COMPUTER.S::maplist: mapi_cmp..mapv_cmp.  Those five
-       file symbols are retail FILES records 128..132 in RDB.DTA. */
-    if(cur_level>=1&&cur_level<=5)set_obj1(127+(int)cur_level);
     event(0x5343484du,cur_level,0);
     for(;;){VSync();c_readpad();if(pressed(c_joy_edge,FIRE_C))return;cursor();}
 }
@@ -273,11 +240,6 @@ static void medical(void)
 }
 static void podcomp(void)
 {
-    /* Unlike the generic/armoury/medical menus, the capsule previously
-     * inherited both Object Processor artwork slots from the last computer
-     * used.  Clear them before either the inactive or armed capsule page.
-     * Computer() has already cleared the CTEXT plane on entry. */
-    set_obj1(-1);set_obj2(-1);
     if(!destruct_flag){event(0x504f444eu,0,0);for(;;){VSync();c_readpad();if(pressed(c_joy_edge,FIRE_C))return;}}
     cursorpos=0;menuopts=1;event(0x504f444du,0,0);
     for(;;){int r=menu_step(1);if(r<0)return;if(!r)continue;avp_computer_launch_pod();event(0x4c41554eu,1,0);

@@ -3,9 +3,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 s16 player_type=PT_HUMAN;
-void avp_mp_input_write_settings(const AvpMpInputConfig *p,FILE *f){(void)p;(void)f;}
 void avp_mazescrn_set_facehug_shake_pain_sounds(int x){(void)x;}
 void avp_player_set_facehug_pain_sounds(int x){(void)x;}
 void avp_player_set_pain_sounds(int x){(void)x;}

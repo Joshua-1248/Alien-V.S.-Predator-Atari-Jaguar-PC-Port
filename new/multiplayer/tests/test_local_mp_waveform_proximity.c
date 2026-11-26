@@ -16,8 +16,14 @@ int main(void)
     CHECK(avp_mp_waveform_gain(3u,2u,1,2,0,0,0,0)==0u);
     CHECK(avp_mp_waveform_gain(4u,1u,15,15,0,0,0,0)==256u);
     CHECK(avp_mp_waveform_gain(15u,1u,15,15,0,0,0,0)==256u);
-    CHECK(avp_mp_waveform_gain(16u,1u,15,15,0,0,0,0)==0u);
-    CHECK(avp_mp_waveform_gain(0u,4u,15,15,0,0,0,0)==0u);
+    CHECK(avp_mp_waveform_gain(16u,1u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(20u,1u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(35u,1u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(36u,1u,15,15,0,0,0,0)==0u);
+    CHECK(avp_mp_waveform_gain(0u,19u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(0u,20u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(0u,35u,15,15,0,0,0,0)==256u);
+    CHECK(avp_mp_waveform_gain(0u,36u,15,15,0,0,0,0)==0u);
     /* Predator has the original visible analyzer, Marine and Alien do not.
      * All species can still contribute proximity-filtered AUDIO samples. */
     CHECK(avp_mp_scope_visible(2u));

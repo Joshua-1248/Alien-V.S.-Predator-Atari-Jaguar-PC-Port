@@ -1,0 +1,47 @@
+{
+  "path": "include/avp_runtime.h",
+  "base_sha256": "c441691fb79c9a169daeaed6277ab0015a87707430c1b5aa425bddfc8fe4d6ed",
+  "output_sha256": "18cf135dd9dd365bf6526a359a9a323a502351846fd6654985882ef659205a14",
+  "edits": [
+    {
+      "start": 36,
+      "end": 36,
+      "replacement": "    /* MAZESCRN.S LoseSounds/RestoreSounds preserves voice 1 and the type\n       of voice 2 across the pause menu. The PC backend can also retain the\n       exact synthesizer phase of those two voices, rather than restarting\n       the weapon and silently dropping an active destruction alarm. */\n    void (*pause_sfx_save)(void *user);\n    void (*pause_sfx_restore)(void *user,u32 weapon_handle,u32 alarm_handle);\n"
+    },
+    {
+      "start": 38,
+      "end": 38,
+      "replacement": "    /* Optional handle-aware form used by the hosted FullSynth mirror.  The\n     * ordinary Jaguar game code still allocates the handle/voice; the host\n     * merely associates its mixer voice with that identity. */\n    void (*play_sfx_handle)(void *user, unsigned id, u32 handle, unsigned voice);\n    /* Optional read-only host completion query.  The 68000 allocator must\n       reclaim a one-shot voice once its DSP sample has finished. */\n    int (*sfx_handle_active)(void *user, u32 handle);\n    /* The Jaguar DSP can finish an unlooped voice AFTER 68000 VIdent is\n     * cleared.  Read the physical voice slot rather than a vanished handle. */\n    int (*sfx_voice_active)(void *user, unsigned voice);\n    void (*unloop_sfx)(void *user, u32 handle);\n"
+    },
+    {
+      "start": 42,
+      "end": 42,
+      "replacement": "    void (*position_sfx)(void *user, u32 handle, s32 x, s32 y);\n"
+    },
+    {
+      "start": 44,
+      "end": 44,
+      "replacement": "    /* Hosted equivalent of the Jaguar UEBERVOLUME mixer register. */\n    void (*set_master_volume)(void *user, u32 volume);\n"
+    },
+    {
+      "start": 49,
+      "end": 49,
+      "replacement": "#include \"../new/pc_host/integration/runtime_movement_member.inc\"\n\n"
+    },
+    {
+      "start": 57,
+      "end": 57,
+      "replacement": "#include \"../new/pc_host/integration/runtime_multiplayer_members.inc\"\n\n"
+    },
+    {
+      "start": 74,
+      "end": 74,
+      "replacement": "#include \"../new/pc_host/integration/runtime_audio_member.inc\"\n\n"
+    },
+    {
+      "start": 79,
+      "end": 79,
+      "replacement": "/* VBlank-chained FX master fade (retail $2EE80 handler hook). */\nvoid avp_runtime_set_fx_vblank(void (*fn)(void));\nvoid avp_runtime_fx_vblank(void);\n"
+    }
+  ]
+}

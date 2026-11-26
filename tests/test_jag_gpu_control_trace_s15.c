@@ -26,6 +26,10 @@ int main(void)
 {
     cart[0x404]=0;cart[0x405]=0x80;cart[0x406]=0x20;cart[0x407]=0;
     pc=0x2000;
+    /* The synthetic 68000 program uses high-word-first register writes.
+     * Explicitly select BIG_IO=1 (Atari's duplicated-word bootstrap),
+     * rather than relying on R237's incorrect fixed word ordering. */
+    movel(0x00010001u,0xF0210Cu);
     movel(0xF03220u,0xF02110u); /* 68000 writes GPU PC while stopped */
     movel(0x00000000u,0xF02114u); /* explicit GO=0; avoid arbitrary GPU code */
     w16(0x60FEu);                 /* BRA.S * */

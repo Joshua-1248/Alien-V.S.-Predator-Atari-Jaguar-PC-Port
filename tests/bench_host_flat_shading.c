@@ -30,7 +30,7 @@ int main(int argc,char **argv)
     uint32_t *table=malloc(65536u*sizeof(uint32_t));
     u16 *tex=malloc(128u*128u*sizeof(u16));
     u8 *rgb=malloc(128u*128u*3u);
-    AvpGpuRgbImage t={128,128,rgb,tex};
+    AvpGpuRgbImage t={128,128,rgb,tex,NULL};
     if(!table||!tex||!rgb||!width||!height||width>8192u||height>8192u)return 2;
     for(unsigned i=0;i<65536u;i++)table[i]=0x34211u^(i*75901u);
     for(unsigned i=0;i<128u*128u;i++)tex[i]=(u16)(i*71717u);

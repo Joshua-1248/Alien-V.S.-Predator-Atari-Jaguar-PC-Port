@@ -1,6 +1,6 @@
 /* Real host floor raster pass against the preceding R126 texture-file lookup.
  * Uses synthetic maze and images; no ROM, external assets, or diagnostics. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 /* Projection-derived shade values are common to both paths. Test positive,
  * negative, and zero shades without linking unrelated C++ bridge modules. */

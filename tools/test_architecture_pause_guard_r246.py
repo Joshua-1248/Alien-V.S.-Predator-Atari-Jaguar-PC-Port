@@ -15,7 +15,7 @@ with redirect_stdout(StringIO()) as captured:
 report = captured.getvalue()
 assert '[FAIL]' not in report and 'PASS: A1 Jaguar compatibility ownership seams remain intact' in report
 valid = auditor['pause_psvo_bridge_is_narrow']
-source = (root/'src/platform/pc/pc_video_x11.c').read_text()
+source = (root/'new/pc_host/src/pc_video_x11.c').read_text()
 assert valid(source), 'Working host pause bridge rejected'
 invalid = {
     'second PSVO event handler': source+'\n0x5053564fu',

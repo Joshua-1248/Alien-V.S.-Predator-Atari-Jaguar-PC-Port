@@ -11,11 +11,12 @@
 static int avp_game_micro_amp_capture_direct(AvpMpAmpNativeState *out)
 {
     if (!out || amp_update_active || amp_data!=level1amps ||
-        amps_at!=level1amps || free_count>AVP_NUM_AMPS ||
+        amps_at!=level1amps || free_count>host_amp_capacity ||
         cur_amp_no>AVP_NUM_AMPS ||
         !avp_mp_amp_free_list_validator ||
         !avp_mp_amp_free_list_validator(free_list,free_count)) return 0;
 
+    for(unsigned i=0;i<free_count;i++)if(free_list[i]>=host_amp_capacity)return 0;
     memset(out,0,sizeof(*out));
     out->valid=AVP_MP_AMP_MAGIC;
     memcpy(out->actors,level1amps,sizeof(out->actors));
@@ -25,7 +26,7 @@ static int avp_game_micro_amp_capture_direct(AvpMpAmpNativeState *out)
     memcpy(out->inventory_table,inventory_table,sizeof(out->inventory_table));
     out->ampcount=ampcount;out->ngens=ngens;out->reset_counter=avp_reset_counter;
     memcpy(out->free_list,free_list,sizeof(out->free_list));
-    out->free_count=free_count;
+    out->free_count=free_count;out->host_amp_capacity=host_amp_capacity;
     memcpy(out->slot_generation,slot_generation,sizeof(out->slot_generation));
     out->next_slot_generation=next_slot_generation;
     memcpy(out->saved_levels,saved_levels,sizeof(out->saved_levels));

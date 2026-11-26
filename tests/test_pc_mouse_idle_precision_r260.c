@@ -38,12 +38,17 @@ int main(void)
     MovePlayer();
     assert((centre_angle>>16)==0u);
 
-    /* An active digital turn must still follow retail snapping semantics. */
+    /* R240 retail parity: Marine C+Right strafes, not turns. The older
+     * fixture incorrectly expected the sidestep chord to rotate the camera. */
     centre_angle=2000u<<16;
     joy_cur=0xffffffffu&~(1u<<FIRE_C)&~(1u<<JOY_RIGHT);
     avp_player_host_aim_options(0,1);
     MovePlayer();
-    assert((centre_angle>>16)==0u); /* 2000 - 1536 = 464, which retains the retail snap. */
+    assert((centre_angle>>16)==2000u);
+    /* Unmodified digital Right still uses the Jaguar snapping rule. */
+    joy_cur=0xffffffffu&~(1u<<JOY_RIGHT);
+    MovePlayer();
+    assert((centre_angle>>16)==0u); /* 2000 - 1536 = 464, so it snaps. */
     puts("R260 mouse idle precision and Jaguar mode PASS");
     return 0;
 }

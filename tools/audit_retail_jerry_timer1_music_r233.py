@@ -64,7 +64,7 @@ def audit(cpu:bytes,img:bytes,source:Path):
     check_movei(img,0xF1B642,23,0xF1BB3C)
     # The host scheduler uses the original descriptor field orientation:
     # timer divider from +16 and prescaler from +18, both +1 divisions.
-    host=(source/'src/jaguar/host/fullsynth_host.c').read_text()
+    host=(source/'new/jaguar/host/fullsynth_host.c').read_text()
     assert 'div=(u16)((d[16]<<8)|d[17])' in host
     assert 'pre=(u16)((d[18]<<8)|d[19])' in host
     assert '(pre+1u)*(uint64_t)(div+1u)*20774ull' in host

@@ -7,6 +7,7 @@
  * award score or erase the level collision grid. */
 #include "jaguar/avp_gpu/state.h"
 #include <stdint.h>
+#include "local_mp.h"
 #define AVP_MP_CORPSE_LIMIT 128u
 
 typedef struct AvpMpCorpse {
@@ -14,7 +15,7 @@ typedef struct AvpMpCorpse {
     uint16_t angle, creature, level;
     uint64_t death_tick;
     uint8_t occupied;
-    uint16_t looted_mask;
+    AvpMpActorMask looted_mask;
 } AvpMpCorpse;
 typedef struct AvpMpCorpses {
     AvpMpCorpse records[AVP_MP_CORPSE_LIMIT];

@@ -16,7 +16,7 @@ static ssize_t fake_readlink(const char *p,char *dst,size_t size)
     memcpy(dst,executable,n);return (ssize_t)n;
 }
 #define readlink fake_readlink
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 #undef readlink
 s16 player_type=PT_HUMAN;
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}

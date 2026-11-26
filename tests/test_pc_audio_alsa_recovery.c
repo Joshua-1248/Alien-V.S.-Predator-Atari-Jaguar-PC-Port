@@ -1,6 +1,6 @@
 /* Mock ALSA PCM transport: confirm an underrun does not discard the already
  * rendered tail of a FullSynth buffer. No device, diagnostics, or ROM assets. */
-#include "../src/platform/pc/pc_audio.c"
+#include "../new/pc_host/src/pc_audio.c"
 #include "avp_resources.h"
 #include <assert.h>
 #include <stdint.h>
@@ -36,12 +36,15 @@ int main(void)
 {
     int16_t data[512u*2u]={0};
     D.pcm=(snd_pcm_t *)(uintptr_t)1u;
+    D.output_channels=2u; /* Stereo PCM pointer offsets use channel stride. */
     D.writei=fake_write;
     D.prepare=fake_prepare;
     D.run=1;
-    /* Exercises the regular worker's PCM-write branch, not a test-only
-       version of the writer. The mock stops it after one full buffer. */
-    (void)audio_thread(NULL);
+    /* Exercise the production PCM-write routine directly. The audio
+       worker now reopens the output on its first iteration, so entering
+       audio_thread() with a fake PCM and uninitialized device hooks would
+       dereference a null close callback before reaching the writer. */
+    write_alsa_block(data,512u);
     assert(calls==4u&&prepares==1u&&accepted==512u);
     /* If hardware is permanently broken, recoveries must be bounded and
        synthesis must not be stuck spinning inside the same PCM call. */

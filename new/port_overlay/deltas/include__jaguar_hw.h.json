@@ -1,0 +1,17 @@
+{
+  "path": "include/jaguar_hw.h",
+  "base_sha256": "e6d88858cf85efade6fadd428a1de4a87163dfa3fd1a719f191064217f2119dc",
+  "output_sha256": "e029465fd6002b91117a8b583faee6dcde1c0dadae370f14787abef380120e04",
+  "edits": [
+    {
+      "start": 10,
+      "end": 10,
+      "replacement": "#ifdef AVP_PC_HOST\n/* Native-host builds preserve the MMIO address semantics behind a platform\n * read boundary.  The PC game core only performs ordinary CPU reads through\n * these macros; Jaguar hardware builds retain direct volatile MMIO. */\nu8  avp_host_mmio_read8(uintptr_t address);\nu16 avp_host_mmio_read16(uintptr_t address);\nu32 avp_host_mmio_read32(uintptr_t address);\n#define AVP_MMIO8(a)  avp_host_mmio_read8((uintptr_t)(a))\n#define AVP_MMIO16(a) avp_host_mmio_read16((uintptr_t)(a))\n#define AVP_MMIO32(a) avp_host_mmio_read32((uintptr_t)(a))\n#else\n"
+    },
+    {
+      "start": 13,
+      "end": 13,
+      "replacement": "#endif\n"
+    }
+  ]
+}

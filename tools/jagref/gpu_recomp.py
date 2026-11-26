@@ -4,7 +4,7 @@
 Input : a GPU local-RAM image (4096 bytes, as captured by jagref with
         JAGM_GPU_SNAP=pc,field) plus the address range of one routine.
 Output: a C function that executes that routine with exactly the instruction
-        semantics of src/jaguar/hw/jrisc.c (TRM Rev.8 pp.44-58): flags, the
+        semantics of new/jaguar/hw/jrisc.c (TRM Rev.8 pp.44-58): flags, the
         one-instruction delay slot, register banks (MOVETA/MOVEFA), DIV and
         its remainder, MULT/IMULT, and all memory access through callbacks.
 Leaving the range (a jump whose target lies outside it) returns that target.

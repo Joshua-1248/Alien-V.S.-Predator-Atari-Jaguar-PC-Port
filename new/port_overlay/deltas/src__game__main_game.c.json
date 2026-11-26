@@ -1,0 +1,62 @@
+{
+  "path": "src/game/main_game.c",
+  "base_sha256": "85a40d744ae0a0a82472f3fff886b2b31337d2ea14104690a021600cb9601dc6",
+  "output_sha256": "eeb74d9a7655797795a57cf57cd1415d8382aa38128f81135b2fc80f076cfacd",
+  "edits": [
+    {
+      "start": 17,
+      "end": 17,
+      "replacement": "#ifdef AVP_PC_HOST\n#include \"pc/pc_title_reference.h\"\n#endif\n"
+    },
+    {
+      "start": 50,
+      "end": 50,
+      "replacement": "#include \"../../new/audio/title_music_prestart.inc\"\n\n"
+    },
+    {
+      "start": 73,
+      "end": 77,
+      "replacement": "    /* MAIN.S passes #title3_music through ram_music here.  Keep that\n     * CPU-owned descriptor selection in the translated game layer; the\n     * Jaguar/host audio backend owns score/patch synthesis. */\n#include \"../../new/audio/title_music_start_gate.inc\"\n\n        StartMus(AVP_MUSIC_TITLE3);\n    /* The original port's 141-VBL placeholder omitted the retail title GPU\n     * jobs and its two interruptible Pause() waits (30 and 260 VBLs).  The\n     * standalone original-C library preserves that historical contract.\n     * Only the PC host uses the ROM/reference-machine-derived presentation\n     * sequence; no other gameplay or MJP menu logic is changed. */\n    avp_mjp_prepare_title();\n    Title();\n#include \"../../new/pc_video/title_sequence_fields.inc\"\n"
+    },
+    {
+      "start": 86,
+      "end": 86,
+      "replacement": "#include \"../../new/multiplayer/main_frontend_launch.inc\"\n\n"
+    },
+    {
+      "start": 107,
+      "end": 107,
+      "replacement": "        End_Sele(); /* original character-detail prompt and confirmation */\n"
+    },
+    {
+      "start": 122,
+      "end": 123,
+      "replacement": "    if(Choice==4){\n        /* Retail MAIN.S restarts the title presentation after Do_Intro,\n         * including the logo GPU jobs and the two Pause() intervals.\n         * Returning straight to main_menu skipped all of that on PC.\n         * On the next title resource load, the host also resets the separate\n         * Jaguar ROM reference renderer, without a second cold boot delay. */\n        MTEST(AVP_MJP_INTRO);\n#include \"../../new/audio/title_music_attract_continue.inc\"\n\n        goto restart_title;\n    }\n"
+    },
+    {
+      "start": 126,
+      "end": 127,
+      "replacement": "static void avp_post_game_frontend_impl(int allow_high_scores)\n"
+    },
+    {
+      "start": 137,
+      "end": 140,
+      "replacement": "        /* MAIN.S starts pred_music for this block regardless of species. */\n        StartMus(AVP_MUSIC_PREDATOR_ENDING);\n"
+    },
+    {
+      "start": 148,
+      "end": 149,
+      "replacement": "    /* Multiplayer scores are ineligible for the retail Hall of Fame.\n     * Preserve this original path unchanged for single-player. */\n    if(allow_high_scores)MTEST(AVP_MJP_FAME);\n"
+    },
+    {
+      "start": 152,
+      "end": 152,
+      "replacement": "}\n\nvoid avp_post_game_frontend(void)\n{\n    avp_post_game_frontend_impl(1);\n}\n\nvoid avp_post_game_frontend_multiplayer(void)\n{\n    avp_post_game_frontend_impl(0);\n"
+    },
+    {
+      "start": 172,
+      "end": 173,
+      "replacement": "        avp_post_game_frontend();\n"
+    }
+  ]
+}

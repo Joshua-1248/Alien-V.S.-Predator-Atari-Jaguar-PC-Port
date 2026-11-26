@@ -25,7 +25,7 @@ typedef struct AvpMpNativeBackendHost {
                         AvpMpActorNativeState *actor);
     /* Optional source-scoped batch validator. Must leave world unchanged on
      * failure; all actor writes remain in private staged copies. */
-    int (*join_group)(void *user,AvpMpNativeWorld *world,unsigned mask,
+    int (*join_group)(void *user,AvpMpNativeWorld *world,AvpMpActorMask mask,
                       AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS]);
     /* Player 1 retains the original PC keyboard/gamepad/pad conversion. It is
      * deliberately NOT overwritten using the secondary-player profile.
@@ -37,11 +37,20 @@ typedef struct AvpMpNativeBackendHost {
      * updates. A player in a death fade skips advance_actor, but still needs
      * fresh enemy/door render snapshots while their camera stays stationary.
      * The original game world and actor state must not be changed here. */
-    int (*snapshot_world_presentation)(void *user,unsigned member_mask);
+    int (*snapshot_world_presentation)(void *user,AvpMpActorMask member_mask);
     /* Optional original one-tick AMP dispatcher, with an explicit gameplay
      * target policy for each original mode. When set, advance_level must NOT
      * call UpdateAMPs a second time; it owns other world work only. */
+    /* Optional visibility at this ORIGINAL world tick: excludes a duct
+     * passenger (including destination fade-in) from AMP AI and acid damage.
+     * Does not change member worlds or the private player fade renderer. */
+    int (*actor_world_present)(void *user,unsigned player);
     AvpMpAmpChooseTarget choose_amp_target;
+    /* Optional PC-only private acid footstep/impact cue for the contacted
+     * actor. World-scoped AMP and collision damage remain original. */
+    AvpMpAmpPlayerAcidCue on_acid_contact;
+    AvpMpAmpEnemySoundScope on_enemy_sound_scope;
+    AvpMpAmpActorDamage on_actor_damage;
     AvpMpNativeWorldStep advance_level;
     /* Optional original post-world weapon/HUD script pass. Original NextFrame
      * updates players, then AMP/world, then calls PreFrame/UpdtScrOverlays.
@@ -52,6 +61,10 @@ typedef struct AvpMpNativeBackendHost {
      * the original world and actor state bound, in the same PC process. */
     int (*draw_actor)(void *user,AvpMpNativeWorld *world,unsigned player,
                       AvpMpActorNativeState *actor,AvpLocalMpSourceFrame *out);
+    /* Optional view-only target binding; never changes simulation ownership. */
+    int (*draw_spy_actor)(void *user,AvpMpNativeWorld *world,unsigned subject,
+                          unsigned viewer,AvpMpActorNativeState *actor,
+                          AvpLocalMpSourceFrame *out);
 } AvpMpNativeBackendHost;
 
 int avp_mp_native_backend_valid(const AvpMpNativeBackendHost *host);

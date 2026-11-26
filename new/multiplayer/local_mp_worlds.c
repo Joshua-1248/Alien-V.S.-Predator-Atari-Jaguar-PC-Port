@@ -22,7 +22,7 @@ static AvpMpActiveWorld *player_world(AvpMpSession *s, unsigned player)
     AvpMpActiveWorld *w;
     if (!s || !s->running || player >= avp_local_mp_total_actors(&s->setup)) return NULL;
     w = find_world(s, s->setup.level[player]);
-    return w && (w->member_mask & (1u << player)) ? w : NULL;
+    return w && (w->member_mask & (AVP_MP_ACTOR_BIT(player))) ? w : NULL;
 }
 
 void avp_mp_session_stop(AvpMpSession *s)
@@ -34,7 +34,7 @@ void avp_mp_session_stop(AvpMpSession *s)
             AvpMpActiveWorld *world = &s->worlds[w];
             if (!world->context) continue;
             for (p = 0; p < AVP_LOCAL_MP_MAX_ACTORS; ++p)
-                if ((world->member_mask & (1u << p)) && s->player[p])
+                if ((world->member_mask & (AVP_MP_ACTOR_BIT(p))) && s->player[p])
                     s->backend.exit_world(s->user, world->context, p, s->player[p]);
             s->backend.destroy_world(s->user, world->context);
         }
@@ -59,6 +59,7 @@ int avp_mp_session_start(AvpMpSession *s, const AvpLocalMpSetup *setup,
     s->backend = *ops;
     s->user = user;
     s->setup = normalized;
+    for(p=0;p<normalized.players;p++)s->spy_target[p]=p;
     s->running = 1;
     for (p = 0; p < avp_local_mp_total_actors(&normalized); ++p) {
         AvpMpActiveWorld *w;
@@ -76,7 +77,7 @@ int avp_mp_session_start(AvpMpSession *s, const AvpLocalMpSetup *setup,
             w->level = normalized.level[p];
         }
         if (!ops->enter_world(user, w->context, p, s->player[p])) goto fail;
-        w->member_mask |= 1u << p;
+        w->member_mask |= AVP_MP_ACTOR_BIT(p);
     }
     return 1;
 fail:
@@ -119,7 +120,7 @@ int avp_mp_session_move(AvpMpSession *s, unsigned player, unsigned new_level)
         for (i = 0; i < AVP_LOCAL_MP_MAX_ACTORS; ++i)
             if (!s->worlds[i].context) break;
         if (i == AVP_LOCAL_MP_MAX_ACTORS) {
-            if (old->member_mask != (1u << player)) return 0;
+            if (old->member_mask != (AVP_MP_ACTOR_BIT(player))) return 0;
             dest = old;
         } else dest = &s->worlds[i];
         if (!s->backend.create_world(s->user, s->setup.campaign, new_level, &fresh) ||
@@ -132,7 +133,7 @@ int avp_mp_session_move(AvpMpSession *s, unsigned player, unsigned new_level)
     }
     /* Transition commits ONLY after destination creation and join succeed. */
     s->backend.exit_world(s->user, old->context, player, s->player[player]);
-    old->member_mask &= ~(1u << player);
+    old->member_mask &= ~(AVP_MP_ACTOR_BIT(player));
     if (!old->member_mask) {
         s->backend.destroy_world(s->user, old->context);
         memset(old, 0, sizeof(*old));
@@ -144,20 +145,20 @@ int avp_mp_session_move(AvpMpSession *s, unsigned player, unsigned new_level)
         dest->member_mask = 0;
         dest->ticks = 0;
     }
-    dest->member_mask |= 1u << player;
+    dest->member_mask |= AVP_MP_ACTOR_BIT(player);
     s->setup.level[player] = new_level;
     return 1;
 }
 
-int avp_mp_session_move_group(AvpMpSession *s,unsigned mask,unsigned new_level)
+int avp_mp_session_move_group(AvpMpSession *s,AvpMpActorMask mask,unsigned new_level)
 {
     AvpMpActiveWorld *old=NULL,*dest=NULL;
     void *fresh=NULL;
     unsigned p,i;
     if(!s||!s->running||s->faulted||!mask||
-       (mask&~((1u<<avp_local_mp_total_actors(&s->setup))-1u))||!new_level||
+       (mask&~((AVP_MP_ACTOR_BIT(avp_local_mp_total_actors(&s->setup))-UINT64_C(1))))||!new_level||
        !s->backend.enter_world_group)return 0;
-    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(1u<<p)){
+    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         AvpMpActiveWorld *w=player_world(s,p);
         if(!w||!s->player[p]||(old&&old!=w))return 0;
         old=w;
@@ -182,7 +183,7 @@ int avp_mp_session_move_group(AvpMpSession *s,unsigned mask,unsigned new_level)
         if(fresh)s->backend.destroy_world(s->user,fresh);
         return 0;
     }
-    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(1u<<p))
+    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(AVP_MP_ACTOR_BIT(p)))
         s->backend.exit_world(s->user,old->context,p,s->player[p]);
     old->member_mask&=~mask;
     if(!old->member_mask){
@@ -194,7 +195,7 @@ int avp_mp_session_move_group(AvpMpSession *s,unsigned mask,unsigned new_level)
         dest->level=new_level;dest->member_mask=0;dest->ticks=0;
     }
     dest->member_mask|=mask;
-    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(1u<<p))
+    for(p=0;p<avp_local_mp_total_actors(&s->setup);p++)if(mask&(AVP_MP_ACTOR_BIT(p)))
         s->setup.level[p]=new_level;
     return 1;
 }
@@ -206,10 +207,17 @@ unsigned avp_mp_session_compose(AvpMpSession *s, const AvpLocalMpOutputFrame *ou
     unsigned p;
     if (!s || !s->running || s->faulted) return 0;
     for (p = 0; p < s->setup.players; ++p) {
-        AvpMpActiveWorld *w = player_world(s, p);
+        unsigned subject=s->spy_target[p];
+        AvpMpActiveWorld *w;
         unsigned q;
-        if (!w || !s->backend.render_player(s->user, w->context, p,
-                                             s->player[p], &frames[p]) ||
+        if(subject>=avp_local_mp_total_actors(&s->setup) || !s->player[subject])
+            subject=p;
+        w=player_world(s,subject);
+        if (!w || !(subject==p ?
+              s->backend.render_player(s->user,w->context,p,s->player[p],&frames[p]) :
+              (s->backend.render_spy_player &&
+               s->backend.render_spy_player(s->user,w->context,subject,
+                                            s->player[subject],p,&frames[p]))) ||
             !frames[p].pixels) return 0;
         /* A reused frame buffer is not an independently rendered view;
          * reject it before ever touching the presentation destination. */

@@ -1,0 +1,77 @@
+{
+  "path": "src/game/computer.c",
+  "base_sha256": "b02687b2df17755bef2a79c1170fd61346c336e945640af0ab457f0b8653935f",
+  "output_sha256": "66d1086d8ec4d7dae65cfd8d06613dacbd7d0dcd1978f28bed05b187064251c7",
+  "edits": [
+    {
+      "start": 7,
+      "end": 7,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 25,
+      "end": 25,
+      "replacement": "#include \"computer_retail_tables.inc\"\n\n"
+    },
+    {
+      "start": 34,
+      "end": 34,
+      "replacement": "\nvoid avp_computer_bind_retail_terminals(void)\n{\n    avp_computer_bind_level(1u,retail_level1_terminals,sizeof(retail_level1_terminals)/sizeof(retail_level1_terminals[0]));\n    avp_computer_bind_level(2u,retail_level2_terminals,sizeof(retail_level2_terminals)/sizeof(retail_level2_terminals[0]));\n    avp_computer_bind_level(3u,retail_level3_terminals,sizeof(retail_level3_terminals)/sizeof(retail_level3_terminals[0]));\n    avp_computer_bind_level(4u,retail_level4_terminals,sizeof(retail_level4_terminals)/sizeof(retail_level4_terminals[0]));\n    avp_computer_bind_level(5u,retail_level5_terminals,sizeof(retail_level5_terminals)/sizeof(retail_level5_terminals[0]));\n}\nint avp_computer_active(void){return active?1:0;}\n"
+    },
+    {
+      "start": 76,
+      "end": 78,
+      "replacement": "    const AvpRuntimeOps *o=ops();\n    const char *encoded;\n    if(!base||n>=base->pages||!base->page_address||!o->frontend_text)return;\n    encoded=o->frontend_text(o->user,base->page_address[n]);\n    if(encoded){\n        pr_string_retail(encoded,base->page_address[n]);\n        /* Retail COMPUTER.S's encoded A/NEXT B/PREVIOUS C/EXIT label.\n         * Emit as an overlay rather than injecting PC-authored wording. */\n        event(0x50474654u,0,0);\n    }\n"
+    },
+    {
+      "start": 118,
+      "end": 118,
+      "replacement": "static void fixed_viewer_image(unsigned tag,s16 page)\n{\n    static const int weapon[4]={104,105,106,107}; /* COMPUTER.S::weaptab */\n    static const int creature[6]={117,118,119,120,121,123}; /* creatab */\n    static const int star[6]={124,125,126,124,124,126}; /* creatab */\n    if(tag==0x4152534eu&&page>=0&&page<4){set_obj1(weapon[page]);set_obj2(-1);}\n    else if(tag==0x53504543u&&page>=0&&page<6){set_obj1(creature[page]);set_obj2(star[page]);}\n}\n"
+    },
+    {
+      "start": 121,
+      "end": 122,
+      "replacement": "    set_obj1(-1);set_obj2(-1);\n    cls();fixed_viewer_image(tag,picount);event(tag,picount,count);\n"
+    },
+    {
+      "start": 128,
+      "end": 129,
+      "replacement": "            cls();fixed_viewer_image(tag,picount);event(tag,picount,count);\n"
+    },
+    {
+      "start": 132,
+      "end": 133,
+      "replacement": "            cls();fixed_viewer_image(tag,picount);event(tag,picount,count);\n"
+    },
+    {
+      "start": 137,
+      "end": 137,
+      "replacement": "#include \"../../new/multiplayer/computer_medical_queries.inc\"\n\nint avp_computer_first_aid_ceiling(unsigned security)\n{\n    static const s16 targets[7]={500,500,500,750,750,750,1000};\n    return security>=4u && security<=10u?targets[security-4u]:0;\n}\n"
+    },
+    {
+      "start": 139,
+      "end": 141,
+      "replacement": "    int t=avp_computer_first_aid_ceiling(acs_level);\n"
+    },
+    {
+      "start": 142,
+      "end": 144,
+      "replacement": "    if(t<=0)return -1;\n"
+    },
+    {
+      "start": 155,
+      "end": 156,
+      "replacement": "    const AvpRuntimeOps *o=ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_SELFD); /* selfdest */\n"
+    },
+    {
+      "start": 170,
+      "end": 170,
+      "replacement": "    /* Shipping COMPUTER.S::maplist: mapi_cmp..mapv_cmp.  Those five\n       file symbols are retail FILES records 128..132 in RDB.DTA. */\n    if(cur_level>=1&&cur_level<=5)set_obj1(127+(int)cur_level);\n"
+    },
+    {
+      "start": 242,
+      "end": 242,
+      "replacement": "    /* Unlike the generic/armoury/medical menus, the capsule previously\n     * inherited both Object Processor artwork slots from the last computer\n     * used.  Clear them before either the inactive or armed capsule page.\n     * Computer() has already cleared the CTEXT plane on entry. */\n    set_obj1(-1);set_obj2(-1);\n"
+    }
+  ]
+}

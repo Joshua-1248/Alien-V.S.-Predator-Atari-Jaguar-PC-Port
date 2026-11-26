@@ -54,15 +54,9 @@ typedef struct AvpTrackerAudioState { u32 volume,pitch,env_rate,mod_depth; } Avp
 extern AvpTrackerAudioState tracker_audio_state;
 extern s16 pred_meter_left,pred_meter_right;
 void avp_hud_set_tracker_distance(u32 nearest);
-unsigned avp_hud_tracker_frame(void);
-u32 avp_hud_tracker_nearest(void);
 void avp_hud_set_pred_meter_samples(s32 a,s32 b);
-void avp_hud_pred_meter_span(unsigned row,s16 *from,s16 *to);
 void TracTest(void); void HUD_human(void); void TC(void); void HP2(void); void UpdtHUD(void);
-void InitNrg(void); void UpdtNrg(void);
-/* Last CPU-selected energy frame and effective width, including low-health blink. */
-unsigned avp_hud_energy_frame(void);
-unsigned avp_hud_energy_pixels(void); void extract_cocoon(u32 packed,AvpCocoonState *out); void DrawCocoon(void);
+void InitNrg(void); void UpdtNrg(void); void extract_cocoon(u32 packed,AvpCocoonState *out); void DrawCocoon(void);
 void ShowPos(void); void xDecPrint(void); void DecPrint(void); void DecCommon(void); void HexPrint(void);
 void InitHUDPal(void); void SetHUDPal(void); void ZeroHUDBright(void); void SetHUDBright(void); void HUDBright(void);
 void InitMap(void); void UpdtMap(void); void ShowMap(void); void wmasks(void); void dmasks(void);

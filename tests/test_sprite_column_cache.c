@@ -1,6 +1,6 @@
 /* R133: actual R132 sprite-column implementation vs reused source-row
  * projection and Jaguar CRY color. All assets are synthetic. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,7 +157,7 @@ int main(void)
             r132_draw_amp_sprite(state,&a,&actor,0,0,1,0,0,1,(double)w*0.5,
                 oc_mode==3u?NULL:zbuf,owner);
             draw_amp_sprite(state,&b,&actor,0,0,1,0,0,1,(double)w*0.5,
-                oc_mode==3u?NULL:zbuf,owner);
+                oc_mode==3u?NULL:zbuf,owner,NULL,0u);
             if(w==320u&&h==228u&&memcmp(a.pixels,b.pixels,pixel_count*sizeof(u32))){
                 fprintf(stderr,"sprite pixel difference width=%u height=%u case=%u species=%u\n",w,h,variant,creature);
                 return 1;

@@ -1,0 +1,17 @@
+{
+  "path": "include/collision.h",
+  "base_sha256": "eefbd3e04ea3a26fd546f5d13e4149da91c131435ab7e57f63dfb68edaac053b",
+  "output_sha256": "960c154112f67ae28122956c1ed59b9a1c374da9359bfb1818093dfd0dd9a65d",
+  "edits": [
+    {
+      "start": 20,
+      "end": 20,
+      "replacement": "/* A passable open-door panel on the boundary ahead (never overrides SafePos). */\nint avp_collision_open_door_ahead(s32 xpos,s32 ypos,int dx,int dy,u8 height);\n"
+    },
+    {
+      "start": 23,
+      "end": 24,
+      "replacement": "int AMPCollisions(s32 xpos,s32 ypos);\n#include \"../new/pc_host/integration/collision_multiplayer_declarations.inc\"\n\n"
+    }
+  ]
+}

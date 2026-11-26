@@ -92,12 +92,14 @@ static inline AvpMpSpritePose avp_mp_sprite_attack_pose_view(unsigned species,
     return avp_mp_sprite_attack_pose(species,weapon,age);
 }
 
-/* Marine frontal Pulse Rifle / Smart Gun: the original AAF 18 sheet is
- * standing=0, lowering=1, crouched firing=2. Its frame 3 remains excluded.
- * On entry show 0 -> 1, HOLD the settled crouch for one full native tick,
- * only then cycle crouched firing 2 <-> 1. Show 1 -> 0 once on release.
- * This is strictly cosmetic: native fire, damage and ammo are not delayed.
- * Side/rear observers retain the source playlist. */
+/* Marine frontal Pulse Rifle / Smart Gun: original enemy AMP.S and the
+ * decoded retail AAF 18 show the ordered poses 0=standing, 1=lowering,
+ * 2=crouched with muzzle flash, 3=crouched without flash. Display the
+ * first TWO pre-fire poses once, then keep the weapon at firing height
+ * by looping 2 <-> 3. Looping 2 <-> 1 wrongly replays the crouch and
+ * makes the player visibly dip a second time. On release show 1 -> 0.
+ * Presentation only: no change to native fire, ammo or 10 Hz simulation.
+ * Side/rear observers retain their separate original source playlist. */
 enum {
     AVP_MP_MARINE_CROUCH_IDLE=0,
     AVP_MP_MARINE_CROUCH_LOWER=1,
@@ -112,6 +114,15 @@ typedef struct AvpMpMarineCrouchAnim {
 static inline unsigned avp_mp_sprite_marine_crouch_weapon(unsigned weapon)
 {
     return weapon==2u || weapon==4u;
+}
+/* A frontal sustained Marine uses ONE timeline. The generic attack path
+ * must not draw AAF 18 before this state machine has entered LOWER (which
+ * caused the first fully crouched frame ahead of the wind-up), nor after
+ * its own release/interrupt. Other angles keep their historical playlist. */
+static inline unsigned avp_mp_sprite_marine_front_owns_attack(unsigned species,
+    unsigned weapon,unsigned front)
+{
+    return species==0u && front && avp_mp_sprite_marine_crouch_weapon(weapon);
 }
 static inline void avp_mp_sprite_marine_crouch_update(AvpMpMarineCrouchAnim *anim,
     unsigned weapon,unsigned fire_held,unsigned interrupted,uint64_t tick)
@@ -128,7 +139,7 @@ static inline void avp_mp_sprite_marine_crouch_update(AvpMpMarineCrouchAnim *ani
            anim->phase==AVP_MP_MARINE_CROUCH_RAISE){
             anim->phase=AVP_MP_MARINE_CROUCH_LOWER;
             anim->start_tick=tick;
-        }else if(anim->phase==AVP_MP_MARINE_CROUCH_LOWER && age>=3u){
+        }else if(anim->phase==AVP_MP_MARINE_CROUCH_LOWER && age>=2u){
             anim->phase=AVP_MP_MARINE_CROUCH_FIRE;
             anim->start_tick=tick;
         }
@@ -149,20 +160,27 @@ static inline void avp_mp_sprite_marine_crouch_update(AvpMpMarineCrouchAnim *ani
 /* Gameplay stays 10 Hz. The renderer samples the native-tick fraction,
  * allowing visible 20 Hz Pulse Rifle and 40 Hz Smart Gun firing cycles without
  * advancing actual attacks or rushing the one-time lowering/raising poses.
- * The original two-frame crouched fire cycle [2,1] is preserved. */
+ * AAF 18 frame 1 is a LOWERING pose, never a sustained firing pose. */
 static inline AvpMpSpritePose avp_mp_sprite_marine_crouch_pose_present(
     const AvpMpMarineCrouchAnim *anim,uint64_t tick,double alpha,
     unsigned weapon)
 {
-    static const uint8_t lower[]={0,1,1};
-    static const uint8_t firing[]={2,1};
+    static const uint8_t lower[]={0,1};
+    static const uint8_t firing[]={2,3};
     static const uint8_t raise[]={1,0};
     const uint8_t *frames=NULL;
     unsigned age,index;
     if(!anim)return (AvpMpSpritePose){AS_STAND,0,0};
     age=(unsigned)(tick-anim->start_tick);
-    if(anim->phase==AVP_MP_MARINE_CROUCH_LOWER && age<3u){
-        frames=lower;index=age;
+    if(anim->phase==AVP_MP_MARINE_CROUCH_LOWER && age<=2u){
+        /* world_tick() invokes the weapon callback before incrementing the
+         * session tick; the spectator renders with that incremented tick.
+         * R269 sampled the SECOND (crouched) wind-up frame first, then
+         * fell through to the idle standing sheet for one frame before the
+         * firing loop. Offset only LOWER's display age: the first rendered
+         * press shows 0, the next shows 1, then FIRE shows 2/3. The RAISE
+         * path, weapon fire cadence and every other pose remain unchanged. */
+        frames=lower;index=age?age-1u:0u;
     }else if(anim->phase==AVP_MP_MARINE_CROUCH_FIRE){
         const unsigned speed=weapon==4u?4u:weapon==2u?2u:1u;
         /* Clamp the fractional position, including a defensive alpha==1.

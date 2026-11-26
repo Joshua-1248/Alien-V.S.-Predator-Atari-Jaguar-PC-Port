@@ -153,7 +153,7 @@ int main(void)
         assert(sfx_count==1);
         a->mode(a);
         assert(sfx_count==2&&sfx_sequence[1]==AVP_FX_ROCKE);
-        /* The disc releases on frame 3 but has no second DISK1 cue. */
+        /* R201: disc release frame must not retrigger audible DISK1. */
         InitAMPs();build_level();
         a=amp_req();
         a->xpos=(s32)x_pos+(90<<9);a->ypos=(s32)y_pos;
@@ -164,8 +164,12 @@ int main(void)
         sfx_count=0;chase_player(a);
         assert(scripted_random_at==3);
         assert(sfx_count==1&&sfx_sequence[0]==AVP_FX_DISK1);
-        for(unsigned i=0;i<3u;i++)a->mode(a);
+        for(unsigned i=0;i<2u;i++)a->mode(a);
         assert(sfx_count==1);
+        a->mode(a); /* frame 3: projectile release without second sound */
+        assert(sfx_count==1&&discflag==1);
+        a->mode(a);a->mode(a); /* recovery completes without a retrigger */
+        assert(sfx_count==1 && a->mode==chase_player);
         scripted_random=NULL;scripted_random_count=scripted_random_at=0;
         avp_runtime_reset_ops();
     }

@@ -41,8 +41,8 @@ static void run_mode(unsigned mode)
         src2[at+1]=(uint8_t)((x*23u+y*3u+1u)&255u);
         src2[at+2]=(uint8_t)((x*5u+y*29u+6u)&255u);
     }
-    state.frontend_img[mode][0]=(AvpGpuRgbImage){IMG_W,IMG_H,src1,NULL};
-    state.frontend_img[mode][1]=(AvpGpuRgbImage){IMG_W,IMG_H,src2,NULL};
+    state.frontend_img[mode][0]=(AvpGpuRgbImage){IMG_W,IMG_H,src1,NULL,NULL};
+    state.frontend_img[mode][1]=(AvpGpuRgbImage){IMG_W,IMG_H,src2,NULL,NULL};
     state.frontend_loaded[mode][0]=1u;
     state.frontend_loaded[mode][1]=1u;
     /* Original MJPX x=58 is mode 0's unscaled picture object. */

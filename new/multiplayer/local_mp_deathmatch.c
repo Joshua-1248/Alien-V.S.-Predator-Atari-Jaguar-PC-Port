@@ -111,6 +111,7 @@ void avp_mp_dm_init(AvpMpDeathmatch *m,const AvpLocalMpSetup *setup)
     m->level=setup->dm_level;
     m->level_travel=setup->dm_level_travel;
     m->cloak_damage=setup->dm_cloak_damage;
+    m->predator_uncloaked_damage=setup->dm_predator_uncloaked_damage;
 }
 void avp_mp_dm_tick(AvpMpDeathmatch *m)
 {
@@ -178,6 +179,13 @@ int avp_mp_dm_direct_damage(int16_t species,int16_t weapon,int damage)
         }
     }
     return damage;
+}
+int avp_mp_dm_predator_attacker_damage(unsigned modifier,
+                                       unsigned predator_uncloaked,int damage)
+{
+    if(!modifier||!predator_uncloaked||damage<=0)return damage;
+    /* Saturate before multiplication; never invoke signed integer overflow. */
+    return damage>INT32_MAX/4?INT32_MAX:damage*4;
 }
 int avp_mp_dm_victim_damage(unsigned modifier,int16_t species,
                             unsigned invisflag,int damage)

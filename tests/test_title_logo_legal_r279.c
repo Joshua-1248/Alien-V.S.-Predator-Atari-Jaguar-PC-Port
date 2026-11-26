@@ -6,7 +6,7 @@
  *     shown at screen row 196 with colour 0 transparent (not transcribed text).
  * Synthetic pixels only; no retail data. */
 #define _DEFAULT_SOURCE 1
-#include "../src/jaguar/avp_gpu/frontend_renderer.c"
+#include "../new/jaguar/avp_gpu/frontend_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

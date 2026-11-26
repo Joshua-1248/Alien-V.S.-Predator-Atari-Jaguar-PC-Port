@@ -17,7 +17,7 @@ static void movew(uint16_t imm,uint32_t addr){w16(0x33FC);w16(imm);w32(addr);}
 
 int main(void)
 {
-    uint64_t p0,p1,stop=4;
+    uint64_t p0,p1,stop=12; /* STOP type 4 + explicit INT flag bit 3 */
     uint32_t list=0x1000,data=0x2000;
     /* cartridge header: run address at $800404 */
     cart[0x404]=0x00;cart[0x405]=0x80;cart[0x406]=0x20;cart[0x407]=0x00;
@@ -30,7 +30,7 @@ int main(void)
     movel((uint32_t)(p1>>32),list+8);movel((uint32_t)p1,list+12);
     movel(0,list+16);movel((uint32_t)stop,list+20);
     movew(28,0xF00046);movew(508,0xF00048);                             /* VDB, VDE */
-    movew(0x00CB,0xF00038);movew(0x0680,0xF0003C);                      /* HDB1, HDE */
+    movew(0x00CB,0xF00038);movew(0x07FF,0xF0003A);movew(0x0680,0xF0003C);                      /* HDB1, HDE */
     movel(list<<16,0xF00020);                                          /* OLP, word-swapped */
     movew(0x06C7,0xF00028);                                            /* VMODE RGB16, PWIDTH 3, BGEN */
     w16(0x60FE);                                                       /* bra.s * */

@@ -1,5 +1,6 @@
 #include "local_mp_native_input.h"
 #include "pc/pc_mouse_look.h"
+#include "pc/pc_axis_deadzone.h"
 #include "joypad.h"
 #include "player.h"
 #include <math.h>
@@ -8,9 +9,10 @@
 static int pressed(uint32_t a, unsigned bit)
 { return (a & (1u<<bit))!=0u; }
 
-/* Jaguar has no separate turn-left vs strafe-left bits. Respect original
- * Alien OPTION/other-species FIRE_C modifier, and use the existing original
- * host sidestep bridge for simultaneous independent turn+strafe. */
+/* Jaguar has no separate turn-left vs strafe-left bits. The ORIGINAL
+ * MovePlayer turns with plain LEFT/RIGHT and sidesteps only with Alien
+ * OPTION or Marine/Predator FIRE_C held. Keep independent simultaneous
+ * turn+strafe through the existing PC host sidestep bridge. */
 int avp_mp_native_input_prepare(AvpMpActorNativeState *actor,
                                 const AvpMpPlayerCommand *c,
                                 const AvpMpInputProfile *profile)
@@ -49,10 +51,14 @@ int avp_mp_native_input_prepare(AvpMpActorNativeState *actor,
     if(pressed(a,AVP_MP_FORWARD))pad&=~(1u<<JOY_UP);
     if(pressed(a,AVP_MP_BACKWARD))pad&=~(1u<<JOY_DOWN);
     if(turn){
-        pad&=~(1u<<(alien?OPTION:FIRE_C));
+        /* Plain D-pad horizontal moves the original heading. Asserting the
+         * species strafe modifier here made bots sidestep instead of turn. */
         if(pressed(a,AVP_MP_TURN_LEFT))pad&=~(1u<<JOY_LEFT);
         if(pressed(a,AVP_MP_TURN_RIGHT))pad&=~(1u<<JOY_RIGHT);
     }else if(strafe){
+        /* With no turn, map strafe onto the original modifier+D-pad chord.
+         * Concurrent strafe+turn uses host_keyboard_strafe_during_turn. */
+        pad&=~(1u<<(alien?OPTION:FIRE_C));
         if(pressed(a,AVP_MP_STRAFE_LEFT))pad&=~(1u<<JOY_LEFT);
         if(pressed(a,AVP_MP_STRAFE_RIGHT))pad&=~(1u<<JOY_RIGHT);
     }
@@ -60,8 +66,10 @@ int avp_mp_native_input_prepare(AvpMpActorNativeState *actor,
     if(pressed(a,AVP_MP_USE)||(alien&&pressed(a,AVP_MP_ALIEN_BITE)))pad&=~(1u<<FIRE_B);
     if(alien&&pressed(a,AVP_MP_ALIEN_TAIL))pad&=~(1u<<FIRE_C);
     if(actor->weapon.hugkill && c->analog_enabled && (c->analog_axis_mask&4u)){
-        if(c->analog_turn < -0.65f)pad&=~(1u<<JOY_LEFT);
-        if(c->analog_turn >  0.65f)pad&=~(1u<<JOY_RIGHT);
+        /* Facehugger shake remains a raw physical 65% stick throw. */
+        const float threshold=avp_pc_axis_precision(0.65f,profile->gamepad_deadzone,0);
+        if(c->analog_turn < -threshold)pad&=~(1u<<JOY_LEFT);
+        if(c->analog_turn >  threshold)pad&=~(1u<<JOY_RIGHT);
     }
     if(pressed(a,AVP_MP_MAP))pad&=~(1u<<KEY_8);
     if(predator&&pressed(a,AVP_MP_PRED_MEDKIT))pad&=~(1u<<KEY_7);

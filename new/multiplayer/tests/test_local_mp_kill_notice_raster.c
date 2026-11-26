@@ -40,8 +40,17 @@ int main(void)
     assert(pixel(&fb,107u,64u)==0x00b860ffu); /* "KILLED BY" */
     assert(pixel(&fb,114u,87u)==0x00b860ffu); /* "PLAYER 1" */
     memset(fb.pixels,0,(size_t)fb.width*fb.height*sizeof(*fb.pixels));
-    avp_gpu_draw_dm_kill_notice(gpu,&fb,1u,17u,PT_HUMAN); /* out-of-range does nothing */
-    assert(pixel(&fb,121u,64u)==0u);
+    avp_gpu_draw_dm_kill_notice(gpu,&fb,1u,17u,PT_HUMAN); /* player 17 must display */
+    assert(pixel(&fb,121u,64u)==0x0000ff00u);
+    for(unsigned player=17u;player<=36u;player++){
+        memset(fb.pixels,0,(size_t)fb.width*fb.height*sizeof(*fb.pixels));
+        avp_gpu_draw_dm_kill_notice(gpu,&fb,1u,player,PT_HUMAN);
+        assert(pixel(&fb,121u,64u)==0x0000ff00u);
+        assert(pixel(&fb,101u,87u)==0x0000ff00u);
+    }
+    memset(fb.pixels,0,(size_t)fb.width*fb.height*sizeof(*fb.pixels));
+    avp_gpu_draw_dm_kill_notice(gpu,&fb,1u,37u,PT_HUMAN);
+    assert(pixel(&fb,121u,64u)==0u); /* out-of-range stays rejected */
     /* Explicit viewer species must win even when global player_type is P1. */
     memset(fb.pixels,0,(size_t)fb.width*fb.height*sizeof(*fb.pixels));
     avp_gpu_draw_dm_kill_notice(gpu,&fb,1u,2u,PT_PREDATOR);

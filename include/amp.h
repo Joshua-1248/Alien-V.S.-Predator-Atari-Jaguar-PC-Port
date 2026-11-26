@@ -56,20 +56,10 @@ AvpAmp *amp_req(void);
 void amp_release(unsigned current_amp_number_1based);
 void save_level(void);
 void restore_level(void);
-/* Debug-only, invalidates ONLY the current level save/visited flag.
- * The next restore_level executes the original first-visit population. */
-void avp_amp_dev_freshen_current_level(void);
-/* Multiplayer-only campaign objective controls. Default state preserves the
- * exact retail single-player AMP modes and restore_level decisions. */
-void avp_amp_mp_defer_end_queen(int enabled);
-void avp_amp_mp_set_campaign_type(s16 type);
-int avp_amp_mp_queen_predator_ending(s16 acting_player_type);
 
 void avp_amp_set_save_callback(void (*fn)(AvpAmp *amps,unsigned count));
 void avp_amp_set_restore_callback(void (*fn)(AvpAmp *amps,unsigned count));
 
-/* Presentation-only slot generation; never used by game collision or AI. */
-u32 avp_amp_slot_generation(unsigned slot);
 extern AvpAmp level1amps[AVP_NUM_AMPS];
 extern AvpAmp *amp_data,*amps_at;
 extern u16 collmap[AVP_AMP_GRID_W*AVP_AMP_GRID_H];
@@ -80,58 +70,10 @@ extern u32 ampcount;
 
 
 /* Source-level explicit-argument forms of register-call AMP helpers. */
-/* Optional PC-local Deathmatch projectile callbacks. All default to NULL
- * and are never installed for single-player or co-op. Original AMP modes,
- * damage tables and collision handling remain the authorities for enemies. */
-typedef void (*AvpAmpMpProjectileSpawn)(void *user,const AvpAmp *projectile);
-typedef int (*AvpAmpMpProjectileHit)(void *user,const AvpAmp *projectile);
-typedef void (*AvpAmpMpExplosionSpawn)(void *user,const AvpAmp *bolt,
-                                        const AvpAmp *explosion_amp);
-typedef int (*AvpAmpMpExplosionDamage)(void *user,const AvpAmp *explosion_amp);
-void avp_amp_set_mp_projectile_hooks(AvpAmpMpProjectileSpawn spawn,
-    AvpAmpMpProjectileHit hit,AvpAmpMpExplosionSpawn explosion_spawn,
-    AvpAmpMpExplosionDamage explosion_damage,void *user);
 AvpAmp *player_weapon(s32 heading_x,s32 heading_y,u16 projectile_kind,u16 reset_counter,
                       s32 sin_angle,s32 cos_angle);
 void lostplayer(AvpAmp *amp);
 void UpdateAMPs(void);
-/* Multiplayer extension only. Reuses original acid contact math and damage
- * against the currently scoped player; never invoked by single-player. */
-int avp_amp_acid_contact_player(const AvpAmp *puddle);
-/* Exact native acid mode; false during the preceding death animation. */
-int avp_amp_is_acid_puddle(const AvpAmp *puddle);
-/* PC-only developer option: suspend hostile AMP state-machine updates. */
-/* PC development cheats, inactive by default. All normal Jaguar paths are retained. */
-void avp_amp_set_attacks_disabled(int enabled);
-int avp_amp_attacks_disabled(void);
-/* Optional PC-only Marine pulse-rifle final-frame line-of-sight damage gate. */
-void avp_amp_set_marine_pulse_los_hits(int enabled);
-int avp_amp_marine_pulse_los_hits(void);
-/* Optional PC-only fatal-hit interruption of enemy Marine pulse bursts. */
-/* PC-only opt-in: contact, latch and melee hits use radial reach instead
- * of Jaguar's world-axis-aligned square range. Facing/turning never changes
- * the retail hitbox. Default OFF preserves all original comparisons. */
-void avp_amp_set_normalize_diagonal_contact_range(int enabled);
-/* PC-only enemy pursuit wake distance: 0 original, 1=2x, 2=3x, 3=4x, 4 unlimited. */
-void avp_amp_set_enemy_activation_distance(unsigned mode);
-unsigned avp_amp_enemy_activation_distance(void);
-int avp_amp_normalize_diagonal_contact_range(void);
-void avp_amp_set_marine_fire_interrupt(int enabled);
-int avp_amp_marine_fire_interrupt(void);
-/* Bound only during a native multiplayer AMP-target callback; default off. */
-void avp_amp_set_marine_multiplayer_target(int enabled);
-/* type==-1 kills all living hostiles; otherwise exact AvpCreatureType. */
-unsigned avp_amp_dev_kill_enemies(int type);
-/* PC cheat only: remove all hostile AMP actors from the currently bound
- * level without invoking deaths, scoring, pickups, or Queen progression. */
-unsigned avp_amp_dev_clear_enemies(void);
-/* PC cheat: despawn only damaging level hazards (explosive drums, Queen
- * electric shields/generators, and active Alien acid), no death triggers. */
-unsigned avp_amp_dev_clear_hazards(void);
-void avp_amp_set_facehug_attach_disabled(int enabled);
-int avp_amp_facehug_attach_disabled(void);
-void avp_amp_set_enemies_frozen(int enabled);
-int avp_amp_enemies_frozen(void);
 void chase_player(AvpAmp *amp);
 void pre_discmove(AvpAmp *amp);
 void discmove(AvpAmp *amp);
@@ -178,17 +120,11 @@ void avp_amp_bind_level_list(unsigned list_kind,unsigned level_1based,const AvpA
 void avp_amp_bind_random_list(unsigned player_kind,unsigned level_1based,const AvpAmpRandomEntry *list);
 const AvpAmpSavedPlacement *avp_amp_saved_level(unsigned level_1based);
 void avp_amp_bind_templates(const AvpAmpTemplate *templates,unsigned count);
-void avp_amp_bind_retail_source_templates_and_random(void);
-unsigned avp_amp_bound_template_count(void);
-unsigned avp_amp_bound_level_list_count(void);
 /* Historical template-mode resolver. Authored template numeric payloads may be
  * loaded by the resource layer while mode identity remains executable C. */
 AvpAmpModeFn avp_amp_builtin_mode_for_def(unsigned def_index);
 
 void avp_amp_set_beam_counter(u32 value);
-/* $F00004 is read again after the Marine line-of-sight calculation.
- * On Jaguar these two volatile hardware reads are not the same sample. */
-void avp_amp_set_beam_weapon_sample(u32 (*sample)(void));
 void avp_amp_set_fight_callback(void (*fn)(AvpAmp *,int action));
 void avp_amp_set_death_callback(void (*fn)(AvpAmp *));
 void avp_amp_set_lift_test_callback(int (*fn)(const AvpAmp *));

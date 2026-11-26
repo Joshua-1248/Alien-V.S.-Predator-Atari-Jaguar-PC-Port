@@ -19,6 +19,17 @@ void avp_mp_life_begin(AvpMpLife *life);
 int avp_mp_life_display_step(AvpMpLife *life);
 void avp_mp_life_resumed(AvpMpLife *life);
 void avp_mp_life_wait(AvpMpLife *life);
+/* Hold the outgoing duct view while the local original-style palette fade
+ * runs. Snapshot lives outside actor/Jaguar state and is freed on fade-in. */
+typedef struct AvpMpLifeFrame {
+    uint32_t *pixels;
+    unsigned width,height;
+} AvpMpLifeFrame;
+int avp_mp_life_frame_preserve(AvpMpLifeFrame *frame,const AvpMpLife *fade,
+    uint32_t *pixels,unsigned width,unsigned height,unsigned pitch);
+void avp_mp_life_frame_release(AvpMpLifeFrame *frame);
+/* A renderer must never reuse previous-level animation/door history. */
+int avp_mp_life_level_changed(unsigned *previous_level,unsigned level);
 void avp_mp_life_apply(const AvpMpLife *life,uint32_t *pixels,
                        unsigned width,unsigned height,unsigned pitch);
 #endif

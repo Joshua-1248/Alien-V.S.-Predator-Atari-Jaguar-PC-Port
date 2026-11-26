@@ -12,12 +12,14 @@ typedef struct Player {
     uint32_t frame[16];
 } Player;
 typedef struct World {
-    unsigned campaign, level, joined_mask, ai_ticks;
+    unsigned campaign, level, ai_ticks;
+    AvpMpActorMask joined_mask;
 } World;
 typedef struct Mock {
     unsigned created_worlds, destroyed_worlds, created_players, destroyed_players;
     unsigned enters, exits, total_ticks, total_renders;
     int duplicate_frames;
+    uint32_t spy_frames[AVP_LOCAL_MP_MAX_PLAYERS][16];
     int reject_level, reject_enter_player, reject_render_player, reject_tick_level;
 } Mock;
 
@@ -51,19 +53,19 @@ static int enter_world(void *u, void *world, unsigned player, void *player_ctx)
 {
     Mock *m = u; World *w = world; Player *p = player_ctx;
     if (m->reject_enter_player == (int)player) return 0;
-    if (w->joined_mask & (1u << player)) abort();
-    w->joined_mask |= 1u << player;
+    if (w->joined_mask & (AVP_MP_ACTOR_BIT(player))) abort();
+    w->joined_mask |= AVP_MP_ACTOR_BIT(player);
     ++p->visits; ++m->enters; return 1;
 }
 static void exit_world(void *u, void *world, unsigned player, void *player_ctx)
 {
     Mock *m = u; World *w = world;
     (void)player_ctx;
-    if (!(w->joined_mask & (1u << player))) abort();
-    w->joined_mask &= ~(1u << player);
+    if (!(w->joined_mask & (AVP_MP_ACTOR_BIT(player)))) abort();
+    w->joined_mask &= ~(AVP_MP_ACTOR_BIT(player));
     ++m->exits;
 }
-static int tick_world(void *u, void *world, unsigned member_mask,
+static int tick_world(void *u, void *world, AvpMpActorMask member_mask,
                       void *const players[AVP_LOCAL_MP_MAX_ACTORS], const AvpMpPlayerCommand commands[AVP_LOCAL_MP_MAX_ACTORS],
                       uint64_t tick)
 {
@@ -72,7 +74,7 @@ static int tick_world(void *u, void *world, unsigned member_mask,
     if (w->joined_mask != member_mask || !tick) abort();
     ++w->ai_ticks; ++m->total_ticks;
     for (p = 0; p < AVP_LOCAL_MP_MAX_ACTORS; ++p)
-        if (member_mask & (1u << p)) {
+        if (member_mask & (AVP_MP_ACTOR_BIT(p))) {
             Player *actor = players[p];
             if (!actor) abort();
             actor->accumulated_moves += commands[p].actions;
@@ -85,7 +87,7 @@ static int render_player(void *u, void *world, unsigned player,
 {
     Mock *m = u; World *w = world; Player *p = player_ctx; unsigned y, x;
     if (m->reject_render_player == (int)player) return 0;
-    if (!(w->joined_mask & (1u << player))) abort();
+    if (!(w->joined_mask & (AVP_MP_ACTOR_BIT(player)))) abort();
     ++m->total_renders;
     for (y = 0; y < 4; ++y) for (x = 0; x < 4; ++x)
         p->frame[y * 4 + x] = y == 3 ? (0xB000u + p->health) :
@@ -95,18 +97,31 @@ static int render_player(void *u, void *world, unsigned player,
     return 1;
 }
 
+static int render_spy_player(void *u,void *world,unsigned subject,
+                             void *subject_ctx,unsigned viewer,
+                             AvpLocalMpSourceFrame *out)
+{
+    Mock *m=u;
+    if(viewer>=AVP_LOCAL_MP_MAX_PLAYERS ||
+       !render_player(u,world,subject,subject_ctx,out))return 0;
+    /* The native backend renders the subject's REAL HUD and camera into
+     * the viewer's independently owned framebuffer. Model this ownership. */
+    memcpy(m->spy_frames[viewer],out->pixels,sizeof m->spy_frames[viewer]);
+    out->pixels=m->spy_frames[viewer];
+    return 1;
+}
 /* Simulated backend supports an atomic batch arrival. Rejecting one member
  * never changes the destination membership or either actor. */
-static int enter_world_group(void *u,void *world,unsigned mask,void *const actors[AVP_LOCAL_MP_MAX_ACTORS])
+static int enter_world_group(void *u,void *world,AvpMpActorMask mask,void *const actors[AVP_LOCAL_MP_MAX_ACTORS])
 {
     Mock *m=u;World *w=world;
-    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)){
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         if(m->reject_enter_player==(int)p||!actors[p]||
-           (w->joined_mask&(1u<<p)))return 0;
+           (w->joined_mask&(AVP_MP_ACTOR_BIT(p))))return 0;
     }
-    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)){
+    for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         ++((Player *)actors[p])->visits;++m->enters;
-        w->joined_mask|=1u<<p;
+        w->joined_mask|=AVP_MP_ACTOR_BIT(p);
     }
     return 1;
 }
@@ -115,6 +130,7 @@ static const AvpMpWorldBackend backend = {
     .create_world=create_world,.destroy_world=destroy_world,
     .enter_world=enter_world,.exit_world=exit_world,
     .tick_world=tick_world,.render_player=render_player,
+    .render_spy_player=render_spy_player,
     .enter_world_group=enter_world_group
 };
 
@@ -161,6 +177,27 @@ int main(void)
     CHECK(picture[3 * 10 + 4] == 0xB000u + 101u);
     CHECK(picture[7 * 10 + 4] == 0xB000u + 103u);
     CHECK(picture[8] == 0xEEEEEEEEu && picture[9] == 0xEEEEEEEEu);
+    /* Cross-level spycam: view P2 while controlling P1. Both P2 and P1
+     * retain their original actor state. The COMPLETE target health row is
+     * P2's and the two viewports have independent frame allocations. */
+    CHECK(s.spy_target[0]==0u && s.spy_target[1]==1u);
+    s.spy_target[0]=1u;
+    CHECK(avp_mp_session_compose(&s,&output,0)==4u);
+    CHECK(picture[0]==12u*256u+8u+1u);
+    CHECK(picture[3*10]==0xB000u+101u);
+    CHECK(picture[3*10+4]==0xB000u+101u);
+    CHECK(((Player *)s.player[0])->health==100u);
+    /* Same-level spycam: visual source is P3, not viewer's P1 snapshot.
+     * P3's own viewport is unaffected by being observed. */
+    s.spy_target[0]=2u;
+    CHECK(avp_mp_session_compose(&s,&output,0)==4u);
+    CHECK(picture[0]==7u*256u+8u+2u);
+    CHECK(picture[3*10]==0xB000u+102u);
+    CHECK(picture[4*10]==7u*256u+8u+2u);
+    s.spy_target[0]=0u;
+    CHECK(avp_mp_session_compose(&s,&output,0)==4u);
+    CHECK(picture[0]==7u*256u+8u);
+    CHECK(picture[3*10]==0xB000u+100u);
     m.reject_render_player = 2;
     for (p = 0; p < 80; ++p) picture[p] = 0xAAAAAAAAu;
     CHECK(!avp_mp_session_compose(&s, &output, 0));
@@ -383,15 +420,15 @@ int main(void)
         CHECK(m.created_worlds==m.destroyed_worlds);
         CHECK(m.created_players==m.destroyed_players);
     }
-    /* R19: four human viewports plus TWELVE separately simulated bots.
-     * All 16 must receive real actor ticks, score/transfer masks must
-     * retain bits 8..15, and rendering remains P1-P4 only. */
+    /* R119: four human viewports plus SIXTEEN separately simulated bots.
+     * All 20 receive real actor ticks; transfer masks retain bits 16..19.
+     * Rendering remains P1-P4 only. */
     {
-        AvpMpSession sixteen={0};AvpLocalMpSetup ec;
+        AvpMpSession twenty={0};AvpLocalMpSetup ec;
         unsigned renders_before=m.total_renders;
         avp_local_mp_defaults(&ec);
-        ec.enabled=1u;ec.players=4u;ec.bot_count=12u;
-        for(unsigned j=0;j<16u;j++){
+        ec.enabled=1u;ec.players=4u;ec.bot_count=16u;
+        for(unsigned j=0;j<20u;j++){
             ec.level[j]=1u+(j%15u);
             if(j>=4u){
                 ec.bot_species[j-4u]=j%3u;
@@ -400,33 +437,61 @@ int main(void)
         }
         m.reject_level=m.reject_enter_player=m.reject_render_player=
             m.reject_tick_level=-1;
-        CHECK(avp_mp_session_start(&sixteen,&ec,&backend,&m));
-        CHECK(avp_local_mp_total_actors(&sixteen.setup)==16u);
-        CHECK(avp_mp_session_world_count(&sixteen)==15u);
-        for(unsigned j=0;j<16u;j++){
-            CHECK(sixteen.player[j]!=NULL);
-            CHECK(avp_mp_session_player_world(&sixteen,j)->level==ec.level[j]);
+        CHECK(avp_mp_session_start(&twenty,&ec,&backend,&m));
+        CHECK(avp_local_mp_total_actors(&twenty.setup)==20u);
+        CHECK(avp_mp_session_world_count(&twenty)==15u);
+        for(unsigned j=0;j<20u;j++){
+            CHECK(twenty.player[j]!=NULL);
+            CHECK(avp_mp_session_player_world(&twenty,j)->level==ec.level[j]);
             commands[j].actions=1u+j;
         }
-        CHECK(avp_mp_session_tick(&sixteen,commands));
-        for(unsigned j=0;j<16u;j++)
-            CHECK(((Player *)sixteen.player[j])->accumulated_moves==1u+j);
-        CHECK(avp_mp_session_compose(&sixteen,&output,0)==4u);
+        CHECK(avp_mp_session_tick(&twenty,commands));
+        for(unsigned j=0;j<20u;j++)
+            CHECK(((Player *)twenty.player[j])->accumulated_moves==1u+j);
+        CHECK(avp_mp_session_compose(&twenty,&output,0)==4u);
         CHECK(m.total_renders-renders_before==4u);
         /* A high-index bot's bit must survive both normal and batch joins. */
-        CHECK(avp_mp_session_move(&sixteen,15u,7u));
-        CHECK((avp_mp_session_player_world(&sixteen,15u)->member_mask&(1u<<15))!=0u);
-        for(unsigned j=0;j<16u;j++)if(j!=15u)CHECK(avp_mp_session_move(&sixteen,j,7u));
-        CHECK(avp_mp_session_world_count(&sixteen)==1u);
-        CHECK(avp_mp_session_player_world(&sixteen,15u)->member_mask==65535u);
+        CHECK(avp_mp_session_move(&twenty,19u,7u));
+        CHECK((avp_mp_session_player_world(&twenty,19u)->member_mask&(1u<<19))!=0u);
+        for(unsigned j=0;j<20u;j++)if(j!=19u)CHECK(avp_mp_session_move(&twenty,j,7u));
+        CHECK(avp_mp_session_world_count(&twenty)==1u);
+        CHECK(avp_mp_session_player_world(&twenty,19u)->member_mask==((1u<<20)-1u));
         unsigned tick_before=m.total_ticks;
-        CHECK(avp_mp_session_tick(&sixteen,commands));
+        CHECK(avp_mp_session_tick(&twenty,commands));
         CHECK(m.total_ticks==tick_before+1u);
-        CHECK(avp_mp_session_move_group(&sixteen,65535u,8u));
-        CHECK(avp_mp_session_player_world(&sixteen,0u)->member_mask==65535u);
-        CHECK(avp_mp_session_player_world(&sixteen,15u)->level==8u);
-        CHECK(avp_mp_session_compose(&sixteen,&output,0)==4u);
-        avp_mp_session_stop(&sixteen);
+        CHECK(avp_mp_session_move_group(&twenty,((1u<<20)-1u),8u));
+        CHECK(avp_mp_session_player_world(&twenty,0u)->member_mask==((1u<<20)-1u));
+        CHECK(avp_mp_session_player_world(&twenty,19u)->level==8u);
+        CHECK(avp_mp_session_compose(&twenty,&output,0)==4u);
+        avp_mp_session_stop(&twenty);
+        CHECK(m.created_worlds==m.destroyed_worlds);
+        CHECK(m.created_players==m.destroyed_players);
+    }
+    /* R131: high actor slots must survive world ticks, spy views and a
+     * complete group transfer with bits 32..35 (no 32-bit aliases). */
+    {
+        AvpMpSession large={0}; AvpLocalMpSetup ec;
+        AvpMpActorMask all=AVP_MP_ACTOR_BIT(36u)-UINT64_C(1);
+        avp_local_mp_defaults(&ec);
+        ec.enabled=1u;ec.players=4u;ec.bot_count=32u;
+        for(unsigned j=0;j<36u;j++)ec.level[j]=3u;
+        m.reject_level=m.reject_enter_player=m.reject_render_player=
+            m.reject_tick_level=-1;
+        CHECK(avp_mp_session_start(&large,&ec,&backend,&m));
+        CHECK(avp_local_mp_total_actors(&large.setup)==36u);
+        CHECK(avp_mp_session_world_count(&large)==1u);
+        CHECK(avp_mp_session_player_world(&large,35u)->member_mask==all);
+        for(unsigned j=0;j<36u;j++)commands[j].actions=j+1u;
+        CHECK(avp_mp_session_tick(&large,commands));
+        CHECK(((Player *)large.player[35])->accumulated_moves==36u);
+        large.spy_target[0]=35u;
+        CHECK(avp_mp_session_compose(&large,&output,0)==4u);
+        CHECK(avp_mp_session_move_group(&large,all,4u));
+        CHECK(avp_mp_session_player_world(&large,35u)->level==4u);
+        CHECK(avp_mp_session_player_world(&large,35u)->member_mask==all);
+        CHECK(avp_mp_session_tick(&large,commands));
+        CHECK(((Player *)large.player[35])->accumulated_moves==72u);
+        avp_mp_session_stop(&large);
         CHECK(m.created_worlds==m.destroyed_worlds);
         CHECK(m.created_players==m.destroyed_players);
     }
@@ -436,6 +501,6 @@ int main(void)
     CHECK(m.created_worlds == m.destroyed_worlds);
     CHECK(m.created_players == m.destroyed_players);
     CHECK(!broken.running);
-    puts("PASS: up to 16 native actor contexts with 4 human views, independent worlds, shared-level AI ticks, transaction-safe transitions, full HUD frames, rollback and fail-stop");
+    puts("PASS: up to 20 native actor contexts with 4 human views, independent worlds, shared-level AI ticks, transaction-safe transitions, full HUD frames, rollback and fail-stop");
     return 0;
 }

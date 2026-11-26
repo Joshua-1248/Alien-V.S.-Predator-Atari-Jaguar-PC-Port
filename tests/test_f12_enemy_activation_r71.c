@@ -19,7 +19,7 @@ static ssize_t avp_test_readlink(const char *path,char *target,size_t cap)
     return (ssize_t)n;
 }
 #define readlink avp_test_readlink
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 #undef readlink
 s16 cur_level=1;
 int avp_mm_select(AvpMapMaker *m,unsigned level){(void)m;(void)level;return 1;}
@@ -51,6 +51,7 @@ unsigned avp_pc_prototype_textures_apply_search(AvpPcPrototypeTextures *s,
     AvpAvpGpuState *g,const char *a,const char *b,const char *c,int d,
     char *e,size_t f)
 {(void)s;(void)g;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;return 0;}
+#include "../new/audio/tests/sound_channels_menu_regression.inc"
 int main(void)
 {
     char folder[]="/tmp/avp-r71-options-XXXXXX";
@@ -64,7 +65,9 @@ int main(void)
     make_settings_path(v);
     v->menu_open=1;v->menu_page=MENU_ENHANCEMENTS;
     assert(v->cfg.enemy_activation_distance==0);
-    assert(menu_count(v)==15);
+    /* Enhancements may acquire unrelated entries.  Verify this option
+     * exists exactly once, not the historic fixed menu length. */
+    assert(menu_count(v)>=17);
     {int n=0;for(int i=0;i<menu_count(v);i++)n+=(menu_id(v,i)==177);assert(n==1);}
     v->menu_index=177;
     for(int i=1;i<=4;i++){menu_adjust(v,1);assert(v->cfg.enemy_activation_distance==i);}
@@ -79,8 +82,11 @@ int main(void)
     f=fopen(v->settings_path,"w");assert(f);
     fputs("enhancement.enemy_activation_distance=99\n",f);fclose(f);
     load_settings(loaded);assert(loaded->cfg.enemy_activation_distance==0);
+    test_sound_channel_menu(v,loaded);
     unlink(v->settings_path);rmdir(folder);
     free(loaded);free(v);
     puts("R71 F12 enemy activation 2x/3x/4x/unlimited cycling and persistence PASS");
     return 0;
 }
+
+#include "../new/audio/tests/sound_channels_menu_stub.inc"

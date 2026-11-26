@@ -69,6 +69,22 @@ static void capture_marine_fight(AvpAmp *a,int action)
     (void)a;
     marine_fight_action=action;
 }
+/* R294: test the actual Alien death-state damage path, not only a helper. */
+static s16 r294_alien_death_spray_health(s32 dx,s32 dy,s16 species)
+{
+    AvpAmp *a;
+    InitAMPs();build_level();
+    a=amp_req();assert(a);
+    *a=(AvpAmp){0};
+    a->mode=chase_player;a->creature=AC_ALIEN;
+    a->xpos=0x00088000;a->ypos=0x00088000;
+    a->energy=0;a->oldenergy=100;a->animseq=AS_RUN;
+    x_pos=(u32)(a->xpos+dx);y_pos=(u32)(a->ypos+dy);
+    player_type=species;player_energy=500;
+    chase_player(a);
+    assert(a->flags&(1u<<AMP_DEAD));
+    return player_energy;
+}
 int main(void){unsigned i;for(i=0;i<AVP_NUM_AMPS;++i){level1amps[i].mode=dummy;level1amps[i].flags=0xffff;}InitAMPs();assert(levels_visit==0);for(i=0;i<AVP_NUM_AMPS;++i)assert(level1amps[i].mode==0);build_level();{AvpAmp*a=amp_req();assert(a==&level1amps[0]);assert(a->flags==0&&a->astype==-1);} {AvpAmp*b=amp_req();assert(b==&level1amps[1]);amp_release(2);assert(amp_req()==&level1amps[1]);}
     {
         const AvpAmpSavedPlacement *saved;
@@ -619,9 +635,10 @@ int main(void){unsigned i;for(i=0;i<AVP_NUM_AMPS;++i){level1amps[i].mode=dummy;l
         player_type=PT_ALIEN;
         level1amps[2].mode(&level1amps[2]);
         for(unsigned i=0;i<3;i++){
-            /* The two generator entries are not released or cleared;
-             * the facehugger still follows its own amp_release path. */
-            assert(collmap[9u*AVP_AMP_GRID_W+8u+i]==(i<2u?i+1u:0u));
+            /* AMP.S clears only the actor mode for both generators and the
+             * Alien-campaign starter facehugger. No entry is released or
+             * removed from its existing grid cell (R184). */
+            assert(collmap[9u*AVP_AMP_GRID_W+8u+i]==i+1u);
             assert(level1amps[i].mode==NULL&&!level1amps[i].host_static);
         }
     }
@@ -695,12 +712,10 @@ int main(void){unsigned i;for(i=0;i<AVP_NUM_AMPS;++i){level1amps[i].mode=dummy;l
         level1amps[1].mode(&level1amps[1]);
         player_type=PT_ALIEN;
         level1amps[2].mode(&level1amps[2]);
-        /* R272: AMP.S .xgen2 and ?genmode only CLR.L amp_mode -- generator
-         * slots stay allocated (not returned to l1_amp_free); only paths that
-         * call amp_release (here the facehugger) return their slot. */
-        assert(amp_req()==&level1amps[2]);
-        {AvpAmp *next=amp_req();
-         assert(next!=&level1amps[1]&&next!=&level1amps[0]);}
+        /* AMP.S .xgen2, ?genmode AND Alien-campaign start_hug all disable
+         * the mode without returning their AMP slots to l1_amp_free. */
+        assert(amp_req()==&level1amps[3]);
+        assert(amp_req()==&level1amps[4]);
     }
     /* Spawn candidates use the same ownership rules as movement: an AMP
      * that has left its old cell cannot reserve that cell forever.  Genuine
@@ -1164,6 +1179,30 @@ int main(void){unsigned i;for(i=0;i<AVP_NUM_AMPS;++i){level1amps[i].mode=dummy;l
         assert(avp_amp_acid_contact_player(&a)==1 && player_energy==97);
         x_pos=(u32)(bx+(31<<9));y_pos=(u32)by;
         assert(avp_amp_acid_contact_player(&a)==0);
+        avp_amp_set_normalize_diagonal_contact_range(0);
+    }
+    /* R294: Alien DEATH spray uses original 96x96 square unless its own
+     * opt-in flag selects a circle. Other contact setting has no authority
+     * over this 50-health one-shot. Alien immunity remains intact. */
+    {
+        const s32 r=96<<9;
+        avp_amp_set_normalize_diagonal_contact_range(0);
+        avp_amp_set_normalize_diagonal_alien_death_spray_range(0);
+        assert(!avp_amp_normalize_diagonal_alien_death_spray_range());
+        assert(r294_alien_death_spray_health(r,r,PT_HUMAN)==450);
+        avp_amp_set_normalize_diagonal_contact_range(1);
+        assert(r294_alien_death_spray_health(r,r,PT_HUMAN)==450);
+        avp_amp_set_normalize_diagonal_alien_death_spray_range(1);
+        assert(avp_amp_normalize_diagonal_alien_death_spray_range());
+        assert(r294_alien_death_spray_health(r,r,PT_HUMAN)==500);
+        assert(r294_alien_death_spray_health(r,0,PT_HUMAN)==450);
+        assert(r294_alien_death_spray_health(0,-r,PT_HUMAN)==450);
+        assert(r294_alien_death_spray_health(57<<9,76<<9,PT_HUMAN)==450);
+        assert(r294_alien_death_spray_health(60<<9,80<<9,PT_HUMAN)==500);
+        assert(r294_alien_death_spray_health(97<<9,0,PT_HUMAN)==500);
+        assert(r294_alien_death_spray_health(0,0,PT_ALIEN)==500);
+        avp_amp_set_normalize_diagonal_alien_death_spray_range(0);
+        assert(r294_alien_death_spray_health(r,r,PT_HUMAN)==450);
         avp_amp_set_normalize_diagonal_contact_range(0);
     }
     /* Enemy Facehuggers only begin their latch animation within the chosen

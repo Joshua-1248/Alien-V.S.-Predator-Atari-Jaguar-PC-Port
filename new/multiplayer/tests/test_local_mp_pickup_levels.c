@@ -298,6 +298,80 @@ static int test_dm_body_collectables(void)
     CHECK((cur_weps&(1u<<1)) && !(cur_weps&(1u<<2)));
     return 0;
 }
+/* R280: these are physical retail ammo pickups, NOT dead-body loot.
+ * Verify that the same co-op Collectables() path handles all four pools,
+ * respects the original cap, and retains each other player's own claim. */
+static int test_standalone_ammo_pickups(void)
+{
+    const struct {
+        s16 def,type,amount;
+        unsigned weapon;
+    } cases[]={
+        {25,COLL_SHOTAMMO,15,1},
+        {16,COLL_PULSEAMMO,60,2},
+        {15,COLL_FLAMEAMMO,25,3},
+        {12,COLL_SMARTAMMO,20,4},
+        {24,COLL_PULSEAMMO,60,2},
+        {23,COLL_SMARTAMMO,20,4},
+    };
+    for(unsigned i=0;i<sizeof(cases)/sizeof(cases[0]);i++){
+        s16 type=0,amount=0;
+        const unsigned w=cases[i].weapon-1u;
+        CHECK(avp_collect_peek(3,5u+i,5u,cases[i].def,&type,&amount));
+        CHECK(type==cases[i].type&&amount==cases[i].amount);
+        avp_collect_set_mp_item_claim(NULL,NULL);
+        prepare(3,5u+i,5u,cases[i].def);
+        reset_actor();cur_weps|=(u8)(1u<<cases[i].weapon);
+        ammo_info[w].max=200;ammo_info[w].cur=199;
+        /* Original cap is applied even if the physical pickup holds more. */
+        Collectables();CHECK(ammo_info[w].cur==200u);
+        CHECK(!level1amps[0].mode && !level1amps[0].host_static);
+
+        memset(coop_owned,0,sizeof(coop_owned));
+        prepare(3,5u+i,5u,cases[i].def);
+        avp_collect_set_mp_item_claim(coop_claim,NULL);
+        for(coop_actor=0;coop_actor<4u;coop_actor++){
+            reset_actor();cur_weps|=(u8)(1u<<cases[i].weapon);
+            ammo_info[w].max=200;ammo_info[w].cur=0u;
+            Collectables();CHECK(ammo_info[w].cur==(u16)cases[i].amount);
+            CHECK((coop_owned[0]&(1u<<coop_actor))!=0);
+            CHECK(!(level1amps[0].flags&(1u<<AMP_COLLECT)));
+            CHECK(level1amps[0].host_static);
+            ammo_info[w].cur=0u;
+            Collectables();CHECK(ammo_info[w].cur==0u); /* no farming */
+        }
+        CHECK(coop_owned[0]==0x0fu);
+        avp_collect_set_mp_item_claim(NULL,NULL);
+    }
+    /* R295: the original game lets a Marine collect loose Pulse Rifle
+     * rounds BEFORE obtaining the rifle itself. This is the key Sub-Level 3
+     * Brig supply case: the inventory's missing weapon bit is not a veto. */
+    {
+        s16 type=0,amount=0;
+        CHECK(avp_collect_peek(3,0x28,0x1d,38,&type,&amount));
+        CHECK(type==COLL_PULSEAMMO && amount==60);
+        avp_collect_set_mp_item_claim(NULL,NULL);
+        prepare(3,0x28,0x1d,38);
+        reset_actor();
+        cur_weps=(u8)(cur_weps&~(1u<<2));
+        ammo_info[1].cur=0;ammo_info[1].max=200;
+        Collectables();
+        CHECK(ammo_info[1].cur==60);
+        CHECK(!(cur_weps&(1u<<2)));
+        puts("R295 unowned Pulse Rifle ammo pickup at original Brig position: PASS");
+    }
+    /* Full magazine cannot consume an otherwise unused physical pickup. */
+    memset(coop_owned,0,sizeof(coop_owned));
+    prepare(3,5u,5u,25);
+    avp_collect_set_mp_item_claim(coop_claim,NULL);
+    coop_actor=0;reset_actor();cur_weps|=(1u<<1);
+    ammo_info[0].max=200;ammo_info[0].cur=200;
+    Collectables();CHECK(!(coop_owned[0]&1u));
+    ammo_info[0].cur=195;
+    Collectables();CHECK(ammo_info[0].cur==200 && (coop_owned[0]&1u));
+    avp_collect_set_mp_item_claim(NULL,NULL);
+    return 0;
+}
 int main(void)
 {
     {s16 type,amount;
@@ -437,8 +511,27 @@ int main(void)
     player_energy=200;objmap[0x21*AVP_AMP_OBJ_ROW_BYTES+0x25*2+1]=1;
     Collectables();CHECK(player_energy==200);
     CHECK(last_sound!=0);
+    CHECK(test_standalone_ammo_pickups()==0);
     CHECK(test_per_player_coop_pickups()==0);
     CHECK(test_dm_body_collectables()==0);
+    /* R279: the original Sub-Level 3 green-uniform dead actor (astype 38)
+     * supplies 60 Pulse Rifle rounds. Near-full ammo still has a real
+     * positive benefit and stays bound by the original magazine maximum. */
+    {
+        s16 type=0,amount=0;
+        CHECK(avp_collect_peek(3,0x28,0x1d,38,&type,&amount));
+        CHECK(type==COLL_PULSEAMMO&&amount==60);
+        CHECK(avp_collect_peek(4,0x0c,0x13,39,&type,&amount));
+        CHECK(type==COLL_S6);
+        CHECK(avp_collect_peek(14,0x21,0x0b,39,&type,&amount));
+        CHECK(type==COLL_S10);
+        avp_collect_set_mp_item_claim(NULL,NULL);
+        prepare(3,0x28,0x1d,38);
+        reset_actor();cur_weps|=(1u<<2);
+        ammo_info[1].cur=199;ammo_info[1].max=200;
+        Collectables();
+        CHECK(ammo_info[1].cur==200);
+    }
     puts("PASS: level-switch loot and four-player independent keycards, weapons, ammo, health, respawn claims");
     return 0;
 }

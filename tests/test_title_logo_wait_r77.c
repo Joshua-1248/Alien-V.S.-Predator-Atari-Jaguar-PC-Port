@@ -2,7 +2,7 @@
  * automatic menu handoff. Synthetic samples only; no ROM artwork bundled.
  */
 #define _DEFAULT_SOURCE 1
-#include "../src/jaguar/avp_gpu/frontend_renderer.c"
+#include "../new/jaguar/avp_gpu/frontend_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,6 +1,6 @@
 /* R131 wall-column reference versus R132 same-texel reuse.  This is a
  * production-routine pixel/depth comparison using synthetic images only. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

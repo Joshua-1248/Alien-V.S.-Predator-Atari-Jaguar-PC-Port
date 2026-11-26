@@ -20,9 +20,9 @@ def audit(rom_path, source_path):
     expected=(4,0xF1DE00,0xF1DE00,0,0x28F00,0,0x80004000)
     assert mod[:7]==expected,(mod[:7],expected)
     source=Path(source_path)
-    synth=(source/'src/jaguar/host/fullsynth_host.c').read_text()
-    pcm=(source/'src/platform/pc/pc_audio.c').read_text()
-    game=(source/'src/platform/pc/pc_main.c').read_text()
+    synth=(source/'new/jaguar/host/fullsynth_host.c').read_text()
+    pcm=(source/'new/pc_host/src/pc_audio.c').read_text()
+    game=(source/'new/pc_host/src/pc_main.c').read_text()
     assert 'if(start)StartAla(AVP_FX_NEWAL);' in game
     assert 'wave=host_wave_sample(m->p[1],pos)' in synth
     assert 'host_wave_table[7][i]=(s16)lrint(n*32767.0)' in synth

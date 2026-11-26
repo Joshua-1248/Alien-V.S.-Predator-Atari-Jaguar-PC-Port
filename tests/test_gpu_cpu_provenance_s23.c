@@ -78,6 +78,9 @@ int main(void)
     jr_movei(8,15,0x1600u);jr_inst(14,47,15,1);/* STORE */
     jr_movei(16,20,0xF03020u);jr_inst(22,52,20,0); /* JUMP */
     jr_inst(24,57,0,0);
+    /* R236 BIG_INSTR=0 fetches the low lane first. The authored synthetic
+     * instruction stream is high-word first, so request that DORG mode. */
+    machine.gpu.bigend=4u;
     machine.gpu.pc=0xF03000u;machine.gpu.go=1u;
     assert(jagm_run_until_gpu_pc(&machine,0xF03020u,0,2));
     assert(map->page[0x12].gpu_reads>0u);

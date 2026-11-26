@@ -12,8 +12,7 @@ typedef enum AvpComputerHandler {
 
 typedef struct AvpComputerContent {
     u16 pages;
-    /* Historical RDB.DTA addresses of authored encoded terminal pages. */
-    const u32 *page_address;
+    const char *const *page;
     /* Source pointer-identity decisions expressed as resource metadata. */
     const struct AvpComputerContent *access9_alternate;
     u8 allows_destruct;
@@ -26,8 +25,6 @@ typedef struct AvpComputerTerminal {
 } AvpComputerTerminal;
 
 void avp_computer_bind_level(unsigned level,const AvpComputerTerminal *records,size_t count);
-void avp_computer_bind_retail_terminals(void);
-int avp_computer_active(void);
 void cls(void);
 void InitComp(void);
 void Computer(void);

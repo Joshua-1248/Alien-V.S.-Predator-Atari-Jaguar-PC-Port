@@ -1,0 +1,12 @@
+{
+  "path": "include/main_game.h",
+  "base_sha256": "fafe6ed38418833214c82b58d3db034b0920df42680d29bfdb3422f4e1ccc603",
+  "output_sha256": "f3e5ce521ad218b46440b15c39ca484cef7290043d3feb40c087665325c71679",
+  "edits": [
+    {
+      "start": 4,
+      "end": 4,
+      "replacement": "void avp_post_game_frontend(void);\n#include \"../new/pc_host/integration/main_game_host_declarations.inc\"\n\n"
+    }
+  ]
+}

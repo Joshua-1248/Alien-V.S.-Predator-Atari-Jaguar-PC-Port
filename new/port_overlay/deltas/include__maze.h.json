@@ -1,0 +1,17 @@
+{
+  "path": "include/maze.h",
+  "base_sha256": "12ed46a8f7708b927f42b2139d74d561da9fec358d069c72b1f8fb602d97b9b3",
+  "output_sha256": "62d277b439f9aeb1de2030c2cc87abc5201b147fb62f1f4d1c8a083e69320bff",
+  "edits": [
+    {
+      "start": 7,
+      "end": 11,
+      "replacement": "#define AVP_NORMAL_SCALE ((128*85)/100)\n#define AVP_NORMAL_WIDTH 1\n#define AVP_DUCT_SCALE 128\n#define AVP_DUCT_WIDTH 0\n"
+    },
+    {
+      "start": 38,
+      "end": 38,
+      "replacement": "int avp_campaign_advance_end_count(void);\n"
+    }
+  ]
+}

@@ -32,9 +32,43 @@ s16 game_over;
 static void count_sound(AvpCountdownCue cue){(void)cue;sound_ticks++;}
 static void alarm(int start){alarm_on=(unsigned)start;}
 
+/* Player CPU state used by the native energy meter. */
+s16 player_type,player_energy,max_energy;
+
 int main(void)
 {
     s16 a,b;
+    /* R305: the PC preference must preserve original low-health flashing
+     * and must never alter the visible Energy amount or threshold. */
+    player_type=0;max_energy=1000;player_energy=300; /* 30% < 37.5% */
+    avp_hud_set_low_health_energy_flash(1);
+    InitNrg();
+    {
+        unsigned hidden=0,visible=0;
+        for(unsigned tick=0;tick<32;tick++){
+            UpdtNrg();
+            if(avp_hud_energy_pixels())visible++;else hidden++;
+        }
+        assert(hidden>0 && visible>0);
+    }
+    /* Turning off flashing immediately restores the ordinary energy bar,
+     * including in the middle of an otherwise-hidden original flash phase. */
+    avp_hud_set_low_health_energy_flash(0);
+    for(unsigned tick=0;tick<32;tick++){
+        UpdtNrg();assert(avp_hud_energy_pixels()>0);
+    }
+    avp_hud_set_low_health_energy_flash(1);
+    player_energy=500; /* 50%, must never flash even with original ON */
+    InitNrg();
+    for(unsigned tick=0;tick<24;tick++){
+        UpdtNrg();assert(avp_hud_energy_pixels()>0);
+    }
+    player_energy=0;
+    avp_hud_set_low_health_energy_flash(0);
+    for(unsigned tick=0;tick<12;tick++){
+        UpdtNrg();assert(avp_hud_energy_pixels()==0);
+    }
+    avp_hud_set_low_health_energy_flash(1);
     avp_hud_set_pred_meter_samples(8192,0); /* (sample << 6) >> 16 = 8 */
     HP2();
     avp_hud_pred_meter_span(0,&a,&b);
@@ -65,15 +99,52 @@ int main(void)
 
     avp_hud_set_clock(0u,10u);
     avp_hud_set_countdown_callbacks(count_sound,alarm);
+    /* Single-player HUD.S per-call flash behavior must not change. */
+    avp_hud_set_coop_countdown(0u);
     InitCountdown();
-    assert(counttime==121&&ticktime==20u&&alarm_on==1u);
-    assert(xtra_c==0xf180u);
     Countdown();
     assert(xtra_c==0xf194u&&flash_dir==20);
     Countdown();
     assert(xtra_c==0xf1a8u&&flash_dir==-20);
     Countdown();
     assert(xtra_c==0xf194u&&flash_dir==-20);
+    avp_hud_set_coop_countdown(1u);
+    sound_ticks=0u;
+    game_over=0;
+    avp_hud_set_clock(0u,10u);
+    InitCountdown();
+    assert(counttime==121&&ticktime==20u&&alarm_on==1u);
+    assert(xtra_c==0xf180u);
+    Countdown();
+    assert(xtra_c==0xf194u&&flash_dir==20);
+    /* R300: once per shared original game tick, NOT once per Marine HUD.
+     * A four-player world must show exactly one red-flash phase change. */
+    Countdown();
+    assert(xtra_c==0xf194u&&flash_dir==20);
+    avp_hud_set_clock(1u,10u);
+    Countdown();
+    assert(xtra_c==0xf1a8u&&flash_dir==-20);
+    Countdown();
+    assert(xtra_c==0xf1a8u&&flash_dir==-20);
+    avp_hud_set_clock(2u,10u);
+    Countdown();
+    assert(xtra_c==0xf194u&&flash_dir==-20);
     assert(counttime==121&&game_over==0&&sound_ticks==0);
+    for(u32 frame=3u;frame<=1220u;frame++){
+        avp_hud_set_clock(frame,10u);
+        Countdown();
+        /* Four independently bound Marine HUDs in the SAME level. */
+        for(unsigned k=0;k<3u;k++){
+            u16 before=xtra_c;
+            Countdown();
+            assert(xtra_c==before);
+        }
+        if(frame==20u){assert(counttime==120);assert(sound_ticks==1u);}
+        if(frame==620u){assert(counttime==60);}
+        if(frame==1220u){assert(counttime==0);}
+    }
+    assert(game_over==-1&&alarm_on==0u);
+    assert(xtra_c==0x8880u);
+    avp_hud_set_coop_countdown(0u);
     return 0;
 }

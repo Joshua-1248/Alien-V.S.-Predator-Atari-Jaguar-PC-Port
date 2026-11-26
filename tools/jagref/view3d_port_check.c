@@ -7,7 +7,7 @@
  * runs the view twice:
  *   A  the ROM's GPU program on the TRM JRISC core (overlays loaded by the
  *      original sequencer), stopped where the sequencer loads stage 3;
- *   B  src/jaguar/avp_gpu/view3d.c (stages 0, 1, 2) on a copy of the machine,
+ *   B  new/jaguar/avp_gpu/view3d.c (stages 0, 1, 2) on a copy of the machine,
  *      driving the same TRM Blitter model through a plain bus.
  * It fails unless every Blitter command (all registers at command time,
  * excluding the original's code-copy blits into GPU RAM), all 2 MiB of DRAM,

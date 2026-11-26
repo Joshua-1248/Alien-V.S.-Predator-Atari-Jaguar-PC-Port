@@ -7,6 +7,7 @@
 typedef struct AvpMpDeathmatch {
     unsigned enabled,players,score_limit,time_limit_minutes,fast_movement;
     unsigned fast_equip,enemies,level,level_travel,cloak_damage;
+    unsigned predator_uncloaked_damage;
     uint64_t elapsed_ticks;
     unsigned kills[AVP_LOCAL_MP_MAX_ACTORS];
     unsigned deaths[AVP_LOCAL_MP_MAX_ACTORS];
@@ -39,6 +40,11 @@ int avp_mp_dm_spawn_origin_region(const uint16_t components[4096],
  * remain unchanged. `source_damage` already includes native charge decay. */
 int avp_mp_dm_direct_damage(int16_t species,int16_t weapon,int source_damage);
 /* Deathmatch-only victim vulnerability; the original AMP damage is unchanged. */
+/* Apply only on PC-local player-versus-player hits, after native weapon
+ * calculation. The caller supplies whether the attacking Predator was
+ * uncloaked when the hit/shot was made; never use this against enemy AMPs. */
+int avp_mp_dm_predator_attacker_damage(unsigned modifier,
+                                       unsigned predator_uncloaked,int damage);
 int avp_mp_dm_victim_damage(unsigned modifier,int16_t species,
                             unsigned invisflag,int damage);
 /* Projectile/splash damage against player avatars, never against AMPs. */

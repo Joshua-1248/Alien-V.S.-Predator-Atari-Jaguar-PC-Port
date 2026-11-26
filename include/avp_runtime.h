@@ -34,41 +34,19 @@ typedef struct AvpRuntimeOps {
     void (*ambient)(void *user);
     void (*kill_ambient)(void *user);
     void (*kill_sounds)(void *user);
-    /* MAZESCRN.S LoseSounds/RestoreSounds preserves voice 1 and the type
-       of voice 2 across the pause menu. The PC backend can also retain the
-       exact synthesizer phase of those two voices, rather than restarting
-       the weapon and silently dropping an active destruction alarm. */
-    void (*pause_sfx_save)(void *user);
-    void (*pause_sfx_restore)(void *user,u32 weapon_handle,u32 alarm_handle);
     void (*play_sfx)(void *user, unsigned id);
     void (*play_sfx_params)(void *user, unsigned id, s32 left, s32 right);
-    /* Optional handle-aware form used by the hosted FullSynth mirror.  The
-     * ordinary Jaguar game code still allocates the handle/voice; the host
-     * merely associates its mixer voice with that identity. */
-    void (*play_sfx_handle)(void *user, unsigned id, u32 handle, unsigned voice);
-    /* Optional read-only host completion query.  The 68000 allocator must
-       reclaim a one-shot voice once its DSP sample has finished. */
-    int (*sfx_handle_active)(void *user, u32 handle);
-    /* The Jaguar DSP can finish an unlooped voice AFTER 68000 VIdent is
-     * cleared.  Read the physical voice slot rather than a vanished handle. */
-    int (*sfx_voice_active)(void *user, unsigned voice);
-    void (*unloop_sfx)(void *user, u32 handle);
     /* 68000 AVPSOUND allocates stable effect handles.  These optional host
      * hooks let a native mixer mirror the historical per-voice operations. */
     void (*stop_sfx)(void *user, u32 handle);
     void (*mod_sfx)(void *user, u32 handle, s32 value);
-    void (*position_sfx)(void *user, u32 handle, s32 x, s32 y);
     void (*start_music)(void *user, unsigned id);
     void (*stop_music)(void *user);
-    /* Hosted equivalent of the Jaguar UEBERVOLUME mixer register. */
-    void (*set_master_volume)(void *user, u32 volume);
     void (*set_message)(void *user, unsigned id);
     void (*load_level)(void *user, s16 level);
     void (*leave_level)(void *user, s16 level);
     int  (*safe_pos)(void *user, s32 x, s32 y, s16 height, u16 width);
     int  (*amp_collision)(void *user, s32 x, s32 y);
-    /* Host movement modifier, consumed ONLY by the player movement routine. */
-    int  (*player_noclip)(void *user);
     int  (*door_access)(void *user, u32 door_offset, u8 panel, u8 current_access);
     void (*area_damage)(void *user, s32 x, s32 y, u32 radius, s16 damage, u16 kill_flags);
     int  (*fire_distance)(void *user, s32 x, s32 y, u16 angle, u32 *distance_out);
@@ -77,13 +55,6 @@ typedef struct AvpRuntimeOps {
     void (*draw_number)(void *user, s32 value,unsigned digits,unsigned x,unsigned y,unsigned cw,unsigned ch);
     void (*frontend_event)(void *user, unsigned event, s32 arg0, s32 arg1);
     int  (*frontend_choice)(void *user, unsigned mode, s32 *choice_inout);
-    /* Optional host F2 launch probe. Always part of the ABI because the
-     * avp_c runtime and avp_pc executable have different feature defines. */
-    int  (*frontend_mp_launch_pending)(void *user);
-    /* PC-only F2 setup visibility query. Unlike frontend input polling, this
-     * is read after each MJP title tick to suspend the retail idle countdown.
-     * NULL retains the original 800-tick Jaguar attract sequence unchanged. */
-    int  (*frontend_mp_menu_open)(void *user);
     /* Optional text-entry bridge.  The MJP C state machine owns score insertion,
      * cursor rules and EEPROM packing; a host UI may only supply six entered
      * characters here.  Return nonzero when out_name was filled. */
@@ -101,17 +72,11 @@ typedef struct AvpRuntimeOps {
     void (*frontend_load_resource)(void *user, unsigned mode, unsigned file_index, unsigned role);
     void (*object_event)(void *user, unsigned event, u32 arg0, u32 arg1, u32 arg2);
     void (*file_event)(void *user, unsigned event, u32 arg0, u32 arg1, u32 arg2);
-    /* PC optional atomic start with original caller TFX D1. The 68000 CPU
-     * allocator remains the only owner of voice selection / handle. */
-    void (*play_sfx_handle_d1)(void *user,unsigned id,u32 handle,unsigned voice,s32 d1);
     void *user;
 } AvpRuntimeOps;
 
 void avp_runtime_bind(const AvpRuntimeOps *ops);
 const AvpRuntimeOps *avp_runtime_ops(void);
-/* VBlank-chained FX master fade (retail $2EE80 handler hook). */
-void avp_runtime_set_fx_vblank(void (*fn)(void));
-void avp_runtime_fx_vblank(void);
 void avp_runtime_reset_ops(void);
 
 #endif

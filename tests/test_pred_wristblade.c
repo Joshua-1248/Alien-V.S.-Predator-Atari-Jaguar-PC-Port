@@ -88,6 +88,42 @@ int main(void){
     assert(melee_hits>=1 && melee_damage>0 && melee_damage<=30);
     assert(blade_sfx>=1);
 
+    /* Predator Combi-Stick first equip must present the first authored
+     * move-in pose, NOT the settled frame0 position.  The Jaguar script
+     * offsets by (+60,+60), sets (-10,-10) velocity, and moves once,
+     * yielding (+50,+50) before its first displayed animation frame.
+     * Probe source state before and after the first actual game tick. */
+    player_type=PT_PREDATOR;
+    cur_weps=(u8)((1u<<1)|(1u<<4));cur_wepno=1;new_wepno=0;wep_fire=0;
+    new_weapon();
+    avp_mazescrn_get_overlay_state(&st);
+    assert(st.overlay_visible && st.overlay_id==15);
+    assert(st.x==0 && st.y==0);
+    assert(st.intro_preview && st.intro_x==(50L<<16) && st.intro_y==(50L<<16));
+    avp_mazescrn_get_overlay_state(&st);
+    assert(st.intro_preview && st.x==wep_x && st.y==wep_y);
+    tick();avp_mazescrn_get_overlay_state(&st);
+    assert(st.x==(50L<<16) && st.y==(50L<<16) && !st.intro_preview);
+    for(n=0;n<12;n++)tick();
+    /* Also reproduce ordinary weapon-cycle completion (wrist -> stick).
+     * The introduction is visible between new_weapon and the next tick. */
+    cur_wepno=4;new_wepno=0;new_weapon();for(n=0;n<12;n++)tick();
+    new_wepno=1;
+    {
+        int switched=0;
+        for(n=0;n<32;n++){
+            tick();avp_mazescrn_get_overlay_state(&st);
+            if(cur_wepno==1){
+                assert(st.intro_preview && st.intro_x==(50L<<16) && st.intro_y==(50L<<16));
+                switched=1;break;
+            }
+        }
+        assert(switched);
+        tick();avp_mazescrn_get_overlay_state(&st);
+        assert(!st.intro_preview && st.x==(50L<<16) && st.y==(50L<<16));
+    }
+    for(n=0;n<12;n++)tick();
+
     /* Preserve the previously user-confirmed Marine R98 correction.
      * The read-only source pose must never alter simulation state. */
     avp_mazescrn_set_shot_callback(NULL);

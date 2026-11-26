@@ -64,6 +64,8 @@ int avp_mp_hudworld_native_capture(AvpMpHudWorldState *out)
     s.counttime=counttime;s.counting=counting;
     s.ticktime=ticktime;s.flash_dir=flash_dir;
     s.frames_now=frames_now;s.one_sec=one_sec;
+    s.countdown_last_frame=countdown_last_frame;
+    s.countdown_flash_color=countdown_flash_color;
     *out=s;
     return 1;
 }
@@ -73,5 +75,7 @@ int avp_mp_hudworld_native_restore(const AvpMpHudWorldState *s)
     counttime=s->counttime;counting=s->counting;
     ticktime=s->ticktime;flash_dir=s->flash_dir;
     frames_now=s->frames_now;one_sec=s->one_sec;
+    countdown_last_frame=s->countdown_last_frame;
+    countdown_flash_color=s->countdown_flash_color;
     return 1;
 }

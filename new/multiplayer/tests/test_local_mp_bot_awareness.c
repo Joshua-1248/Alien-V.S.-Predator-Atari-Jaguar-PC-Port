@@ -29,6 +29,28 @@ int main(void)
     assert(!avp_bot_in_view(0u,10*u,10*u,9*u,10*u));
     assert(!avp_bot_in_view(0u,10*u,10*u,10*u,13*u));
     assert(!avp_bot_in_view(0u,10*u,10*u,19*u,10*u));
+    /* R298: a living Facehugger at 3 tiles BEHIND or to either side is
+     * noticed without a Marine tracker. Other nearby melee and ranged
+     * opponents use shorter distances; a distant rear enemy stays hidden.
+     * Original wall/closed-door LOS still has to pass at call site. */
+    assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,7*u,10*u,4u));
+    assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,10*u,13*u,4u));
+    assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,10*u,7*u,4u));
+    assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,7*u,10*u,3u));
+    assert(!avp_bot_in_view_or_nearby(0u,10*u,10*u,6*u,10*u,3u));
+    assert(!avp_bot_in_view_or_nearby(0u,10*u,10*u,5*u,10*u,4u));
+    assert(!avp_bot_in_view_or_nearby(0u,10*u,10*u,7*u,10*u,2u));
+    assert(!avp_bot_in_view_or_nearby(0u,10*u,10*u,9*u,10*u,0u));
+    assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,14*u,10*u,0u));
+    {
+        uint32_t wall=12u*u;
+        const uint32_t back=7u*u;
+        assert(avp_bot_in_view_or_nearby(0u,10*u,10*u,back,10*u,4u));
+        assert(!mock_los(&wall,10*u,10*u,back+8u*u,10*u));
+        /* Proximity alone is never enough to override the LOS veto. */
+        wall=6u*u;
+        assert(!mock_los(&wall,10*u,10*u,back,10*u));
+    }
     /* No omniscient initial contact. A sighting captures position once;
        unseen target movement is NOT copied into the contact. */
     avp_bot_contact_update(&c,3,8,10,11*u,12*u,0,0);
@@ -94,6 +116,15 @@ int main(void)
         assert(trail.count==1u); /* reused target slot clears old samples */
         avp_bot_trail_clear(&trail);
         assert(trail.count==0u);
+    }
+    /* R473: even a close scanner blip cannot interrupt supplies. */
+    {
+        const uint64_t tile_sq=(uint64_t)u*u;
+        assert(avp_mp_bot_contact_interrupts_supply(1,25u*tile_sq));
+        assert(!avp_mp_bot_contact_interrupts_supply(0,4u*tile_sq));
+        assert(!avp_mp_bot_contact_interrupts_supply(0,9u*tile_sq));
+        assert(!avp_mp_bot_contact_interrupts_supply(0,16u*tile_sq));
+        assert(!avp_mp_bot_contact_interrupts_supply(0,25u*tile_sq));
     }
     /* R8 DM dropped the native AMP target on entry to its player scan.
      * The guard must preserve a visible enemy when players are only known

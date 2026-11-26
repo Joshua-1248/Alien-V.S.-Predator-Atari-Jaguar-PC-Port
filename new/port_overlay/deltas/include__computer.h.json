@@ -1,0 +1,22 @@
+{
+  "path": "include/computer.h",
+  "base_sha256": "b0c345f10281309900c6f16acf1621c6a4456686488c7cf801809f7c06344d50",
+  "output_sha256": "3a977793b17f3efd181441589230188f53da966253409729acf0d15e4b71c5a5",
+  "edits": [
+    {
+      "start": 14,
+      "end": 15,
+      "replacement": "    /* Historical RDB.DTA addresses of authored encoded terminal pages. */\n    const u32 *page_address;\n"
+    },
+    {
+      "start": 27,
+      "end": 27,
+      "replacement": "void avp_computer_bind_retail_terminals(void);\nint avp_computer_active(void);\n"
+    },
+    {
+      "start": 39,
+      "end": 39,
+      "replacement": "#include \"../new/pc_host/integration/computer_ai_declarations.inc\"\n\n"
+    }
+  ]
+}

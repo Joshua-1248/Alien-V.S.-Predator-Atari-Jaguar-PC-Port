@@ -7,7 +7,7 @@
  * the loud, shrill R110 noise generator (positive first sample) without
  * embedding any Jaguar wavetable or commercial game assets. */
 #define _DEFAULT_SOURCE 1
-#include "../src/jaguar/host/fullsynth_host.c"
+#include "../new/jaguar/host/fullsynth_host.c"
 #include <assert.h>
 #include <stdio.h>
 

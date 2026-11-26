@@ -6,8 +6,6 @@
  * remains the binary oracle.
  */
 #include "player.h"
-#include "pc/pc_analog_aim.h"
-#include "pc/pc_mouse_look.h"
 #include "jaguar_hw.h"
 #include "joypad.h"
 #include "maze.h"
@@ -16,8 +14,6 @@
 #include "levels.h"
 #include "amp.h"
 #include "avp_runtime.h"
-#include "avp_sfx_ids.h"
-#include "music.h"
 #include "collectables.h"
 #include "weapons.h"
 #include "hud.h"
@@ -45,9 +41,6 @@ u32 pain_cols,new_pos,old_pos;
 s16 cheat;
 u8 wep_fire,one_fire,plreset_count;
 u16 fade_c,xtra_c,invisflag;
-/* Retail RDB.DTA::predovision entries also contain the TOM VMODE word.
- * The original vision cannot be reproduced from xtra_c alone. */
-u16 pred_vision_vmode;
 u8 invis_act,invis_stat,medpak_act;
 u16 predo,predo_count;
 static u32 predo_ID;
@@ -66,6 +59,9 @@ extern u32 centre_angle;
 extern void readpad(void),InitAccess(void),ResetAccess(void),InitDoors(void),ResetDoors(void);
 extern void InitHUD(void),ResetHUD(void),ResetClct(void),DoorKeys(void),Collectables(void);
 
+
+/* Symbolic SFX IDs are intentionally abstract here until AVPSOUND is converted. */
+enum { SFX_AMB2=0, SFX_AMB3=1 };
 
 static void controller_noop(void) { }
 extern void (*x_read)(void);
@@ -99,7 +95,7 @@ void InitPlayer(void) {
     init_random();
     fade_c=0x8880u; xtra_c=0x8880u;
     bg_fx=0;
-    predo_ID=0; invis_act=0; invis_stat=0; medpak_act=0; predo=0; predo_count=0; invisflag=0; pred_vision_vmode=0;
+    predo_ID=0; invis_act=0; invis_stat=0; medpak_act=0; predo=0; predo_count=0; invisflag=0;
     InitDoors();
     InitHUD();
 
@@ -137,16 +133,15 @@ u16 avp_random(void) {
 void BGSounds(void) {
     u16 r=avp_random();
     u16 single=(u16)(r&127u);
-    /* PLAYER.S::BGSounds uses the ordinary `sfx` macro here, which allocates
-     * one of the Jaguar's priority-managed effect voices.  Directly calling
-     * the PC mixer bypasses those voice limits and can mask/restart effects. */
-    if (single<4u) (void)TFX(single<2u ? AVP_FX_AMB2 : AVP_FX_AMB3);
+    if (single<4u) { const AvpRuntimeOps *o=avp_runtime_ops(); if(o->play_sfx) o->play_sfx(o->user,single<2u ? SFX_AMB2 : SFX_AMB3); }
 
     r=(u16)((r>>8)|(r<<8));
     if ((r&511u)==0u && bg_fx==0u) {
-        /* Shipped PLAYER.S::bg_fxs begins with dc.l 0 (the proposed repeating
-         * background cues are commented out).  Do not invent an active cue. */
-        bg_fx=0; bg_repeat=4; bg_delay=10; bg_count=1;
+        /* PLAYER.S currently selects the first bg_fxs entry. Keep the table
+         * ownership outside this core until AVPSOUND data is translated. */
+        /* The table itself is retail AVPSOUND data.  Keep ownership at the
+         * resource/backend boundary; this state mirrors the source scheduler. */
+        bg_fx=1; bg_repeat=1; bg_delay=30; bg_count=1;
     }
     if (!bg_fx) return;
     if (--bg_count!=0) return;
@@ -155,13 +150,8 @@ void BGSounds(void) {
     /* The historical do_sfx call is commented out in the supplied source. */
 }
 
-/* Keep the ORIGINAL PLAYER.S actor order in one source-defined body. The
- * optional local co-op bridge needs to execute it with an already collected
- * player-specific input sample, then advance doors once for the shared world.
- * The ordinary single-player entry retains its historical readpad/door/sound
- * ordering, and never consults any multiplayer state. */
-static void update_player_actor_body(void)
-{
+void UpdatePlayer(void) {
+    readpad();
     if (!hugkill && !use_cocoon && !key_lock) DoorKeys();
     do_move();
     TidyMove();
@@ -173,31 +163,8 @@ static void update_player_actor_body(void)
         if (player_type!=PT_ALIEN) Collectables();
         PlayerWeapons(); MapKeys(); ChangeLevel(); Pain(); TestKeys(); ExtraKeys();
     }
-}
-
-void UpdatePlayer(void) {
-    readpad();
-    update_player_actor_body();
     MoveDoors(); BGSounds();
 }
-
-#ifdef AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE
-/* Called only with BOTH the original actor scope and shared-level scope bound.
- * The session has already prepared joy_cur/joy_edge for the selected player:
- * calling readpad() here would overwrite their keys with P1's host device.
- * In the Jaguar source MoveDoors is time-based, unlike DoorKeys which responds
- * to this player's use action; advance it only ONCE after all level members.
- * Per-actor BGSounds keeps the original RNG state belonging to the player. */
-void avp_mp_player_native_step_actor(void)
-{
-    update_player_actor_body();
-    BGSounds();
-}
-void avp_mp_player_native_step_world_doors(void)
-{
-    MoveDoors();
-}
-#endif
 
 void ResetMove(void) { ang_vel=0; x_vel=0; y_vel=0; }
 
@@ -225,186 +192,41 @@ extern u8 map_on,show_coords;
 extern s16 use_cocoon;
 static u32 last_moan;
 
-static int host_analog_motion;
-static float host_analog_forward,host_analog_strafe;
-static int host_keyboard_strafe_during_turn;
-static int host_analog_aim;
-static float host_aim_turn,host_aim_sensitivity,host_aim_speed;
-/* Co-op-only digital controller tuning: 1.0 means exact retail behavior.
- * Captured/restored with the per-player engine snapshot. */
-static float host_digital_turn_sensitivity=1.0f,host_digital_turn_speed=1.0f;
-static int host_enhanced_analog_aim,host_mouse_aim;
-static AvpPcContinuousHeading host_continuous_heading;
-static int host_live_heading_enabled;
-static u32 host_live_heading_value;
-static int host_quick_turn_enabled;
-static u32 host_quick_turn_heading;
-static int host_quick_turn_preserve_heading;
-void avp_player_host_quick_turn_heading(int enabled,u32 heading)
-{
-    host_quick_turn_enabled=enabled?1:0;
-    host_quick_turn_heading=heading;
-    if(enabled){
-        host_quick_turn_preserve_heading=1;
-        avp_pc_continuous_heading_reset(&host_continuous_heading);
-    }
-}
-void avp_player_host_live_heading(int enabled,u32 heading)
-{ host_live_heading_enabled=enabled?1:0;host_live_heading_value=heading; }
-void avp_player_host_quick_turn_reset(void)
-{ host_quick_turn_enabled=0;host_quick_turn_preserve_heading=0; }
-void avp_player_host_aim_options(int enhanced_analog,int mouse_mode)
-{
-    host_enhanced_analog_aim=enhanced_analog?1:0;
-    host_mouse_aim=mouse_mode?1:0;
-    if(!host_enhanced_analog_aim||host_mouse_aim)
-        avp_pc_continuous_heading_reset(&host_continuous_heading);
-}
-
-void avp_player_host_analog_aim(int enabled,float turn,float sensitivity,float speed)
-{
-    host_analog_aim=enabled?1:0;
-    host_aim_turn=turn;
-    host_aim_sensitivity=sensitivity;
-    host_aim_speed=speed;
-}
-void avp_player_host_analog_motion(int enabled,float forward,float strafe)
-{
-    host_analog_motion=enabled?1:0;
-    host_analog_forward=forward>1.0f?1.0f:(forward< -1.0f?-1.0f:forward);
-    host_analog_strafe=strafe>1.0f?1.0f:(strafe< -1.0f?-1.0f:strafe);
-}
-void avp_player_host_keyboard_strafe_during_turn(int direction)
-{
-    host_keyboard_strafe_during_turn=(direction>0)-(direction<0);
-}
 void MovePlayer(void)
 {
     u32 keys=joy_cur;
     s16 req_turn=0,av=ang_vel;
-    u16 mouse_angle_step=0;
-    u32 enhanced_angle=0;
-    int enhanced_angle_active=0;
     s32 ax=0,ay=0,nx,ny;
     s32 sa=sin_ang,ca=cos_ang;
     int turn_mode=(player_type==PT_ALIEN)?pressed(keys,OPTION):pressed(keys,FIRE_C);
-    /* Enhanced analog must preserve the angle at rest as well as while the
-     * stick is moving. Retain retail snapping for active digital turns. */
-    /* PC mouse look must retain its precise stopping angle on idle ticks.
-     * An impulse already bypasses snapping below, but the following neutral
-     * tick must not retroactively snap it to a Jaguar cardinal angle.
-     * Preserve retail snapping for actual digital turns and for Jaguar mode. */
-    int bypass_jaguar_angle_snap=host_analog_aim&&
-        (host_enhanced_analog_aim||(host_mouse_aim&&host_aim_turn==0.0f))&&
-        !(turn_mode&&(pressed(keys,JOY_RIGHT)||pressed(keys,JOY_LEFT)));
     const AvpRuntimeOps *ops=avp_runtime_ops();
 
     if(turn_mode){
-        /* Button/D-pad turning had ignored the per-player F12 tuning.
-         * Keep the original integer Jaguar acceleration bit-for-bit when
-         * both multipliers are at their default 1x. No analog control or
-         * mouse input is synthesized for digital turning. */
-        s32 step=ang_acc;
-        if(host_digital_turn_sensitivity!=1.0f){
-            step=(s32)((float)ang_acc*host_digital_turn_sensitivity+0.5f);
-            if(step<1)step=1;
-            if(step>32767)step=32767;
-        }
-        if(pressed(keys,JOY_RIGHT)) req_turn=(s16)-step;
-        if(pressed(keys,JOY_LEFT))  req_turn=(s16) step;
+        if(pressed(keys,JOY_RIGHT)) req_turn=(s16)-ang_acc;
+        if(pressed(keys,JOY_LEFT))  req_turn=(s16) ang_acc;
     }
-    if(host_analog_aim && host_aim_turn!=0.0f && !hugkill){
-        /* Right-stick aim has an immediate proportional response. Digital
-         * turning still follows the original acceleration logic below. */
-        if(host_mouse_aim){
-            /* Mouse is an impulse, not a limited joystick velocity. Accumulate
-             * its full angle step modulo 16 bits, and never snap the result. */
-            av=0;
-            mouse_angle_step=avp_pc_mouse_angle_step(host_aim_turn,max_avel);
-            bypass_jaguar_angle_snap=1;
-        }else{
-            av=avp_pc_analog_aim_step(host_aim_turn,host_aim_sensitivity,
-                                      host_aim_speed,max_avel);
-            bypass_jaguar_angle_snap=host_enhanced_analog_aim;
-        }
-    }else if(req_turn){
+    if(req_turn){
         if(av && ((av^req_turn)<0)) av=0;
         {
             s32 nv=(s32)av+req_turn,lim=max_avel;
-            if(host_digital_turn_speed!=1.0f){
-                lim=(s32)((float)max_avel*host_digital_turn_speed+0.5f);
-                if(lim<1)lim=1;
-                if(lim>32767)lim=32767;
-            }
             if(nv>lim) nv=lim;
             if(nv<-lim) nv=-lim;
             av=(s16)nv;
         }
     } else av=0; /* retail build uses the immediate-stop branch */
-    /* Enhanced PC stick heading accumulates continuously in double precision,
-     * rather than quantizing each tick to s16 angular velocity.  Keep the
-     * 68000 signed velocity for the original weapon swing calculation. */
-    if(host_analog_aim && host_enhanced_analog_aim && !host_mouse_aim && !hugkill &&
-       !(turn_mode&&(pressed(keys,JOY_RIGHT)||pressed(keys,JOY_LEFT)))){
-        enhanced_angle=host_live_heading_enabled ? host_live_heading_value :
-            avp_pc_continuous_heading_tick(&host_continuous_heading,
-                           centre_angle,host_aim_turn,host_aim_sensitivity,
-                           host_aim_speed,max_avel);
-        enhanced_angle_active=1;
-        bypass_jaguar_angle_snap=1;
-    }
-    /* Quick Turn is a PC-only animated view action. Only its active frames
-     * override the host heading: no Jaguar controls, acceleration, camera
-     * tilt, or other source-owned movement branches change when inactive. */
-    if(host_quick_turn_enabled&&!hugkill){
-        enhanced_angle=host_quick_turn_heading;
-        enhanced_angle_active=1;
-        bypass_jaguar_angle_snap=1;
-    }
-    /* A completed quick turn must not snap back towards the Jaguar cardinal
-     * grid on the next NEUTRAL tick. Manual turning immediately restores the
-     * original input branch; no Quick Turn used means no behavior change. */
-    if(host_quick_turn_preserve_heading && !host_quick_turn_enabled){
-        if(req_turn || (host_analog_aim && host_aim_turn!=0.0f))
-            host_quick_turn_preserve_heading=0;
-        else bypass_jaguar_angle_snap=1;
-    }
     ang_vel=av;
     {
         u16 a=(u16)((centre_angle>>16)+(u16)av),low=(u16)(a&0x3fffu);
-        a=(u16)(a+mouse_angle_step);
-        if(!bypass_jaguar_angle_snap && low<(u16)ang_acc) a=(u16)(a&0xc000u);
-        centre_angle=enhanced_angle_active?enhanced_angle:
-                     ((centre_angle&0x0000ffffu)|((u32)a<<16));
+        if(low<(u16)ang_acc) a=(u16)(a&0xc000u);
+        centre_angle=(centre_angle&0x0000ffffu)|((u32)a<<16);
     }
 
     sa >>= acc_shift; ca >>= acc_shift;
-    if(!lift_key){
-        if(pressed(keys,JOY_UP)){ax+=ca;ay-=sa;}
-        if(pressed(keys,JOY_DOWN)){ax-=ca;ay+=sa;}
-        if(host_analog_motion){
-            ax+=(s32)((float)ca*host_analog_forward);
-            ay-=(s32)((float)sa*host_analog_forward);
-        }
-    }
+    if(!lift_key){ if(pressed(keys,JOY_UP)){ax+=ca;ay-=sa;} if(pressed(keys,JOY_DOWN)){ax-=ca;ay+=sa;} }
     sa >>= 1; ca >>= 1;
-    /* The PC keyboard can request a sidestep and a turn on the same tick.
-     * Apply this extra sidestep with the identical original fixed-point
-     * acceleration, even while the Jaguar turn modifier is asserted. */
-    if(host_keyboard_strafe_during_turn){
-        ax+=sa*host_keyboard_strafe_during_turn;
-        ay+=ca*host_keyboard_strafe_during_turn;
-    }
     /* Option is the documented sidestep modifier for non-Alien players.  Alien
      * uses Option for turn mode in this source revision; C preserves that split. */
-    if(!turn_mode){
-        if(pressed(keys,JOY_RIGHT)){ax+=sa;ay+=ca;}
-        if(pressed(keys,JOY_LEFT)){ax-=sa;ay-=ca;}
-        if(host_analog_motion){
-            ax+=(s32)((float)sa*host_analog_strafe);
-            ay+=(s32)((float)ca*host_analog_strafe);
-        }
-    }
+    if(!turn_mode){ if(pressed(keys,JOY_RIGHT)){ax+=sa;ay+=ca;} if(pressed(keys,JOY_LEFT)){ax-=sa;ay-=ca;} }
 
     {
         /* PLAYER.S::LMM: decelerate, apply this frame's acceleration, then
@@ -436,9 +258,8 @@ void MovePlayer(void)
     /* Use a host override when present, otherwise execute the translated
      * COLLIDE.S routines directly.  Runtime callbacks therefore remain an
      * optional acceleration/debug boundary, not a missing gameplay dependency. */
-    const int ignore_player_collision=ops->player_noclip && ops->player_noclip(ops->user);
-    #define WALL_SAFE(px,py) (ignore_player_collision || (ops->safe_pos ? (ops->safe_pos(ops->user,(px),(py),80,40)==AVP_COLL_SAFE) : (SafePos(80,(px),(py),40)==AVP_COLL_SAFE)))
-    #define AMP_SAFE(px,py)  (ignore_player_collision || (ops->amp_collision ? ops->amp_collision(ops->user,(px),(py)) : !AMPCollisions((px),(py))))
+    #define WALL_SAFE(px,py) (ops->safe_pos ? ops->safe_pos(ops->user,(px),(py),80,40) : (SafePos(80,(px),(py),40)==AVP_COLL_SAFE))
+    #define AMP_SAFE(px,py)  (ops->amp_collision ? ops->amp_collision(ops->user,(px),(py)) : !AMPCollisions((px),(py)))
     if(!WALL_SAFE(nx,ny)){
         s32 ox=nx,oy=ny;
         nx=(s32)x_pos; /* try Y only */
@@ -453,67 +274,31 @@ void MovePlayer(void)
     x_pos=(u32)nx;y_pos=(u32)ny;
 }
 
-/* PLAYER.S::do_predo: cloak activation waits for the six-step HUD fade.
- * Once active, the original vision setting remains unchanged until the
- * Predator vision key (6) is pressed.  Each requested change gets the
- * original three-frame flicker.  In particular, redraws or idle player
- * ticks must never cycle the CLUT or restart the sound on their own. */
+/* PLAYER.S Predovision state machine.  Hardware VMODE writes are represented
+ * by xtra_c plus the runtime/backend presentation boundary; gameplay-visible
+ * invisflag and flicker timing remain here. */
 void do_predo(void)
 {
-    /* Original retail RDB.DTA $44C8-$44DB: five {VMODE, X_FADE extra}
-     * word pairs. RGB16 $06C7 and RGB24 $0EC3 have different pixel
-     * interpretations, even for the two $8880 color entries. */
-    static const struct {u16 vmode,extra;} vision[5]={
-        {0x06c7u,0x9558u},{0x0ec3u,0x0cf8u},{0x0ec3u,0x8880u},
-        {0x06c7u,0x26f8u},{0x06c7u,0x8880u}
-    };
-    if(invis_stat==0)return;
+    static const u16 extra[5]={0x9558u,0x0cf8u,0x8880u,0x26f8u,0x8880u};
+    const AvpRuntimeOps *o=avp_runtime_ops();
+    if(invis_stat==0) return;
     if(invis_act){
         if(invis_stat!=2){
-            /* VSX20 is a *looping* retail FullSynth descriptor.  Keep its
-             * AVPSOUND identity, not a boolean.  The voice can then be
-             * released through the original StopLoop lifecycle. */
-            u32 h=TFX(AVP_FX_VSX20);
-            predo_ID=(h!=(u32)-1)?h:0;
-            invis_stat=2;
-            invisflag=(u16)(1u<<AMP_INVHIT);
-            predo_count=3;
+            if(o->play_sfx)o->play_sfx(o->user,60u);
+            predo_ID=1; invis_stat=2; invisflag=(u16)(1u<<AMP_INVHIT); predo_count=3;
             predo=(u16)((predo+20u-8u)%20u);
-        }else if(predo_count){
-            --predo_count;
-        }else{
-            if(!pressed(joy_edge,KEY_6))return;
-            predo_count=2;
-            /* Switching multispectrum modes replaces the cloak cue rather
-             * than leaving its old looping voice running in parallel. */
-            if(predo_ID)StopLoop(predo_ID);
-            {u32 h=TFX(AVP_FX_VSX20);predo_ID=(h!=(u32)-1)?h:0;}
-        }
-    }else{
+        } else if(predo_count) --predo_count;
+        else { predo_count=2; if(o->play_sfx)o->play_sfx(o->user,60u); predo_ID=1; }
+    } else {
         if(invis_stat!=1){
-            /* Original Jaguar decloak also triggers VSX20.  Release the
-             * continuing cloak loop, play a fresh transition cue, then
-             * unloop that new cue immediately so it has its authored ending
-             * instead of persisting while the Predator is visible. */
-            if(predo_ID)StopLoop(predo_ID);
-            predo_ID=0;
-            {u32 end=TFX(AVP_FX_VSX20);
-             if(end!=(u32)-1 && end!=0u)StopLoop(end);}
-            invis_stat=1;
-            predo_count=3;
+            if(predo_ID && o->play_sfx)o->play_sfx(o->user,60u);
+            predo_ID=0; invis_stat=1; predo_count=3;
         }
-        if(predo_count)--predo_count;
-        else{
-            invisflag=0;
-            invis_stat=0;
-            xtra_c=0x8880u;
-            pred_vision_vmode=0; /* standard CRY16 output */
-            return;
-        }
+        if(predo_count) --predo_count;
+        else { invisflag=0; invis_stat=0; xtra_c=0x8880u; return; }
     }
     predo=(u16)((predo+4u)%20u);
-    xtra_c=vision[predo/4u].extra;
-    pred_vision_vmode=vision[predo/4u].vmode;
+    xtra_c=extra[predo/4u];
 }
 
 void PlayerWeapons(void)
@@ -521,12 +306,7 @@ void PlayerWeapons(void)
     u32 e=joy_edge,c=joy_cur;
     wep_fire=one_fire=0;
     if(player_type==PT_PREDATOR){
-        if(pressed(e,OPTION)){
-            /* PLAYER.S keeps AMP_INVHIT set through the authored decloak
-             * fade; do_predo clears it only when that transition finishes.
-             * Do not clear it early in the PC input interception. */
-            invis_act=(u8)~invis_act;
-        }
+        if(pressed(e,OPTION)) invis_act=(u8)~invis_act;
         medpak_act=0;
         /* Retail `test_key medpak,d5`: held medpak control.  The reconstructed
          * input map uses KEY_7 for this otherwise platform-defined action. */
@@ -558,11 +338,7 @@ void ExtraKeys(void)
         if(pressed(joy_edge,KEY_5)&&acs_level<10)++acs_level;
         if(pressed(joy_edge,KEY_8)&&acs_level>0)--acs_level;
     }
-    if(allow_god && pressed(joy_edge,KEY_0) && pressed(joy_cur,OPTION)) {
-        const AvpRuntimeOps *o=avp_runtime_ops();
-        cheat=(s16)~cheat;
-        if(o->set_message)o->set_message(o->user,cheat?5u:6u);
-    }
+    if(allow_god && pressed(joy_edge,KEY_0) && pressed(joy_cur,OPTION)) cheat=(s16)~cheat;
 }
 void TestKeys(void){ /* NO_DEBUG retail build compiles the debug test body out. */ }
 
@@ -571,49 +347,23 @@ void TestKeys(void){ /* NO_DEBUG retail build compiles the debug test body out. 
  * resources; the important game-side behavior here is the exact branch and
  * random-selection ordering. */
 enum {
-    AVP_SFX_HUMAN_AAGH_A = AVP_FX_UGH2A,
-    AVP_SFX_HUMAN_AAGH_B = AVP_FX_UGH2B,
-    AVP_SFX_HUMAN_UHH_A  = AVP_FX_UHH3A,
-    AVP_SFX_HUMAN_UHH_B  = AVP_FX_UHH3B,
-    AVP_SFX_HUMAN_UHH_C  = AVP_FX_UHH3C,
-    AVP_SFX_ALIEN_PAIN_A = AVP_FX_NALN1,
-    AVP_SFX_ALIEN_PAIN_B = AVP_FX_NALN2,
-    AVP_SFX_ALIEN_PAIN_C = AVP_FX_XALN1,
-    AVP_SFX_ALIEN_PAIN_D = AVP_FX_XALN2,
-    AVP_SFX_PRED_PAIN_A  = AVP_FX_PREDH,
-    AVP_SFX_PRED_PAIN_B  = AVP_FX_EDITR,
-    AVP_SFX_PRED_PAIN_C  = AVP_FX_PHIT3,
-    AVP_SFX_PRED_PAIN_D  = AVP_FX_PHIT4
+    AVP_SFX_HUMAN_AAGH_A = 40,
+    AVP_SFX_HUMAN_AAGH_B = 41,
+    AVP_SFX_HUMAN_UHH_A  = 42,
+    AVP_SFX_HUMAN_UHH_B  = 43,
+    AVP_SFX_HUMAN_UHH_C  = 44,
+    AVP_SFX_ALIEN_PAIN_A = 45,
+    AVP_SFX_ALIEN_PAIN_B = 46,
+    AVP_SFX_ALIEN_PAIN_C = 47,
+    AVP_SFX_ALIEN_PAIN_D = 48,
+    AVP_SFX_PRED_PAIN_A  = 49,
+    AVP_SFX_PRED_PAIN_B  = 50,
+    AVP_SFX_PRED_PAIN_C  = 51,
+    AVP_SFX_PRED_PAIN_D  = 52
 };
 
-/* Retail sounds are descriptors 0x50 bytes apart, NOT consecutive integers.
- * Keep the original four-way random sound selection, but resolve the chosen
- * index to a real cartridge descriptor for each playable species. */
-static const unsigned alien_pain_fx[4]={
-    AVP_SFX_ALIEN_PAIN_A,AVP_SFX_ALIEN_PAIN_B,
-    AVP_SFX_ALIEN_PAIN_C,AVP_SFX_ALIEN_PAIN_D
-};
-static const unsigned predator_pain_fx[4]={
-    AVP_SFX_PRED_PAIN_A,AVP_SFX_PRED_PAIN_B,
-    AVP_SFX_PRED_PAIN_C,AVP_SFX_PRED_PAIN_D
-};
-
-/* Native PC presentation preference only.  Damage, pain flashes, moan timing,
- * and the retail random-number sequence remain unchanged. */
-static int pc_player_pain_sounds_enabled=1;
-static int pc_facehug_pain_sounds_enabled=1;
-void avp_player_set_facehug_pain_sounds(int enabled){pc_facehug_pain_sounds_enabled=enabled!=0;}
-void avp_player_set_pain_sounds(int enabled)
-{
-    pc_player_pain_sounds_enabled=(enabled!=0);
-}
-
-static unsigned host_last_pain_sfx;
-void avp_player_clear_last_pain_sfx(void){host_last_pain_sfx=0u;}
-unsigned avp_player_last_pain_sfx(void){return host_last_pain_sfx;}
 static void pain_sfx(unsigned id)
 {
-    host_last_pain_sfx=id;
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(o->play_sfx)o->play_sfx(o->user,id);
 }
@@ -651,15 +401,13 @@ void Pain(void)
             u32 r;
             last_moan=frame_counter;
             if(player_type==PT_HUMAN){
-                /* The original random draw must occur even when muted. */
-                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))HumanPain();
-                else (void)avp_random();
+                HumanPain();
             }else if(player_type==PT_ALIEN){
                 r=avp_random()&3u;
-                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))pain_sfx(alien_pain_fx[r]);
+                pain_sfx((unsigned)(AVP_SFX_ALIEN_PAIN_A+r));
             }else{
                 r=avp_random()&3u;
-                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))pain_sfx(predator_pain_fx[r]);
+                pain_sfx((unsigned)(AVP_SFX_PRED_PAIN_A+r));
             }
         }
         p+=(s32)delta+50; /* MIN_PAIN */
@@ -691,10 +439,6 @@ void Pain(void)
  * coarse shot box, signed low-word rotation, closest-z selection, damage flags
  * and the deliberately 7/8-positioned Human spark. */
 static s32 spark_x,spark_y;
-static AvpPlayerMpShotHook player_mp_shot_hook;
-static void *player_mp_shot_user;
-void avp_player_set_mp_shot_hook(AvpPlayerMpShotHook callback,void *user)
-{player_mp_shot_hook=callback;player_mp_shot_user=callback?user:NULL;}
 static u32 shot_distance;
 
 static s32 abs_s32_local(s32 v){return v<0?(s32)(-(s64)v):v;}
@@ -713,17 +457,13 @@ AvpAmp *TestSpark(void)
     /* random leaves its 16-bit result in d0.w; SWAP/ASR #7 is equivalent to
      * sign-extending that word and shifting it left nine places. */
     {
-        /* Original 68000 ADD/SUB are modulo 32 bits.  A negative d0.w
-         * must not be left-shifted as a signed C value (undefined behavior).
-         * Signed 16-bit spread * 512 fits s32; unsigned ADD/SUB then exactly
-         * preserves the Jaguar register's 32-bit wraparound. */
-        u32 a=centre_angle+(u32)((s32)(s16)avp_random()*512);
+        s32 a=(s32)centre_angle+((s32)(s16)avp_random()<<9);
         /* The surviving retail source literally tests the code label
          * `enable_swing`, not swing_on.  The first opcode byte is non-zero in
          * the retail routine, so the swing term is always taken. Preserve the
          * executable behavior rather than silently correcting the source typo. */
-        a-=(u32)((s64)(s16)swing_x*0x400000ll);
-        fire_angle=a;
+        a-=(s32)((s64)(s16)swing_x*0x400000ll);
+        fire_angle=(u32)a;
     }
 
     {
@@ -740,11 +480,8 @@ AvpAmp *TestSpark(void)
         shoty=((s32)sn*(s32)dw)>>7;
     }
     spark_x=shotx;spark_y=shoty;
-    /* PLAYER.S widens the signed fire-width word before *512.  Signed
-     * multiplication is defined for every s16 width; left-shifting a
-     * negative signed value was undefined C behavior. */
-    boxx=abs_s32_local(shotx)+(s32)(s16)fire_width*512;
-    boxy=abs_s32_local(shoty)+(s32)(s16)fire_width*512;
+    boxx=abs_s32_local(shotx)+((s32)(s16)fire_width<<9);
+    boxy=abs_s32_local(shoty)+((s32)(s16)fire_width<<9);
 
     for(unsigned i=0;i<AVP_NUM_AMPS;i++) {
         AvpAmp *a=&amps_at[i];
@@ -764,12 +501,6 @@ AvpAmp *TestSpark(void)
         closest=uz;best=a;best_offset=xoff;
     }
 
-    /* Optional local Deathmatch player avatars. Original AMP hit-selection
-     * and random spread are already complete; leave them untouched. */
-    if(player_mp_shot_hook && player_mp_shot_hook(player_mp_shot_user,
-           (s32)x_pos,(s32)y_pos,boxx,boxy,cs,sn,fire_width,
-           closest,fire_damage))return NULL;
-
     if(best) {
         s32 dx=best->xpos-(s32)x_pos,dy=best->ypos-(s32)y_pos;
         s16 off=(s16)(best_offset>>16);
@@ -777,7 +508,6 @@ AvpAmp *TestSpark(void)
         s32 corry=((s32)off*(s32)cs)>>7;
         dx-=corrx;dy+=corry;
         best->energy=(s16)(best->energy-fire_damage);
-        /* PLAYER.S:1064-1067: OR invisflag in -- "once set, stays set". */
         best->flags|=(u16)((1u<<AMP_PHIT)|(1u<<AMP_CLOSEHIT)|invisflag);
         if(player_type==PT_HUMAN) {
             dx-=dx>>3;dy-=dy>>3;
@@ -814,9 +544,3 @@ void TidyMove(void) {
     new_pos=((gy*(u32)maze_width)+gx)<<MAZE_BLOCK_SHIFT;
 }
 
-
-/* PC local multiplayer: optional read/write snapshot of player.c globals.
- * The reconstructed original game routines above are never modified. */
-#ifdef AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE
-#include "../../new/multiplayer/local_mp_player_native.inc"
-#endif

@@ -284,6 +284,16 @@ int main(void){
      assert(!a->mode&&!a->host_static);
      assert(collmap[cell]==1&&objmap[off]==0&&objmap[off+1]==1);
      assert(other->mode!=NULL);
+     /* R268: an independently arriving co-op player must use their OWN
+      * destination coordinates, without changing P1's current position.
+      * The original mode-only and protected-AMP exceptions remain exact. */
+     a->mode=(AvpAmpModeFn)(uintptr_t)1;
+     a->host_static=1;
+     avp_levels_kill_bastards_at(0x00018000u,0x00018000u);
+     assert(a->mode!=NULL && a->host_static);
+     avp_levels_kill_bastards_at(0x00088000u,0x00098000u);
+     assert(a->mode==NULL && !a->host_static);
+     assert(x_pos==0x00088000u && y_pos==0x00098000u);
      a->mode=(AvpAmpModeFn)(uintptr_t)1;
      collmap[cell]=2;objmap[off+1]=2;
      KillBastards();

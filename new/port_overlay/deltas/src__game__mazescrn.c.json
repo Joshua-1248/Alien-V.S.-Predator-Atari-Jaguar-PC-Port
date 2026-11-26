@@ -1,0 +1,222 @@
+{
+  "path": "src/game/mazescrn.c",
+  "base_sha256": "f6a74eb874fdf35e16f6b7858b5f7fcf9c9532851c4785ab388ea10b0e438dcb",
+  "output_sha256": "2ab25f5219ff9b3752e971666cbe1c280e606ee6bd21181fe0100e00e5077fda",
+  "edits": [
+    {
+      "start": 7,
+      "end": 7,
+      "replacement": "#include \"doors.h\"\n"
+    },
+    {
+      "start": 9,
+      "end": 9,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 29,
+      "end": 29,
+      "replacement": "#include \"../../new/audio/pc_facehug_shake_option.inc\"\n"
+    },
+    {
+      "start": 33,
+      "end": 33,
+      "replacement": "static u32 wepfxID;\n"
+    },
+    {
+      "start": 42,
+      "end": 43,
+      "replacement": "#include \"../../new/cheats/pc_weapon_extension_state.inc\"\nstatic s16 over_id=-1,use1_id=-1,use2_id=-1;\n"
+    },
+    {
+      "start": 48,
+      "end": 48,
+      "replacement": "void avp_mazescrn_get_overlay_state(AvpFirstPersonOverlayState *out){\n    if(!out)return;\n    out->overlay_id=over_id;out->overlay_visible=over_visible;\n    out->use1_id=use1_id;out->use2_id=use2_id;\n    out->use1_visible=use1_visible;out->use2_visible=use2_visible;\n    out->swing_enabled=swing_on?1u:0u;\n    out->x=wep_x;out->y=wep_y;out->swing_x=swing_x;out->swing_y=swing_y;\n    out->intro_preview=0;out->intro_x=out->intro_y=0;\n    /* First-frame equip presentation: R98 Marine, R203 Alien and now the\n     * Predator Combi-Stick's original (+60,+60),(-10,-10) move_in script.\n     * new_weapon()/frame0()\n     * installs the new sprite at its settled pose before the first move_in\n     * frame is executed.  This getter shows only that first authored movement\n     * pose, without executing any gameplay command or changing the state.\n     *\n     * Unlike Marine frame0, Alien tail and claw frame0 intentionally place\n     * the overlay at nonzero coordinates.  Begin from the *actual* source\n     * frame0 position, not zero.  Nonzero velocity identifies a move_in that\n     * has already run, so no subsequent animation frame is predicted.\n     * Only Predator slot 1 has this move-in pose; wrist blades and other\n     * Predator equipment remain unaffected. The script is read-only:\n     * attack commands, audio, and gameplay logic are untouched.\n     * The exact Jaguar OP publication timing still requires A/B validation. */\n    if((player_type==PT_HUMAN||player_type==PT_ALIEN||\n        (player_type==PT_PREDATOR&&cur_wepno==1))&&\n       cur_def&&cur_def->move_in&&wep_animptr==cur_def->move_in&&\n       wep_xvel==0&&wep_yvel==0&&\n       (player_type!=PT_HUMAN||(wep_x==0&&wep_y==0))){\n        const AvpWepCmd *c=cur_def->move_in;\n        s32 px=wep_x,py=wep_y,vx=0,vy=0;\n        for(unsigned i=0;i<12u;i++,c++){\n            if(c->op==AVP_WC_END_ANIM)break;\n            if(c->op==AVP_WC_END_FRAME){\n                out->intro_preview=1;out->intro_x=px+vx;out->intro_y=py+vy;\n                break;\n            }\n            if(c->op==AVP_WC_OFFSET_POS){px+=(s32)c->a*65536;py+=(s32)c->b*65536;}\n            else if(c->op==AVP_WC_SET_POS){px=(s32)c->a*65536;py=(s32)c->b*65536;}\n            else if(c->op==AVP_WC_SET_VEL){vx=(s32)c->a*65536;vy=(s32)c->b*65536;}\n            else if(c->op==AVP_WC_ZERO_VEL){vx=vy=0;}\n            else if(c->op==AVP_WC_ZERO_POS){px=py=0;}\n            else if(c->op==AVP_WC_SET_FVEL){vx=c->a;vy=c->b;}\n        }\n    }\n}\n"
+    },
+    {
+      "start": 54,
+      "end": 57,
+      "replacement": "       OV_PUNCH1,OV_PUNCH2,OV_FACEHUG };\nenum { USE_NONE=-1,USE_FLASH1,USE_FLASH2A,USE_FLASH2B,USE_FLASH3A,USE_FLASH3B };\n/* Weapon command operands are signed 16-bit values in the readable C model,\n * mirroring the compact source command stream.  Keep small host tokens here and\n * translate them to retail RDB.DTA descriptor identities at the SOUND opcode. */\nenum { SFX_SHOTGUN=0x101,SFX_COCK,SFX_PULSE,SFX_FLAME,SFX_SMART,SFX_TAIL,\n       SFX_SWIPE,SFX_BITE,SFX_MELEE,SFX_ROCKET,SFX_DISK,SFX_WRBLADE,SFX_EMPTY };\nstatic unsigned weapon_sfx_descriptor(s16 token){\n    switch(token){\n    case SFX_SHOTGUN:return AVP_FX_SHOTG; case SFX_COCK:return AVP_FX_COCK1;\n    case SFX_PULSE:return AVP_FX_PLSX1; case SFX_FLAME:return AVP_FX_FLAMX;\n    case SFX_SMART:return AVP_FX_SMRTX; case SFX_TAIL:return AVP_FX_TAIL;\n    case SFX_SWIPE:return AVP_FX_WHOOS; case SFX_BITE:return AVP_FX_SWIPE;\n    case SFX_MELEE:return AVP_FX_MELEE; case SFX_ROCKET:return AVP_FX_ROCKE;\n    case SFX_DISK:return AVP_FX_DISK1; case SFX_WRBLADE:return AVP_FX_WRBLA;\n    case SFX_EMPTY:return AVP_FX_MTY; default:return (unsigned)(u16)token;\n    }\n}\n"
+    },
+    {
+      "start": 69,
+      "end": 70,
+      "replacement": "static const AvpWepCmd shot_f0[]={C1(AVP_WC_SET_OVER,OV_GSHOT1),C1(AVP_WC_SET_USE1,USE_FLASH1),C0(AVP_WC_HIDE_USE),EA};\n"
+    },
+    {
+      "start": 74,
+      "end": 75,
+      "replacement": "static const AvpWepCmd pulse_f0[]={C1(AVP_WC_SET_OVER,OV_PULSE),C1(AVP_WC_SET_USE1,USE_FLASH2A),C1(AVP_WC_SET_USE2,USE_FLASH2B),C0(AVP_WC_HIDE_USE),EA};\n"
+    },
+    {
+      "start": 80,
+      "end": 81,
+      "replacement": "static const AvpWepCmd smart_f0[]={C1(AVP_WC_SET_OVER,OV_SMART),C1(AVP_WC_SET_USE1,USE_FLASH3A),C1(AVP_WC_SET_USE2,USE_FLASH3B),C0(AVP_WC_HIDE_USE),EA};\n"
+    },
+    {
+      "start": 92,
+      "end": 93,
+      "replacement": "static const AvpWepCmd bite_act[]={C0(AVP_WC_SHOW_OVER),EF,C1(AVP_WC_SOUND,SFX_BITE),C1(AVP_WC_SET_OVER,OV_BITE2),C1(AVP_WC_SET_TIME,1),EF,\n"
+    },
+    {
+      "start": 173,
+      "end": 174,
+      "replacement": "/* MAZESCRN.S pause_sfx uses the ambient-reserved DSP voice 0, while\n * wep_sfx (the pause cheat/save cue) uses weapon-reserved voice 1.\n * Do not send either through ordinary TFX voice allocation. */\nstatic void pause_sfx(unsigned id){\n    unsigned retail=id;\n    if(id>=SFX_SHOTGUN && id<=SFX_EMPTY) retail=weapon_sfx_descriptor((s16)id);\n    (void)avp_music_placed_voice(retail,0u);\n}\nstatic void pause_weapon_sfx(unsigned id){\n    unsigned retail=id;\n    if(id>=SFX_SHOTGUN && id<=SFX_EMPTY) retail=weapon_sfx_descriptor((s16)id);\n    (void)avp_music_placed_voice(retail,1u);\n}\n"
+    },
+    {
+      "start": 312,
+      "end": 313,
+      "replacement": "        pause_weapon_sfx(SFX_SHOTGUN);\n"
+    },
+    {
+      "start": 326,
+      "end": 327,
+      "replacement": "                pause_weapon_sfx(AVP_FX_LAFF);\n"
+    },
+    {
+      "start": 350,
+      "end": 351,
+      "replacement": "        pause_weapon_sfx(AVP_FX_LAFF);\n"
+    },
+    {
+      "start": 379,
+      "end": 380,
+      "replacement": "    /* A level/player reinitialization must not orphan an active Medkit loop. */\n    if(medpak_ID && medpak_ID!=(u32)-1)StopLoop(medpak_ID);\n    invis_bright=0; medpak_bright=0; mpak_maxed=mpak_time=mpak_state=0; medpak_ID=0; wepfxID=0;\n"
+    },
+    {
+      "start": 405,
+      "end": 405,
+      "replacement": "            /* MAZESCRN.S:3306-3314: selecting the Predator cannon icon plays\n             * `wep_sfx motor1` (PlacedEf voice 1); wepfxID is not updated. */\n            if(inwep_no==2 && player_type==PT_PREDATOR)\n                (void)avp_music_placed_voice(AVP_FX_MOTOR,1u);\n"
+    },
+    {
+      "start": 416,
+      "end": 417,
+      "replacement": ""
+    },
+    {
+      "start": 424,
+      "end": 425,
+      "replacement": "        if(!medpak_ID){\n            /* The hosted FullSynth needs the actual effect handle to release\n             * the retail Medkit loop; a Boolean lets successive uses stack. */\n            u32 h=TFX(AVP_FX_PMED3);\n            if(h && h!=(u32)-1)medpak_ID=h;\n        }\n"
+    },
+    {
+      "start": 427,
+      "end": 427,
+      "replacement": "            ammo_info[5].cur=(u16)charge;\n"
+    },
+    {
+      "start": 438,
+      "end": 439,
+      "replacement": "        if(medpak_bright==0){\n            if(medpak_ID && medpak_ID!=(u32)-1)StopLoop(medpak_ID);\n            medpak_ID=0;\n            if(charge==0)cur_weps=(u8)(cur_weps&~(1u<<WEP_MEDPAK));\n        }\n"
+    },
+    {
+      "start": 442,
+      "end": 445,
+      "replacement": "static u32 save_be32(const u8 *p);\n\nvoid InitScrOverlays(void){const AvpRuntimeOps*o=avp_runtime_ops();if(o->init_screen_overlays)o->init_screen_overlays(o->user);StdHUD();Init1stOvers();InitHUDPal();}\n/* MAZESCRN.S hug_init only expands the facehugger graphic; unstick_dir is\n * never stored by the retail code (only TST.W/NEG.W at $E15C/$E192), so it\n * stays 0 from power-on and the release loop always tests LEFT. */\nvoid hug_init(void){hug_recov=0;hug_throw=0;}\nvoid StdHUD(void)\n{\n    InitHUD();\n    /* A loaded Marine's tracker was restored by InitPlayer, but PostFirst's\n     * second InitHUD clears show_mt.  Consume the original saved inventory\n     * bit again while savegame is still live; PostFirst clears the pointer\n     * only after the complete overlay initialization has finished.  A new\n     * game (no savegame), or a save without the pickup, still starts with\n     * no tracker.  Leave the original 20-byte EEPROM layout untouched. */\n    if (player_type==PT_HUMAN && savegame) {\n        const u8 *sv=(const u8 *)(uintptr_t)savegame;\n        show_mt=(save_be32(sv+16)&(1u<<11)) ? -1 : 0;\n    }\n}\n"
+    },
+    {
+      "start": 456,
+      "end": 457,
+      "replacement": "static void reset_frame0(void){active_wep=0;wep_x=wep_y=wep_xvel=wep_yvel=0;use1_id=use2_id=-1;use1_visible=use2_visible=0;over_visible=1;enable_swing();}\n"
+    },
+    {
+      "start": 458,
+      "end": 459,
+      "replacement": ""
+    },
+    {
+      "start": 461,
+      "end": 463,
+      "replacement": "    /* The Jaguar shifts signed 16-bit weapon commands into 16.16 fixed\n     * point.  Signed left shift of a negative operand is undefined in C;\n     * signed multiplication by 65536 is defined for every s16 input and\n     * yields precisely the original 32-bit two's-complement bit pattern. */\n    case AVP_WC_SET_POS:wep_x=(s32)c->a*65536L;wep_y=(s32)c->b*65536L;break;\n    case AVP_WC_OFFSET_POS:wep_x+=(s32)c->a*65536L;wep_y+=(s32)c->b*65536L;break;\n"
+    },
+    {
+      "start": 464,
+      "end": 465,
+      "replacement": "    case AVP_WC_SET_VEL:wep_xvel=(s32)c->a*65536L;wep_yvel=(s32)c->b*65536L;break;\n"
+    },
+    {
+      "start": 472,
+      "end": 472,
+      "replacement": "    case AVP_WC_SET_USE1:use1_id=c->a;break;\n    case AVP_WC_SET_USE2:use2_id=c->a;break;\n"
+    },
+    {
+      "start": 475,
+      "end": 477,
+      "replacement": "    /* MAZESCRN.S wep_fx: `wep_sfx` = PlacedEf into reserved voice 1;\n     * xwep_fx (cocking, \"noise on another channel\"): ordinary `sfx`. */\n    case AVP_WC_SOUND:\n        wepfxID=avp_music_placed_voice(weapon_sfx_descriptor(c->a),1u);\n        break;\n    case AVP_WC_SOUND_ALT:\n        wepfxID=TFX(weapon_sfx_descriptor(c->a));\n        break;\n    case AVP_WC_KILL_SOUND:\n        if(wepfxID && wepfxID!=(u32)-1){StopLoop(wepfxID);wepfxID=0;}\n        break;\n"
+    },
+    {
+      "start": 487,
+      "end": 489,
+      "replacement": "void new_weapon(void){\n    cur_def=avp_weapon_def(player_type,cur_wepno);if(!cur_def){cur_wepno=0;use1_id=use2_id=-1;over_visible=use1_visible=use2_visible=0;wep_animptr=NULL;return;}frame0();wep_animptr=cur_def->move_in;wep_action=0;wep_desel=0;wait_state=0;fire_damage=0;mp_equip_phase=1;}\nvoid fire_wep(void){\n    if(!cur_def)return;\n    fire_damage=cur_def->damage;\n    fire_distance=(u32)cur_def->distance<<8;\n    fire_width=cur_def->width;\n    /* The retail weapon definitions use a finite 0x880 shot trace. Opt-in\n     * Marine hitscan firearms traverse to the first wall/map edge instead.\n     * The signed 16-bit shot vector used by TestSpark bounds this value:\n     * 0x7fff00 is sufficient to cross even a 64x64 retail map diagonal.\n     * Never extend Alien/Predator melee or alter projectile travel physics. */\n    if(host_unlimited_shooting_range && player_type==PT_HUMAN &&\n       (cur_wepno==1 || cur_wepno==2 || cur_wepno==4))\n        fire_distance=0x7fff00u;\n}\n"
+    },
+    {
+      "start": 494,
+      "end": 494,
+      "replacement": "/* MAZESCRN.S weapon definitions: bar x,y are local to the 320x200 HUD\n   object (screen offset +14), in weapon order for each species. */\nstatic const s16 human_bar_xy[4][2]={{251,34},{251,74},{251,116},{251,163}};\nstatic const s16 alien_bar_xy[3][2]={{248,135},{248,29},{248,87}};\nstatic const s16 pred_bar_xy[6][2]={{250,41},{250,75},{250,116},{250,161},{30,131},{30,131}};\n\n"
+    },
+    {
+      "start": 495,
+      "end": 495,
+      "replacement": "    host_cocoon_stage=0;host_cocoon_target=NULL;host_cocoon_tick=0;host_cocoon_last_hit_tick=0;\n"
+    },
+    {
+      "start": 497,
+      "end": 498,
+      "replacement": "    for(unsigned i=0;i<n&&i<6;i++){const AvpWeaponDef*d=avp_weapon_def(player_type,(s16)(i+1));AvpAmmoInfo*a=&ammo_info[i];if(player_type==PT_HUMAN || i>=4){a->cur=d->init_or_dec;a->max=d->max_or_inc;a->dec=0;a->inc=0;}else{a->cur=AVP_APAMM_MAX;a->max=AVP_APAMM_MAX;a->dec=d->init_or_dec;a->inc=d->max_or_inc;}a->old=0xffffu;\n        /* MAZESCRN.S::InitWAmmo: (44*65536/max)-1, truncated to 16-bit. */\n        a->rescale=a->max?(u16)(((44u*65536u)/a->max)-1u):0;\n        {const s16 (*xy)[2]=(player_type==PT_HUMAN)?human_bar_xy:\n             (player_type==PT_ALIEN)?alien_bar_xy:pred_bar_xy;\n         a->x=xy[i][0];a->y=xy[i][1];}}\n"
+    },
+    {
+      "start": 506,
+      "end": 506,
+      "replacement": "    /* Predator medpak charge and slot-6 ammo are the same Jaguar value.\n     * Restore both when loading; reset stale charge when starting anew. */\n    if(player_type==PT_PREDATOR){\n        if(ammo_info[5].cur>ammo_info[5].max)ammo_info[5].cur=ammo_info[5].max;\n        medpak=(s16)ammo_info[5].cur;\n    }\n"
+    },
+    {
+      "start": 507,
+      "end": 508,
+      "replacement": "void fill_weps(void){\n    for(int i=0;i<num_weps&&i<6;i++)ammo_info[i].cur=ammo_info[i].max;\n    /* A Predator ammo refill also refills the portable medpak.  Its ammo\n     * word and player-use charge must not become separate values. */\n    if(player_type==PT_PREDATOR&&num_weps>=6)\n        medpak=(s16)ammo_info[5].cur;\n}\n"
+    },
+    {
+      "start": 514,
+      "end": 515,
+      "replacement": "    old_weps=0xff;hugkill=0;hug_recov=0;hug_throw=0;mp_equip_phase=0;\n"
+    },
+    {
+      "start": 519,
+      "end": 520,
+      "replacement": "    if(hugkill){\n        /* MAZESCRN.S::update_wep/.inhug.  The attach overlay and alternating\n         * left/right release sequence belong to the original game, not the\n         * host controller.  joy_edge is active-low and fires once per press. */\n        if(wepfxID && wepfxID!=(u32)-1){StopLoop(wepfxID);wepfxID=0;}\n        if(hug_recov){\n            hugkill=0;hug_recov=0;hug_throw=0;\n            over_visible=0;wep_fire=0;wait_state=0;\n            if(cur_def){frame0();wep_animptr=cur_def->move_in;}\n            return;\n        }\n        if(hug_throw==0){\n            hug_throw=9;over_id=OV_FACEHUG;\n            over_visible=1;use1_visible=use2_visible=0;\n            TFX(AVP_FX_SUCK1);\n        }\n        player_energy=(s16)(player_energy-10);\n        /* TST.W unstick_dir; BPL .left_uns: zero tests LEFT.  NEG.W of the\n         * retail value 0 is 0, so every throw needs a fresh LEFT press. */\n        if(((joy_edge&(1u<<(unstick_dir>=0?JOY_LEFT:JOY_RIGHT)))==0u)){\n            unstick_dir=(s16)-unstick_dir;\n            if(--hug_throw==0){\n                TFX(AVP_FX_SUCK1);\n                hug_recov=-1;\n            }else if(hug_throw==4||hug_throw==2){\n                TFX(AVP_FX_SUCK1);\n            }else if(hug_throw>4){\n                if(pc_facehug_shake_pain_sounds_enabled)TFX(player_type==PT_PREDATOR?AVP_FX_PHIT3:AVP_FX_UHH3A);\n            }\n        }\n        return;\n    }\n"
+    },
+    {
+      "start": 525,
+      "end": 526,
+      "replacement": "        if(new_wepno){wep_desel=0xffu;wep_animptr=cur_def->move_out;mp_equip_phase=1;}\n"
+    },
+    {
+      "start": 528,
+      "end": 536,
+      "replacement": "    /* Advance the same authored equipment scripts at two presentation steps\n     * per one original 10 Hz game tick. Exactly the ordinary single-player\n     * step is used when disabled and during firing/attacks. Each equipment\n     * substep advances its original velocity to avoid shortcutting the\n     * animation or leaving an offset at the settled weapon pose. */\n    {\n        unsigned equip_fast=(mp_fast_equip &&\n            (player_type==PT_HUMAN || player_type==PT_PREDATOR) &&\n            (wep_desel || mp_equip_phase) && wep_animptr);\n        unsigned steps=equip_fast?2u:1u;\n        for(unsigned step=0;step<steps;step++){\n            if(step && (!wep_animptr || !(wep_desel || mp_equip_phase)))break;\n            if(wep_animptr){\n                if(a1st_time>1){--a1st_time;}else{\n                    a1st_time=1;\n                    if(wait_state){AvpAmmoInfo*a=&ammo_info[cur_wepno-1];if(a->cur&&wep_fire)wep_animptr=wait_ptr;else wait_state=0;}\n                    if(!wait_state){\n                        if(!play_frame(&wep_animptr)){\n                            if(wep_desel){wep_desel=0;cur_wepno=new_wepno;new_wepno=0;new_weapon();}\n                            else{wep_animptr=NULL;frame0();mp_equip_phase=0;}\n                        }\n                    }else play_frame(&wep_animptr);\n"
+    },
+    {
+      "start": 537,
+      "end": 538,
+      "replacement": "            }\n            if(step==0)SwingPos();\n            wep_x+=wep_xvel;wep_y+=wep_yvel;\n"
+    },
+    {
+      "start": 540,
+      "end": 541,
+      "replacement": ""
+    },
+    {
+      "start": 542,
+      "end": 542,
+      "replacement": "}\n\n/* Player melee contacts use the shared CLAW2 hit effect, distinct from\n * NPC Alien vocalizations in AMP.S and the attack-start effects.  Only a confirmed successful melee\n * hit should play one of these cues; missing a target remains silent.  Keep\n * this in the PC presentation/audio bridge, outside Jaguar hit geometry. */\nunsigned avp_mazescrn_melee_contact_sfx(s16 species,s16 weapon)\n{\n    if(species==PT_ALIEN){\n        switch(weapon){\n        case 1:return AVP_FX_CLAW2; /* Alien tail: same contact effect as claw */\n        case 2:return AVP_FX_CLAW2; /* Alien swipe fight damage event */\n        case 3:return AVP_FX_CLAW2; /* Alien bite: same contact effect as claw */\n        default:return 0u;\n        }\n    }\n    if(species==PT_PREDATOR){\n        switch(weapon){\n        case 1:return AVP_FX_MELEE; /* combi-stick fight damage event */\n        case 4:return AVP_FX_CLAW2; /* wrist-blades fight damage event */\n        default:return 0u;\n        }\n    }\n    return 0u;\n"
+    },
+    {
+      "start": 549,
+      "end": 550,
+      "replacement": "    if(fire_damage>0){s16 dam=fire_damage;if(player_type!=PT_HUMAN){u32 d=(u32)charge*(u16)dam;d>>=14;dam=(s16)((d+(u16)dam)>>1);fire_damage=dam;}AvpAmp*hit=shot_cb?shot_cb(dam,fire_distance,fire_width):TestSpark();if(hit){\n        unsigned contact_sfx=avp_mazescrn_melee_contact_sfx(player_type,cur_wepno);\n        if(contact_sfx)(void)TFX(contact_sfx);\n        host_cocoon_shot(hit,cur_wepno,dam);\n        if(player_type==PT_ALIEN&&cur_wepno!=2){\n            if(cur_wepno==1)hit->flags^=(1u<<AMP_STUN);\n            else hit->flags&=(u16)~(1u<<AMP_STUN);\n        }\n    }\n#ifdef AVP_PC_HOST\n    else if(player_type==PT_PREDATOR &&\n              avp_doors_predator_melee_jammed(cur_wepno,fire_distance)){\n        /* The original weapon's confirmed-contact sound; never on misses. */\n        unsigned contact_sfx=avp_mazescrn_melee_contact_sfx(player_type,cur_wepno);\n        if(contact_sfx)(void)TFX(contact_sfx);\n    }\n#endif\n    else if(player_type==PT_ALIEN && host_alien_cocoon_infinite_ammo_assist)\n        host_cocoon_shot(NULL,cur_wepno,0);\n    }\n"
+    },
+    {
+      "start": 553,
+      "end": 554,
+      "replacement": "void UpdtScrOverlays(void){++host_cocoon_tick;if(player_type==PT_PREDATOR)PredAvail();update_wep();process_shot();recharge();}\n\n#ifdef AVP_LOCAL_MULTIPLAYER_WEAPON_BRIDGE\n#include \"../../new/multiplayer/local_mp_weapon_native.inc\"\n#endif\n"
+    }
+  ]
+}

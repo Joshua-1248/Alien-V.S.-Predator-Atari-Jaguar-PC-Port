@@ -19,7 +19,7 @@ static ssize_t avp_test_readlink(const char *path,char *target,size_t cap)
     return (ssize_t)n;
 }
 #define readlink avp_test_readlink
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 #undef readlink
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
@@ -51,24 +51,71 @@ int main(void)
     snprintf(cfg,sizeof(cfg),"%s/settings.cfg",dir);
     load_settings(v);
     assert(!v->cfg.normalize_diagonal_contact_range);
+    assert(!v->cfg.normalize_diagonal_alien_death_spray_range);
+    assert(!v->cfg.normalize_diagonal_enemy_movement_speed);
+    assert(avp_pc_video_normalize_diagonal_enemy_movement_speed(v)==0);
     assert(avp_pc_video_normalize_diagonal_contact_range(v)==0);
+    assert(avp_pc_video_normalize_diagonal_alien_death_spray_range(v)==0);
     v->menu_page=MENU_ENHANCEMENTS;
-    assert(menu_id(v,menu_count(v)-1)==174);
+    { int contact_seen=0,spray_seen=0,movement_seen=0;
+      for(int i=0;i<menu_count(v);i++){
+        if(menu_id(v,i)==174)contact_seen++;
+        if(menu_id(v,i)==190)spray_seen++;
+        if(menu_id(v,i)==191)movement_seen++;
+      }
+      assert(contact_seen==1&&spray_seen==1&&movement_seen==1);
+    }
+    /* Existing R59 setting remains an independent toggle. */
     v->menu_index=174;
     menu_adjust(v,1);
     assert(avp_pc_video_normalize_diagonal_contact_range(v)==1);
+    assert(avp_pc_video_normalize_diagonal_alien_death_spray_range(v)==0);
     f=fopen(cfg,"r");assert(f);
     while(fgets(line,sizeof(line),f))
         if(!strcmp(line,"enhancement.normalize_diagonal_contact_range=true\n"))found=1;
     fclose(f);assert(found);
+    /* New R294 option is separately persisted and has no contact side effects. */
+    v->menu_index=190;
+    menu_adjust(v,1);
+    assert(avp_pc_video_normalize_diagonal_contact_range(v)==1);
+    assert(avp_pc_video_normalize_diagonal_alien_death_spray_range(v)==1);
+    f=fopen(cfg,"r");assert(f);found=0;
+    while(fgets(line,sizeof(line),f))
+        if(!strcmp(line,"enhancement.normalize_diagonal_alien_death_spray_range=true\n"))found=1;
+    fclose(f);assert(found);
+    /* R297 movement setting has its own saved flag and independent toggle. */
+    v->menu_index=191;
+    menu_adjust(v,1);
+    assert(avp_pc_video_normalize_diagonal_enemy_movement_speed(v)==1);
+    f=fopen(cfg,"r");assert(f);found=0;
+    while(fgets(line,sizeof(line),f))
+        if(!strcmp(line,"enhancement.normalize_diagonal_enemy_movement_speed=true\n"))found=1;
+    fclose(f);assert(found);
     v->cfg.normalize_diagonal_contact_range=0;
+    v->cfg.normalize_diagonal_alien_death_spray_range=0;
+    v->cfg.normalize_diagonal_enemy_movement_speed=0;
     load_settings(v);
     assert(v->cfg.normalize_diagonal_contact_range);
+    assert(v->cfg.normalize_diagonal_alien_death_spray_range);
+    assert(v->cfg.normalize_diagonal_enemy_movement_speed);
+    v->menu_index=190;
+    menu_adjust(v,-1);
+    assert(!v->cfg.normalize_diagonal_alien_death_spray_range);
+    assert(v->cfg.normalize_diagonal_contact_range);
+    assert(v->cfg.normalize_diagonal_enemy_movement_speed);
+    v->menu_index=191;
+    menu_adjust(v,-1);
+    assert(!v->cfg.normalize_diagonal_enemy_movement_speed);
+    v->menu_index=174;
     menu_adjust(v,-1);
     assert(!v->cfg.normalize_diagonal_contact_range);
     v->cfg.normalize_diagonal_contact_range=1;
+    v->cfg.normalize_diagonal_alien_death_spray_range=1;
+    v->cfg.normalize_diagonal_enemy_movement_speed=1;
     load_settings(v);
     assert(!v->cfg.normalize_diagonal_contact_range);
+    assert(!v->cfg.normalize_diagonal_alien_death_spray_range);
+    assert(!v->cfg.normalize_diagonal_enemy_movement_speed);
     unlink(cfg);rmdir(dir);free(v);
     puts("R59 F12 Normalize Diagonal Contact Range default + persistence PASS");
     return 0;

@@ -37,26 +37,13 @@ void InitDoors(void);
 void SaveDoors(void);
 void ResetDoors(void);
 void DoorKeys(void);
-/* PC-action mode only: host Use is independent of the Alien bite attack. */
-void avp_doors_pc_alien_use(int active,int down);
 void MoveDoors(void);
 void InitAccess(void);
 void ResetAccess(void);
 void avp_doors_bind_maze(u8 *maze,u16 width,u16 height);
 void avp_doors_bind_level_meta(const AvpDoorLevelMeta *levels,unsigned count);
-void avp_doors_bind_retail_meta(void);
 void avp_doors_bind_panel_ids(const AvpDoorPanelIds *ids);
 int avp_doors_cell_is_liftside(s32 xpos,s32 ypos);
-/* Read-only PC input routing: whether DoorKeys would select do_lifts. */
-int avp_doors_player_facing_lift(void);
-/* PC-only transition provenance. Reset before each original player update;
- * zero means a non-elevator/non-airlock exit. Never alters Jaguar behavior. */
-enum { AVP_DOORS_EXIT_NONE=0, AVP_DOORS_EXIT_LIFT=1, AVP_DOORS_EXIT_AIRLOCK=2 };
-void avp_doors_host_clear_exit_kind(void);
-/* PC-local Deathmatch interaction gating; zero means original Jaguar rules.
- * Called only while one native multiplayer actor is bound. */
-void avp_doors_mp_restrict_interactions(int deathmatch,int level_travel);
-unsigned avp_doors_host_exit_kind(void);
 
 extern u8 fullbits[256];
 extern u8 acs_level,lift_key,comp_panel;

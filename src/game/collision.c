@@ -58,17 +58,8 @@ static void normalize_pair(u32 *x,u32 *y) {
     *x >>= 1;
 }
 
-/* The retail 68000 SUB.L wraps at 32 bits.  Signed subtraction in C
- * invokes undefined behavior on overflow; decode the unsigned 32-bit
- * difference back to its exact signed two's-complement value. */
-static s32 wrapped_delta(s32 to,s32 from)
-{
-    u32 d=(u32)to-(u32)from;
-    return d<=0x7fffffffu ? (s32)d : (s32)((s64)d-INT64_C(4294967296));
-}
-
 u16 Angle(const AvpXY *from,const AvpXY *to) {
-    s32 sx=wrapped_delta(to->x,from->x), sy=wrapped_delta(to->y,from->y);
+    s32 sx=to->x-from->x, sy=to->y-from->y;
     u32 x,y; u16 invert=0,base=0;
     if ((sx|sy)==0) return 0;
     x=abs32s(sx); y=abs32s(sy);
@@ -84,7 +75,7 @@ u16 Angle(const AvpXY *from,const AvpXY *to) {
 }
 
 void Vector(const AvpXY *from,const AvpXY *to,s32 *vx,s32 *vy) {
-    s32 sx=wrapped_delta(to->x,from->x), sy=wrapped_delta(to->y,from->y);
+    s32 sx=to->x-from->x, sy=to->y-from->y;
     u32 x,y,xx,yy,den; int negx=sx<0,negy=sy<0;
     if ((sx|sy)==0) { *vx=0x4000; *vy=0; return; }
     x=abs32s(sx); y=abs32s(sy); normalize_pair(&x,&y);
@@ -109,21 +100,15 @@ static u8 *cell_at(unsigned x,unsigned y)
  * This is the C form of the initialized door_tab[] used by check_wall. */
 static const u8 *door_for_wall(const u8 *wall)
 {
-    size_t off=(size_t)(wall-maze_data);
-    unsigned slot=(unsigned)(off&3u);
-    size_t cell_index=off/CELL_SIZE;
-    size_t x=cell_index%bound_w,y=cell_index/bound_w;
+    uintptr_t off=(uintptr_t)(wall-maze_data);
+    unsigned slot=(unsigned)(off & 3u);
     const u8 *base=wall-slot;
     size_t row=row_cells()*CELL_SIZE;
-    /* The retail mazes keep their outer boundaries closed. A boundary door
-     * cannot have a neighboring door-open byte: reading right/bottom would
-     * alias the next row or leave the allocation entirely. Treat it as solid
-     * rather than consulting unrelated geometry or out-of-range memory. */
     switch(slot) {
-    case LEFT_WALL:   return x?base+LEFT_DOOR:NULL;
-    case TOP_WALL:    return y?base+TOP_DOOR:NULL;
-    case RIGHT_WALL:  return x+1u<bound_w?base+CELL_SIZE+LEFT_DOOR:NULL;
-    default:          return y+1u<bound_h?base+row+TOP_DOOR:NULL;
+    case LEFT_WALL:   return base+LEFT_DOOR;
+    case TOP_WALL:    return base+TOP_DOOR;
+    case RIGHT_WALL:  return base+CELL_SIZE+LEFT_DOOR;
+    default:          return base+row+TOP_DOOR;
     }
 }
 
@@ -147,9 +132,7 @@ static u8 check_wall(const u8 *wall,u16 coord,u8 height)
     }
     if (!(flags&AVP_WB_DOOR)) return 0;
 
-    {const u8 *door=door_for_wall(wall);
-    if(!door)return HIT_WALL;
-    open=*door;}
+    open=*door_for_wall(wall);
     if (!(flags&AVP_WB_TBDOOR)) {
         if (flags&AVP_WB_EDGEDOOR) {
             unsigned edge=128u+CDOOR_LIM-(unsigned)open;
@@ -165,31 +148,6 @@ static u8 check_wall(const u8 *wall,u16 coord,u8 height)
         int lo=64-(int)open,hi=64+(int)open;
         return ((int)height<=lo || (int)height>=hi) ? HIT_DOOR:0;
     }
-}
-
-/* The AI's blocked-movement fallback may align with an open doorway, but
- * only when the door panel actually has enough clearance for that actor.
- * Inspect both authored wall faces: a solid/closed opposite face must not be
- * bypassed. Geometry and crossing still go through ordinary SafePos(). */
-int avp_collision_open_door_ahead(s32 xpos,s32 ypos,int dx,int dy,u8 height)
-{
-    unsigned x=(u32)xpos>>16,y=(u32)ypos>>16;
-    unsigned nx=x,ny=y,side,opposite;
-    const u8 *wall1,*wall2;
-    int door_present=0;
-    if(!inside_cell(x,y) || ((dx!=0)+(dy!=0))!=1)return 0;
-    if(dx>0){nx=x+1u;side=RIGHT_WALL;opposite=LEFT_WALL;}
-    else if(dx<0){if(!x)return 0;nx=x-1u;side=LEFT_WALL;opposite=RIGHT_WALL;}
-    else if(dy>0){ny=y+1u;side=BOTTOM_WALL;opposite=TOP_WALL;}
-    else {if(!y)return 0;ny=y-1u;side=TOP_WALL;opposite=BOTTOM_WALL;}
-    if(!inside_cell(nx,ny))return 0;
-    wall1=cell_at(x,y)+side;
-    wall2=cell_at(nx,ny)+opposite;
-    if(fullbits[*wall1]&AVP_WB_DOOR)door_present=1;
-    if(fullbits[*wall2]&AVP_WB_DOOR)door_present=1;
-    if(!door_present)return 0;
-    return check_wall(wall1,0x8000u,height)==0 &&
-           check_wall(wall2,0x8000u,height)==0;
 }
 
 static int outside_solid(u8 wallno,int from_left)
@@ -277,17 +235,7 @@ int AMPCollisions(s32 xpos,s32 ypos)
         int x=cx+ox,y=cy+oy; u16 n; AvpAmp *a; s32 w,dx,dy;
         if(x<0||y<0||x>=AVP_AMP_GRID_W||y>=AVP_AMP_GRID_H)continue;
         n=collmap[y*AVP_AMP_GRID_W+x]; if(!n||n>AVP_NUM_AMPS)continue;
-        a=&amp_data[n-1u];
-        /* Grid IDs are reusable AMP slots, not permanent occupancy.  An
-         * inactive actor or a live actor that has moved to another square
-         * must not block the player through an obsolete grid registration.
-         * Static furniture with a real owner remains solid. */
-        if((!a->mode && !a->host_static) ||
-           ((u32)a->xpos>>16)!=(unsigned)x ||
-           ((u32)a->ypos>>16)!=(unsigned)y)continue;
-        if(a->creature>=40u)continue;
-        w=coll_widths[a->creature];
-        if(!w)continue;
+        a=&amp_data[n-1u]; if(a->creature>=40u)continue; w=coll_widths[a->creature]; if(!w)continue;
         dx=a->xpos-xpos;if(dx<0)dx=-dx;dy=a->ypos-ypos;if(dy<0)dy=-dy;
         if(dx<w&&dy<w)return 1;
     }
@@ -473,24 +421,10 @@ int LineOfSight(const AvpXY *from,const AvpXY *to)
     return scan_maze(&q)!=0u;
 }
 
-/* The 68000's SUB.L, NEG.L and ADD.L use modulo-2^32 results.  In
- * particular NEG.L of $80000000 remains $80000000; C signed overflow is
- * undefined, so keep the register words unsigned until explicitly decoded. */
-static s32 signed_word32(u32 v)
-{
-    return v<=0x7fffffffu ? (s32)v : (s32)((s64)v-INT64_C(4294967296));
-}
-
 static s32 rough_dist(s32 ax,s32 ay,s32 bx,s32 by)
 {
-    s32 dx=wrapped_delta(ax,bx),dy=wrapped_delta(ay,by);
-    if(dx<0)dx=signed_word32(0u-(u32)dx);
-    if(dy<0)dy=signed_word32(0u-(u32)dy);
-    if(dx>dy){s32 t=dx;dx=dy;dy=t;}
-    /* Source arithmetic shift by two, including the sign bits if NEG.L
-     * encountered its self-negating 0x80000000 corner case. */
-    u32 quarter=((u32)dx>>2)|(dx<0?0xc0000000u:0u);
-    return signed_word32((u32)dy+quarter);
+    s32 dx=ax-bx,dy=ay-by;if(dx<0)dx=-dx;if(dy<0)dy=-dy;
+    if(dx>dy){s32 t=dx;dx=dy;dy=t;}return dy+(dx>>2);
 }
 
 void AreaAmpDamage(s32 xpos,s32 ypos,s32 radius,s16 damage,u16 damage_flags)

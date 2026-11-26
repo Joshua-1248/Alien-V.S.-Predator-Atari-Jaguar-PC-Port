@@ -41,7 +41,7 @@ typedef struct AvpMpWorldBackend {
     void (*destroy_world)(void *user, void *world_ctx);
     int (*enter_world)(void *user, void *world_ctx, unsigned player, void *player_ctx);
     void (*exit_world)(void *user, void *world_ctx, unsigned player, void *player_ctx);
-    int (*tick_world)(void *user, void *world_ctx, unsigned member_mask,
+    int (*tick_world)(void *user, void *world_ctx, AvpMpActorMask member_mask,
                       void *const player_ctx[AVP_LOCAL_MP_MAX_ACTORS],
                       const AvpMpPlayerCommand commands[AVP_LOCAL_MP_MAX_ACTORS],
                       uint64_t tick);
@@ -49,12 +49,17 @@ typedef struct AvpMpWorldBackend {
                          void *player_ctx, AvpLocalMpSourceFrame *out);
     /* Optional failure-atomic batch arrival: validate/prepare ALL actors first,
      * then commit every actor together or leave every actor untouched. */
-    int (*enter_world_group)(void *user,void *world_ctx,unsigned mask,
+    int (*enter_world_group)(void *user,void *world_ctx,AvpMpActorMask mask,
                              void *const player_ctx[AVP_LOCAL_MP_MAX_ACTORS]);
+    /* Optional spycam view: original actor scope is SUBJECT while pixels
+     * are owned by VIEWER's independent split-screen framebuffer. */
+    int (*render_spy_player)(void *user,void *world_ctx,unsigned subject,
+                             void *subject_ctx,unsigned viewer,
+                             AvpLocalMpSourceFrame *out);
 } AvpMpWorldBackend;
 
 typedef struct AvpMpActiveWorld {
-    unsigned campaign, level, member_mask;
+    unsigned campaign, level; AvpMpActorMask member_mask;
     void *context;
     uint64_t ticks;
 } AvpMpActiveWorld;
@@ -66,6 +71,7 @@ typedef struct AvpMpSession {
     void *player[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpActiveWorld worlds[AVP_LOCAL_MP_MAX_ACTORS];
     uint64_t tick;
+    unsigned spy_target[AVP_LOCAL_MP_MAX_PLAYERS]; /* viewer -> subject */
     int running, faulted;
 } AvpMpSession;
 
@@ -83,7 +89,7 @@ int avp_mp_session_tick(AvpMpSession *s,
 int avp_mp_session_move(AvpMpSession *s, unsigned player, unsigned new_level);
 /* Multi-passenger lift/airlock transfer, all-or-nothing. Requires every player
  * in mask to share one source world; one destination join transaction. */
-int avp_mp_session_move_group(AvpMpSession *s,unsigned mask,unsigned new_level);
+int avp_mp_session_move_group(AvpMpSession *s,AvpMpActorMask mask,unsigned new_level);
 /* Render one separate player frame each, then reuse the Sweep 52 compositor.
  * On any renderer failure, the destination is NOT modified. */
 unsigned avp_mp_session_compose(AvpMpSession *s, const AvpLocalMpOutputFrame *output,

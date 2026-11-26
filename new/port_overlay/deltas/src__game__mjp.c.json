@@ -1,0 +1,362 @@
+{
+  "path": "src/game/mjp.c",
+  "base_sha256": "d641c0f14d7e68aaf39d785d7b87694a02b26b6e79c051b3340da11939fc5e1e",
+  "output_sha256": "59578b9141521a202c63f96dd8022af7c3cf5f2eb8e2227d6c230c4a0a4179c1",
+  "edits": [
+    {
+      "start": 9,
+      "end": 9,
+      "replacement": "#include \"music.h\"\n"
+    },
+    {
+      "start": 22,
+      "end": 22,
+      "replacement": "#include \"../../new/pc_video/select_briefing_skip.inc\"\n\n/* Retail Do_Escap $01DC52/$01DCA0/$01DD78 increments the actual\n * Show_Tex Y cursor by the $4BEA8 14-pixel line step between successive\n * countdown records on the SAME page. The renderer's line index must carry\n * that source-owned advance, instead of restarting each word on row zero. */\nstatic unsigned mjp_escape_text_line;\n/* Original $4BEC8: the spoken Five/Four/Three/Two/One/Zero cues suppress\n * TYP1B even though later Escape report pages enable it ($01E226). */\nstatic unsigned mjp_suppress_typing_sound;\n"
+    },
+    {
+      "start": 96,
+      "end": 96,
+      "replacement": "/* Decode a 68000 longword as signed without relying on an out-of-range cast. */\nstatic s32 mjp_longword(u32 word)\n{\n    return word<=0x7fffffffu ? (s32)word : (s32)((s64)word-INT64_C(4294967296));\n}\n"
+    },
+    {
+      "start": 97,
+      "end": 99,
+      "replacement": "    /* Retail $01E2F2: signed scale/position words, 32-bit wrapping SUB/LSL. */\n    u32 *r=raw_for(Ob_Addr);\n"
+    },
+    {
+      "start": 100,
+      "end": 102,
+      "replacement": "    Ob_Addr->scaled=1;Ob_Addr->scale_x=Ob_Addr->scale_y=Ob_Scale;\n"
+    },
+    {
+      "start": 103,
+      "end": 104,
+      "replacement": "        u32 d=(u32)Ob_Scale-8u;\n        u32 d2=d<<1;\n        Ob_Addr->x=mjp_longword((u32)Ob_Addr->x-d2);\n        Ob_Addr->y=mjp_longword((u32)Ob_Addr->y-d);\n"
+    },
+    {
+      "start": 105,
+      "end": 108,
+      "replacement": "        /* New_Make returns with (scale-8)*16 in D2, consumed by Sel_Upda. */\n        mjp_d2_residue=mjp_longword(d2<<3);\n"
+    },
+    {
+      "start": 235,
+      "end": 235,
+      "replacement": "/* Show_Tex cursor X origin, retail $4BEB0 (copied to $4BE94 at $01D29C and\n * at each new line, $01D2D4).  Do_Intro/Do_Escap set $18; other scenes keep\n * the port's established origin until individually verified. */\nstatic unsigned mjp_text_x0;\n/* Only modes that actually draw the green Show_Tex square need a cursor\n * retirement callback. Keep SELECT/FAME/other MJP screens free from new\n * incidental event-triggered host repaints. */\nstatic void mjp_cursor_retire(void)\n{\n    if(current_mjp_mode==AVP_MJP_INTRO ||\n       current_mjp_mode==AVP_MJP_ESCAPE ||\n       current_mjp_mode==AVP_MJP_SIM_TERMINATED ||\n       current_mjp_mode==AVP_MJP_BASE_EXPLODES)\n        evt(0x4d4a505au,0,0); /* MJPZ */\n}\n"
+    },
+    {
+      "start": 246,
+      "end": 247,
+      "replacement": "    /* Retail Show_Tex at $01D3FE checks $4BEC8 and branches straight\n     * to the next character, bypassing BOTH the DEL cursor and the VBlank\n     * wait. R95 muted only TYP1B, unintentionally delaying the escape\n     * countdown by every padding-space and letter glyph. */\n    int fast=(current_mjp_mode==AVP_MJP_FAME || mjp_suppress_typing_sound);\n"
+    },
+    {
+      "start": 248,
+      "end": 248,
+      "replacement": "    /* MJPZ is PC presentation metadata: the original screen contains a\n     * cursor only while Show_Tex is actively revealing characters. Retiring\n     * it changes no 68000 timing, audio, text, or screen-clearing operations.\n     * Always retire the previous message's cursor, including empty input. */\n    mjp_cursor_retire(); /* no cursor until a live glyph advances */\n"
+    },
+    {
+      "start": 250,
+      "end": 251,
+      "replacement": "        unsigned x=mjp_text_x0;\n"
+    },
+    {
+      "start": 254,
+      "end": 255,
+      "replacement": "            /* Retail Show_Tex $01D2FE..$01D376 skips TFX for ASCII\n             * space (mapped to underscore) AND a literal underscore.\n             * Tilde/@ are mapped later, after the TFX decision. */\n            if(mjp_typewriter_sound_mode() && !mjp_suppress_typing_sound && !fast && c!=' ' && c!='_' && c!=0 && o->frontend_event)\n"
+    },
+    {
+      "start": 256,
+      "end": 257,
+      "replacement": "            /* One_Tick's text position belongs to the original global Y cursor.\n             * Advance the host line only for the first spoken escape page's\n             * successive messages, preserving all authored line breaks. */\n            const unsigned display_line=line+\n                (current_mjp_mode==AVP_MJP_ESCAPE?mjp_escape_text_line:0u);\n            mjp_text_char(display_line,x,draw);\n"
+    },
+    {
+      "start": 258,
+      "end": 258,
+      "replacement": "            /* Presentation metadata, not an extra text/audio/video tick:\n             * The ROM's visible DEL/0x7F green block follows the next\n             * glyph X. It is distinct from silent/transparent ASCII '_'. */\n            if(!fast && (current_mjp_mode==AVP_MJP_INTRO ||\n                         current_mjp_mode==AVP_MJP_ESCAPE ||\n                         current_mjp_mode==AVP_MJP_SIM_TERMINATED ||\n                         current_mjp_mode==AVP_MJP_BASE_EXPLODES))\n                evt(0x4d4a5043u,(s32)x,(s32)display_line); /* MJPC */\n"
+    },
+    {
+      "start": 261,
+      "end": 262,
+      "replacement": "                    if(current_mjp_mode==AVP_MJP_INTRO){\n                        text_abort=1;\n                        mjp_cursor_retire(); /* skipped text */\n                        return;\n                    }\n"
+    },
+    {
+      "start": 268,
+      "end": 269,
+      "replacement": "        mjp_text_char(line+(current_mjp_mode==AVP_MJP_ESCAPE?mjp_escape_text_line:0u),x,'_');\n"
+    },
+    {
+      "start": 270,
+      "end": 271,
+      "replacement": "        if(*p==0){\n            mjp_cursor_retire(); /* text completed, no cursor on hold */\n            return;\n        }\n"
+    },
+    {
+      "start": 387,
+      "end": 387,
+      "replacement": "    char displayed[6]={0,0,0,0,0,0};\n"
+    },
+    {
+      "start": 392,
+      "end": 392,
+      "replacement": "        for(unsigned j=0;j<6u;j++)if(displayed[j]!=fame[slot].name[j]){\n            displayed[j]=fame[slot].name[j];\n            evt(0x464e4348u,(s32)j,(s32)(unsigned char)displayed[j]); /* FNCH */\n        }\n        evt(0x464e414du,(s32)cursor,(s32)(unsigned char)current); /* FNAM */\n"
+    },
+    {
+      "start": 404,
+      "end": 405,
+      "replacement": ""
+    },
+    {
+      "start": 408,
+      "end": 408,
+      "replacement": "    for(unsigned j=0;j<6u;j++)\n        evt(0x464e4348u,(s32)j,(s32)(unsigned char)fame[slot].name[j]);\n    evt(0x464e444eu,0,0); /* FNDN: editor completed */\n"
+    },
+    {
+      "start": 410,
+      "end": 410,
+      "replacement": "void Do_Credits(void); /* Backend-only display, entered inside Do_Title. */\n"
+    },
+    {
+      "start": 418,
+      "end": 419,
+      "replacement": "        One_Tick();\n#include \"../../new/multiplayer/mjp_title_idle_and_launch.inc\"\n\n        mjppad();\n"
+    },
+    {
+      "start": 430,
+      "end": 431,
+      "replacement": "        if(Choice==3){\n            title_save_menu=0;\n            evt(0x53565854u,0,0);\n            /* The CANCEL key also means FIRE on the title screen.  Consume\n             * its release before returning, or that same held press selects\n             * NEW GAME and erroneously opens character selection. */\n            Wait_Up();\n            return 0;\n        }\n"
+    },
+    {
+      "start": 438,
+      "end": 439,
+      "replacement": "    Clear_Bu();EncodeGa();evt(0x544d454eu,0,0);title_save_menu=0;Choice=0;\n"
+    },
+    {
+      "start": 446,
+      "end": 447,
+      "replacement": "        else if(Choice!=0&&Choice!=2&&Choice!=4\n#include \"../../new/multiplayer/mjp_title_choice_gate.inc\"\n\n                )Choice=0;\n"
+    },
+    {
+      "start": 452,
+      "end": 452,
+      "replacement": "#include \"../../new/multiplayer/mjp_title_launch_return.inc\"\n\n"
+    },
+    {
+      "start": 454,
+      "end": 455,
+      "replacement": "        if(Choice==3){\n            /* Retail Do_Title handles CREDITS within the title selector and\n             * resumes that selector when the presentation closes. R138\n             * incorrectly returned a new Choice=5 to MAIN, restarting the\n             * entire menu and reinitializing its input/resource state.\n             *\n             * The credits *presentation* is still an unverified PC backend\n             * replacement; confine it to that seam, not Jaguar CPU flow. */\n            const AvpRuntimeOps *o=avp_runtime_ops();\n            evt(0x43524544u,0,0); /* CRED: retail menu credit selection */\n            if(o->frontend_load_resource)\n                o->frontend_load_resource(o->user,AVP_MJP_CREDITS,238u,0u); /* credits bitmap */\n            Do_Credits();\n            if(o->frontend_load_resource)\n                o->frontend_load_resource(o->user,AVP_MJP_TITLE,208u,0u);\n            evt(0x43524558u,0,0); /* CREX: PC presentation cleanup */\n            Choice=0;           /* $01F198 -> $01F12A selector; Do_Credits ended with $01FDFC */\n            continue;\n        }\n"
+    },
+    {
+      "start": 473,
+      "end": 473,
+      "replacement": "/* The selected character is the portrait on the centre/front track.  At\n * phase zero this is track 2; at the right-turn wrap ($7c) it is track 1.\n * Keep the selection and the visible SELV pose sourced from the same track,\n * including when Fire is pressed before any carousel rotation. */\nstatic unsigned select_front_species(void)\n{\n    unsigned i=(select_phase>>2)&31u;\n    unsigned best=0u;\n    s32 scale=select_track[6][i];\n    if(select_track[7][i]>scale){best=1u;scale=select_track[7][i];}\n    if(select_track[8][i]>scale)best=2u;\n    return select_species[best];\n}\n/* Forward the real 32-step OP object state without changing the selector's\n * CPU-side phase, sort order, or the animation table recovered from RDB.DTA.\n * Slots 0,2,4 correspond to the three authored selection objects. */\nstatic void select_emit_object(unsigned slot)\n{\n    const AvpMjpObject *o;\n    u32 packed;\n    if(!pool||slot>=pool_cap)return;\n    o=&pool[slot];\n    packed=((u32)slot<<16)|(((u32)o->scale_x&255u)<<8)|(o->data&255u);\n    evt(0x534f424au,(s32)packed,\n        (s32)(((u32)(u16)o->x<<16)|(u16)o->y)); /* SOBJ */\n}\nstatic void select_emit_objects(void)\n{\n    select_emit_object(0u);\n    select_emit_object(2u);\n    select_emit_object(4u);\n}\n"
+    },
+    {
+      "start": 498,
+      "end": 498,
+      "replacement": "    select_emit_objects();\n    evt(0x53454c56u,(s32)select_front_species(),(s32)select_phase); /* SELV: host presentation seam */\n"
+    },
+    {
+      "start": 509,
+      "end": 509,
+      "replacement": "        select_emit_objects();\n"
+    },
+    {
+      "start": 513,
+      "end": 513,
+      "replacement": "/* Retail Pause() permits a *new* Fire skip, but the key that chose the\n * character must not also dismiss the immediately following GPU transition.\n * Preserve the authored VBL counts and intentional skip behavior, while\n * treating the selection-confirmation hold as already consumed. */\nstatic void select_animation_pause(unsigned ticks)\n{\n    const u32 fire_mask=(1u<<FIRE_A)|(1u<<FIRE_B)|(1u<<FIRE_C);\n    u32 held=mjp_pad&fire_mask;\n    while(ticks--){\n        One_Tick();mjppad();\n        u32 pressed=mjp_pad&fire_mask;\n        if(pressed&~held)return; /* a new press, not the held selector press */\n        held=pressed;\n    }\n}\n\n"
+    },
+    {
+      "start": 518,
+      "end": 518,
+      "replacement": "    select_brief_skip=0;\n"
+    },
+    {
+      "start": 529,
+      "end": 529,
+      "replacement": "        /* Retail selector is stationary until the player requests a direction.\n         * The previous hosted reconstruction entered the rotation loop with\n         * select_direction=0 and therefore scrolled by itself. */\n        One_Tick();mjppad();\n        if(mjp_pressed(FIRE_A)||mjp_pressed(FIRE_B)||mjp_pressed(FIRE_C))break;\n        if(mjp_pressed(JOY_LEFT))select_direction=1u;\n        else if(mjp_pressed(JOY_RIGHT))select_direction=0u;\n        else continue;\n        /* Retail rotation starts on the sampled direction; waiting for\n         * release froze the carousel during an ordinary held key press. */\n"
+    },
+    {
+      "start": 545,
+      "end": 549,
+      "replacement": ""
+    },
+    {
+      "start": 550,
+      "end": 552,
+      "replacement": "    /* The original left/right exits select different species-table slots.\n     * Resolve the frontmost authored portrait directly so Fire before any\n     * rotation and both exit directions agree with what is on screen. */\n    chosen=select_front_species();\n"
+    },
+    {
+      "start": 556,
+      "end": 558,
+      "replacement": "    /* Hold-safe version of the original 50/20-VBL, skippable Pause jobs. */\n"
+    },
+    {
+      "start": 559,
+      "end": 560,
+      "replacement": "    select_animation_pause(50u);\n"
+    },
+    {
+      "start": 563,
+      "end": 564,
+      "replacement": "    select_animation_pause(20u);\n"
+    },
+    {
+      "start": 572,
+      "end": 575,
+      "replacement": "    /* A newly pressed A/B/C button can complete the hosted briefing at\n     * once. That deliberate press is consumed and advances into the\n     * original loading/fade sequence without a redundant PRESS FIRE gate.\n     * In the normal path the separate, hold-safe confirmation is unchanged. */\n    if(!select_brief_skip){\n        evt(0x53454c54u,0x2b74e,0);\n        Wait_Up();\n        for(;;){One_Tick();mjppad();if(mjp_pad&0x22002000u)break;}\n    }\n    select_brief_skip=0;\n    /* The original FX fade command is executable audio control, not just a\n     * display event. ScreenOff() waits for it to complete before stopping\n     * character-selection music and entering the gameplay presentation. */\n    FXFadeDo(0xfa);\n"
+    },
+    {
+      "start": 598,
+      "end": 598,
+      "replacement": "extern volatile u32 one_second_ticks;\n"
+    },
+    {
+      "start": 599,
+      "end": 599,
+      "replacement": "/* Original Do_Escap uses 70 $01E15A VBlank waits between consecutive\n * spoken cues, or a 30+40-field hold/slide. Those are 70/60 seconds on\n * a 60-Hz Jaguar. The user requests literal 1.000-second spoken intervals\n * in the PC port, so compensate at this ONE presentation seam, without\n * changing the original 68000 ROM or generic MJP tick clock.\n * The current CROSS host reconstruction costs 8+16*2 = 40 fields. */\nstatic unsigned mjp_escape_cue_interval(void)\n{\n    return one_second_ticks==50u?50u:60u;\n}\nstatic int mjp_escape_before_slide_wait(void)\n{\n    const unsigned slide_fields=8u+16u*2u;\n    const unsigned target=mjp_escape_cue_interval();\n    /* mjp_timed_wait(N) waits N+1 fields, and then the slide costs 40. */\n    return mjp_timed_wait((s32)(target-slide_fields-1u));\n}\n"
+    },
+    {
+      "start": 611,
+      "end": 611,
+      "replacement": "    mjp_text_x0=0u;\n"
+    },
+    {
+      "start": 628,
+      "end": 628,
+      "replacement": "/* Retail page-slide words: $4BED4 direction (0, +1, -1), $4BED8 upper and\n * $4BEDC lower limit for D1.  The picture object's X is $12+4*D1\n * ($01DF6A/$01DFC2, $01E07E/$01E088, $01E12A/$01E134). */\nstatic s32 mjp_slide_dir,mjp_slide_max,mjp_slide_min;\nstatic s32 mjp_slide_x(s32 n)\n{\n    s32 d1;\n    if(mjp_slide_dir==1)d1=n;                 /* $01DF96 / $01E0C4: unclamped */\n    else if(mjp_slide_dir==-1){               /* $01DF9C / $01E0C8 */\n        d1=24-n;\n        if(!(d1<mjp_slide_max))d1=mjp_slide_max;   /* CMP $4BED8, BLT */\n        if(!(d1>mjp_slide_min))d1=mjp_slide_min;   /* CMP $4BEDC, BGT */\n    }else d1=10;                              /* $01DF90 / $01E0BE */\n    return 0x12+4*d1;\n}\n"
+    },
+    {
+      "start": 630,
+      "end": 633,
+      "replacement": "    /* Retail local $01DF2C.  First epoch: D5=0..7 builds the picture object\n     * at the slide position, then waits one VBL ($01E15A).  Second epoch:\n     * the CROSS GPU program publishes progress $7FB4=1..16, each packed\n     * RGB16 blend stage ending on a VBlank acknowledgment ($7FA8, R237),\n     * while the 68000 rebuilds the object at D1=$7FB4+8; completion\n     * ($7F80=2) follows the stage-16 acknowledgment.  Then $01E152 NEG\n     * $4BED4.  The ROM proves >=1 VBL per stage; the BigPEmu reference\n     * (2026-10-30 capture, intro pages 1 and 2) holds every stage for\n     * exactly two VBLs: blending 144 rows exceeds one frame. */\n"
+    },
+    {
+      "start": 634,
+      "end": 636,
+      "replacement": "    for(s32 d5=0;d5<8;++d5){\n        evt(0x4d4a5058u,mjp_slide_x(d5),0); /* MJPX: picture X, CROSS stage */\n        One_Tick();\n    }\n    for(s32 stage=1;stage<=16;++stage){\n        evt(0x4d4a5058u,mjp_slide_x(stage+8),stage);\n        One_Tick();One_Tick();       /* two VBLs per GPU stage */\n    }\n    evt(0x4d4a5053u,(s32)from,(s32)to); /* MJPS: GPU status 2 */\n    mjp_slide_dir=-mjp_slide_dir;\n"
+    },
+    {
+      "start": 664,
+      "end": 664,
+      "replacement": "    mjp_text_x0=0x18u;                          /* $01D84C */\n"
+    },
+    {
+      "start": 666,
+      "end": 667,
+      "replacement": "    mjp_slide_min=0;mjp_slide_dir=0;           /* $01D89A, $01D8A4 */\n    mjp_transition(AVP_MJP_PAGE_BLANK,0);       /* D6=$4BE18, D7=page 0 */\n    mjp_slide_dir=-1;                           /* $01D8B4 */\n    mjp_text_id(0x0002AA18u);\n"
+    },
+    {
+      "start": 669,
+      "end": 669,
+      "replacement": "        if(i==0u)mjp_slide_max=10;              /* $01D904 */\n        if(i==1u)mjp_slide_max=0x63;            /* $01D930 */\n        if(i==6u)mjp_slide_min=10;              /* $01D9E4 */\n"
+    },
+    {
+      "start": 675,
+      "end": 676,
+      "replacement": "    mjp_slide_dir=0;                            /* $01DB40 */\n    mjp_transition(0,AVP_MJP_PAGE_BLANK);       /* D6=page 0, D7=$4BE18 */\n"
+    },
+    {
+      "start": 678,
+      "end": 678,
+      "replacement": "/* Retail $01F7E8: one VBL ($01E15A), read the pad; PAUSE (bit 28) freezes\n * the scroll until it is released, pressed and released again.  Returns\n * nonzero when A/B/C is down. */\nstatic int credits_wait(void)\n{\n    One_Tick();mjppad();\n    if(mjp_pad&(1u<<PAUSE)){\n        do{One_Tick();mjppad();}while(mjp_pad&(1u<<PAUSE));\n        do{One_Tick();mjppad();}while(!(mjp_pad&(1u<<PAUSE)));\n        do{One_Tick();mjppad();}while(mjp_pad&(1u<<PAUSE));\n    }\n    return (mjp_pad&0x22002000u)!=0u;\n}\n/* Retail Do_Title CREDITS, $01F5BC..$01F7D0.  FILES 238 is a pre-rendered\n * 320x1373 4-bpp anti-aliased bitmap shown through the 16-step grey CLUT\n * written to $F00400 (index 0 transparent over the dimmed title).  A 280-line\n * ($118) object rises from Y+300 ($12C) to Y+1, one line per VBL; then its\n * data pointer advances one 160-byte line per VBL for $55D (1373) lines,\n * past the image into the blitter-cleared tail.  A/B/C exits at any VBL. */\nvoid Do_Credits(void)\n{\n    s32 y=0x12c,line=0;\n    Wait_Up();                                  /* $01F5BC: $01FDFC */\n    evt(0x43524247u,0,0);                       /* CRBG */\n    evt(0x43525359u,y,0);                       /* CRSY: object Y, data line */\n    for(;;){                                    /* $01F6EC */\n        if(credits_wait())goto done;\n        evt(0x43525359u,y,0);\n        if(--y==0)break;\n    }\n    while(line<0x55d){                          /* $01F726 */\n        if(credits_wait())goto done;\n        ++line;\n        evt(0x43525359u,1,line);\n    }\ndone:\n    Wait_Up();                                  /* $01F75A: $01FDFC */\n    evt(0x4352454eu,0,0);                       /* CREN */\n}\n\n"
+    },
+    {
+      "start": 732,
+      "end": 732,
+      "replacement": "    mjp_slide_dir=0;              /* $01DB82 */\n"
+    },
+    {
+      "start": 733,
+      "end": 733,
+      "replacement": "    mjp_slide_min=10;mjp_slide_max=10; /* $01DBA6, $01DBB0 */\n    mjp_text_x0=0x18u;            /* $01DB92 */\n    mjp_escape_text_line=0u;\n    mjp_suppress_typing_sound=1u; /* $4BEC8=1: countdown words are silent TYP1B */\n"
+    },
+    {
+      "start": 737,
+      "end": 738,
+      "replacement": "        mjp_transition(AVP_MJP_PAGE_BLANK,0); /* D6=$4BE18 -> first escape page */\n"
+    },
+    {
+      "start": 740,
+      "end": 746,
+      "replacement": "        /* $01DC28..$01DCEE: the spoken sample starts BEFORE Show_Tex.\n         * The original countdown text cells are displayed on successive\n         * Y=$A6,$B4,$C2 lines; $4BEC8=1 suppresses ordinary TYP1B here. */\n        mjp_audio_id(0x00022848u,0x2600);mjp_text_id(0x0002ADDAu);\n        ++mjp_escape_text_line;\n        mjp_wait_exact(mjp_escape_cue_interval());\n        mjp_audio_id(0x00022898u,0x2600);mjp_text_id(0x0002AE01u);\n        ++mjp_escape_text_line;\n        mjp_wait_exact(mjp_escape_cue_interval());\n        mjp_audio_id(0x000228E8u,0x2600);mjp_text_id(0x0002AE28u);\n        if(mjp_escape_before_slide_wait()<0)break;\n"
+    },
+    {
+      "start": 748,
+      "end": 752,
+      "replacement": "        mjp_escape_text_line=0u; /* retail resets $4BEB4=$A6 for new page */\n        mjp_audio_id(0x00022938u,0x2600);mjp_text_id(0x0002AE4Fu);\n        ++mjp_escape_text_line;\n        mjp_wait_exact(mjp_escape_cue_interval());\n        mjp_audio_id(0x00022988u,0x2600);mjp_text_id(0x0002AE76u);\n        if(mjp_escape_before_slide_wait()<0)break;\n"
+    },
+    {
+      "start": 753,
+      "end": 754,
+      "replacement": "        mjp_transition(1,2);Clear();\n        mjp_escape_text_line=0u;\n"
+    },
+    {
+      "start": 755,
+      "end": 755,
+      "replacement": "        mjp_text_id(0x0002AE9Du);\n"
+    },
+    {
+      "start": 757,
+      "end": 757,
+      "replacement": "        mjp_suppress_typing_sound=0u; /* $01E226: report text enables TYP1B */\n"
+    },
+    {
+      "start": 763,
+      "end": 764,
+      "replacement": "        Clear();mjp_transition(4,AVP_MJP_PAGE_BLANK); /* $01DEFC: page 4 -> $4BE18 */\n        mjp_suppress_typing_sound=1u;\n        mjp_escape_text_line=0u;\n"
+    },
+    {
+      "start": 769,
+      "end": 769,
+      "replacement": "    mjp_text_x0=0u;\n    mjp_escape_text_line=0u;\n    mjp_suppress_typing_sound=0u;\n"
+    },
+    {
+      "start": 776,
+      "end": 776,
+      "replacement": "    mjp_slide_min=10;mjp_slide_max=10; /* $01DA0C, $01DA16 */\n"
+    },
+    {
+      "start": 777,
+      "end": 778,
+      "replacement": "    mjp_slide_dir=0;              /* $01DA78 */\n    mjp_transition(AVP_MJP_PAGE_BLANK,0);Clear(); /* D6=$4BE18, D7=page 0 */\n    /* The retail Do_Lose sets $4BEB0=$18 at $01DAAE before the text walk.\n     * In particular the Marine self-destruct report was hosted at X=0. */\n    if(!terminated)mjp_text_x0=0x18u;\n"
+    },
+    {
+      "start": 789,
+      "end": 790,
+      "replacement": "    mjp_slide_dir=0;              /* shared $01DB40 */\n    mjp_transition(0,AVP_MJP_PAGE_BLANK);mjp_scene_end(0x4c4f5345u);\n"
+    },
+    {
+      "start": 835,
+      "end": 835,
+      "replacement": "static const AvpMjpResource res_credits[]={{238,0}};\n"
+    },
+    {
+      "start": 846,
+      "end": 846,
+      "replacement": "    case AVP_MJP_CREDITS:r=res_credits;n=sizeof(res_credits)/sizeof(*r);break;\n"
+    },
+    {
+      "start": 864,
+      "end": 864,
+      "replacement": "void avp_mjp_prepare_title(void){load_mode_resources(AVP_MJP_TITLE);}\n"
+    },
+    {
+      "start": 870,
+      "end": 870,
+      "replacement": "#include \"../../new/audio/mjp_intro_voice_begin.inc\"\n\n"
+    },
+    {
+      "start": 871,
+      "end": 872,
+      "replacement": "    case AVP_MJP_TITLE:Do_Title();break;\n    case AVP_MJP_SELECT:\n        /* Retail mode 1: $01C08C install Lister3 VBlank list writer;\n         * $01C096 WaitFXFa; $01C0A4 StartMus($2046C); $01C0B0 FXFadeUp($FA);\n         * $01C0B6 JSR $1E868 = Do_Selec; $01C0BC WaitFXFa.  The carousel\n         * runs WHILE the VBlank-chained master fade rises from 0 (about 132\n         * VBlanks), so the first portrait is shown with the score still\n         * quiet.  R272-R276 waited for the whole fade before Do_Selec. */\n        WaitFXFa();\n        StartMus(AVP_MUSIC_CHARACTER_SELECT);\n        FXFadeUp(0xfau);\n        Do_Selec();\n        WaitFXFa();\n        break;\n"
+    },
+    {
+      "start": 873,
+      "end": 873,
+      "replacement": "    case AVP_MJP_CREDITS:Do_Credits();break;\n"
+    },
+    {
+      "start": 877,
+      "end": 877,
+      "replacement": "#include \"../../new/audio/mjp_intro_lane_reset.inc\"\n\n"
+    }
+  ]
+}

@@ -16,7 +16,10 @@ static void wr(void *p,uint32_t a,uint32_t v,int w){(void)p;for(int i=w;i-->0;){
 static uint16_t ins(unsigned op,unsigned a,unsigned b){return (uint16_t)((op<<10)|(a<<5)|b);}
 static void emit(JRisc *j,unsigned n,uint16_t v){j->ram[n*2]=(uint8_t)(v>>8);j->ram[n*2+1]=(uint8_t)v;}
 static JRisc J;
-static void start(int kind){JRiscBus b={0,rd,wr};jrisc_init(&J,kind,b);J.check_hazards=1;J.go=1;}
+/* Synthetic opcodes below are emitted in high-word-first RAM order.
+ * R236 made BIG_INSTR=0 fetch the low halfword first, so explicitly select
+ * BIG_INSTR=1 rather than accidentally executing the next opcode. */
+static void start(int kind){JRiscBus b={0,rd,wr};jrisc_init(&J,kind,b);J.bigend=4u;J.check_hazards=1;J.go=1;}
 
 static void blitter(void)
 {

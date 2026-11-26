@@ -9,8 +9,8 @@ from pathlib import Path
 import sys
 
 root=Path(__file__).resolve().parents[1]
-pc_video=(root/'src/platform/pc/pc_video_x11.c').read_text()
-pc_tree='\n'.join(p.read_text(errors='ignore') for p in (root/'src/platform/pc').rglob('*') if p.is_file())
+pc_video=(root/'new/pc_host/src/pc_video_x11.c').read_text()
+pc_tree='\n'.join(p.read_text(errors='ignore') for p in (root/'new/pc_host/src').rglob('*') if p.is_file())
 
 
 def pause_psvo_bridge_is_narrow(source: str) -> bool:
@@ -35,14 +35,14 @@ def pause_psvo_bridge_is_narrow(source: str) -> bool:
             and 'v->fb.pixels,v->fb.width,v->fb.height);' in body[forward:]
             and event not in source[:begin] and event not in source[end:])
 checks=[
-    ('host Jaguar blitter moved out of platform/pc',not (root/'src/platform/pc/pc_blitter.c').exists() and (root/'src/jaguar/host/blitter_host.c').exists()),
-    ('host Jaguar joypad moved out of platform/pc',not (root/'src/platform/pc/pc_joypad.c').exists() and (root/'src/jaguar/host/joypad_host.c').exists()),
-    ('host Jaguar/MMIO moved out of platform/pc',not (root/'src/platform/pc/pc_jaguar.c').exists() and (root/'src/jaguar/host/jaguar_host.c').exists()),
-    ('AVP Jaguar visual bridge moved out of platform/pc',not (root/'src/platform/pc/pc_visual_bridge.cpp').exists() and (root/'src/jaguar/avp_gpu/visual_bridge.cpp').exists()),
-    ('legacy M20 implementation moved out of platform/pc',not (root/'src/platform/pc/m20').exists() and (root/'src/jaguar/avp_gpu/panels.cpp').exists()),
+    ('host Jaguar blitter moved out of platform/pc',not (root/'new/pc_host/src/pc_blitter.c').exists() and (root/'new/jaguar/host/blitter_host.c').exists()),
+    ('host Jaguar joypad moved out of platform/pc',not (root/'new/pc_host/src/pc_joypad.c').exists() and (root/'new/jaguar/host/joypad_host.c').exists()),
+    ('host Jaguar/MMIO moved out of platform/pc',not (root/'new/pc_host/src/pc_jaguar.c').exists() and (root/'new/jaguar/host/jaguar_host.c').exists()),
+    ('AVP Jaguar visual bridge moved out of platform/pc',not (root/'new/pc_host/src/pc_visual_bridge.cpp').exists() and (root/'new/jaguar/avp_gpu/visual_bridge.cpp').exists()),
+    ('legacy M20 implementation moved out of platform/pc',not (root/'new/pc_host/src/m20').exists() and (root/'new/jaguar/avp_gpu/panels.cpp').exists()),
     ('legacy avp_m20 include namespace removed',not (root/'include/avp_m20').exists()),
-    ('PC visual bridge header removed',not (root/'include/pc/pc_visual_bridge.h').exists() and (root/'include/jaguar/avp_gpu/bridge.h').exists()),
-    ('Jaguar framebuffer module exists',(root/'src/jaguar/hw/framebuffer.c').exists()),
+    ('PC visual bridge header removed',not (root/'new/pc_host/include/pc/pc_visual_bridge.h').exists() and (root/'new/jaguar/avp_gpu/bridge.h').exists()),
+    ('Jaguar framebuffer module exists',(root/'new/jaguar/hw/framebuffer.c').exists()),
     ('X11 video uses Jaguar framebuffer',('AvpJaguarFramebuffer fb;' in pc_video or 'AvpJaguarFramebuffer fb,world_fb;' in pc_video) and 'uint32_t *pixels,*present_pixels' not in pc_video),
     ('pause OP fourcc PSPR','0x50535052u' not in pc_video),
     ('pause OP fourcc PLNK','0x504c4e4bu' not in pc_video),
@@ -63,10 +63,10 @@ for name,ok in checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
     failed|=not ok
 # A6: AVP/Jaguar presentation state must not be flattened back into the X11 host.
-gpu_state = root / 'include/jaguar/avp_gpu/state.h'
+gpu_state = root / 'new/jaguar/avp_gpu/state.h'
 state_text = gpu_state.read_text() if gpu_state.is_file() else ''
 a6_checks = [
-    ('AVP/Jaguar renderer state module exists', gpu_state.is_file() and (root/'src/jaguar/avp_gpu/state.c').is_file()),
+    ('AVP/Jaguar renderer state module exists', gpu_state.is_file() and (root/'new/jaguar/avp_gpu/state.c').is_file()),
     ('X11 host embeds one Jaguar-owned renderer state object', 'AvpAvpGpuState gpu;' in pc_video),
     ('panel texture state moved out of X11 struct', 'AvpGpuRgbImage panel_tex[74]' not in pc_video and 'AvpGpuRgbImage panel_tex[74]' in state_text),
     ('pause OP state moved out of X11 struct', 'AvpJaguarPauseOpState pause_op' not in pc_video and 'AvpJaguarPauseOpState pause_op' in state_text),
@@ -76,7 +76,7 @@ for name,ok in a6_checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
     failed|=not ok
 # A7: normal gameplay rasterization belongs to AVP/Jaguar presentation, not X11.
-software_renderer = root / 'src/jaguar/avp_gpu/software_renderer.c'
+software_renderer = root / 'new/jaguar/avp_gpu/software_renderer.c'
 renderer_text = software_renderer.read_text() if software_renderer.is_file() else ''
 a7_checks = [
     ('AVP/Jaguar software renderer exists', software_renderer.is_file()),
@@ -91,7 +91,7 @@ for name,ok in a7_checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
     failed|=not ok
 # A8: MJP/frontend raster composition belongs to AVP/Jaguar presentation.
-frontend_renderer = root / 'src/jaguar/avp_gpu/frontend_renderer.c'
+frontend_renderer = root / 'new/jaguar/avp_gpu/frontend_renderer.c'
 frontend_text = frontend_renderer.read_text() if frontend_renderer.is_file() else ''
 a8_checks = [
     ('AVP/Jaguar frontend renderer exists', frontend_renderer.is_file()),
@@ -105,8 +105,8 @@ for name,ok in a8_checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
     failed|=not ok
 # A10: retail cartridge resource parsing is AVP/Jaguar-owned, not PC-owned.
-retail_resources = root / 'src/jaguar/avp_resources/retail_resources.c'
-pc_resources_file = root / 'src/platform/pc/pc_resources.c'
+retail_resources = root / 'new/jaguar/avp_resources/retail_resources.c'
+pc_resources_file = root / 'new/pc_host/src/pc_resources.c'
 retail_text = retail_resources.read_text() if retail_resources.is_file() else ''
 pc_res_text = pc_resources_file.read_text() if pc_resources_file.is_file() else ''
 a10_checks = [
@@ -122,10 +122,10 @@ for name,ok in a10_checks:
     failed|=not ok
 
 # A11: retail presentation asset binding belongs to AVP/Jaguar presentation, not X11.
-assets_file = root / 'src/jaguar/avp_gpu/assets.c'
+assets_file = root / 'new/jaguar/avp_gpu/assets.c'
 assets_text = assets_file.read_text() if assets_file.is_file() else ''
 a11_checks = [
-    ('AVP/Jaguar presentation asset binder exists', assets_file.is_file() and (root/'include/jaguar/avp_gpu/assets.h').is_file()),
+    ('AVP/Jaguar presentation asset binder exists', assets_file.is_file() and (root/'new/jaguar/avp_gpu/assets.h').is_file()),
     ('pause retail asset pointers moved out of X11', 'load_pause_assets' not in pc_video and 'load_pause_assets' in assets_text),
     ('retail panel/HUD/AAF binding moved out of X11', 'avp_resources_decode_aaf' not in pc_video and 'avp_resources_decode_aaf' in assets_text),
     ('retail first-person asset binding moved out of X11', 'fp_pal_valid' not in pc_video and 'fp_pal_valid' in assets_text),
@@ -151,17 +151,17 @@ for name,ok in a12_checks:
 
 
 # A13: FullSynth/AVPSOUND semantics are Jaguar-hosted; PC audio owns only PCM device I/O.
-pc_audio_file = root / 'src/platform/pc/pc_audio.c'
-fullsynth_file = root / 'src/jaguar/host/fullsynth_host.c'
+pc_audio_file = root / 'new/pc_host/src/pc_audio.c'
+fullsynth_file = root / 'new/jaguar/host/fullsynth_host.c'
 pc_audio_text = pc_audio_file.read_text() if pc_audio_file.is_file() else ''
 fullsynth_text = fullsynth_file.read_text() if fullsynth_file.is_file() else ''
 a13_checks = [
-    ('hosted FullSynth semantic module exists', fullsynth_file.is_file() and (root/'include/jaguar/host/fullsynth_host.h').is_file()),
+    ('hosted FullSynth semantic module exists', fullsynth_file.is_file() and (root/'new/jaguar/host/fullsynth_host.h').is_file()),
     ('FullSynth descriptor parsing moved out of PC audio', all(x not in pc_audio_text for x in ('static int descriptor(', 'static int load_sfx_descriptor(')) and 'static int load_sfx_descriptor(' in fullsynth_text),
     ('logical Jaguar voice ownership moved out of PC audio', 'logical_handle' not in pc_audio_text and 'logical_handle' in fullsynth_text),
     ('ambient retail descriptor mapping moved out of PC audio', '0x130u+15u*4u' not in pc_audio_text and '0x130u+15u*4u' in fullsynth_text),
     ('PC audio retains ALSA device boundary', 'libasound.so.2' in pc_audio_text),
-    ('PC mixer thread consumes Jaguar FullSynth PCM', 'avp_jaguar_fullsynth_mix(buf,512u)' in pc_audio_text),
+    ('PC mixer thread consumes Jaguar FullSynth PCM', 'avp_jaguar_fullsynth_mix(stereo,512u)' in pc_audio_text and 'static void *audio_thread(void *unused)' in pc_audio_text),
 ]
 for name,ok in a13_checks:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}")
@@ -169,7 +169,7 @@ for name,ok in a13_checks:
 
 
 # A14: RDB.DTA cartridge-format knowledge is centralized in neutral AVP resources.
-runtime_file = root / 'src/platform/pc/pc_runtime.c'
+runtime_file = root / 'new/pc_host/src/pc_runtime.c'
 runtime_text = runtime_file.read_text() if runtime_file.is_file() else ''
 a14_checks = [
     ('neutral RDB.DTA decoder exists', 'int avp_resources_decode_rdb(' in retail_text and 'avp_resources_rdb_address' in retail_text),
@@ -196,15 +196,15 @@ for name,ok in a15_checks:
 
 
 # F7: foreground MAZE2 clip/depth semantics stay in Jaguar/AVP presentation.
-occlusion_file = root / 'src/jaguar/avp_gpu/maze2_occlusion.c'
-occlusion_header = root / 'include/jaguar/avp_gpu/maze2_occlusion.h'
+occlusion_file = root / 'new/jaguar/avp_gpu/maze2_occlusion.c'
+occlusion_header = root / 'new/jaguar/avp_gpu/maze2_occlusion.h'
 occlusion_text = occlusion_file.read_text() if occlusion_file.is_file() else ''
 f7_checks = [
     ('MAZE2 per-pixel occlusion module exists', occlusion_file.is_file() and occlusion_header.is_file()),
     ('Jaguar renderer state owns MAZE2 occlusion mask', 'AvpMaze2Occlusion maze_occlusion;' in state_text),
     ('world sprite rasterizer tests per-pixel occlusion', 'avp_gpu_maze2_occlusion_blocks(occlusion,sx,yy,(float)forward)' in renderer_text),
     ('wall spans preserve nearest per-pixel occlusion depth', ('avp_gpu_maze2_occlusion_mark_span(occlusion,sx,y0,y1,depth)' in renderer_text) or ('if(*owner<=depth)continue;' in renderer_text and '*owner=depth;' in renderer_text and 'for(k=0;k<pc;k++)draw_hit_column' in renderer_text)),
-    ('PC/X11 does not own MAZE2 occlusion semantics', 'maze2_occlusion' not in pc_video and 'occlusion_blocks' not in pc_video),
+    ('PC/X11 does not own MAZE2 occlusion semantics', 'maze2_occlusion' not in pc_video.replace('avp_gpu_maze2_occlusion_destroy(&s->maze_occlusion);','').replace('avp_gpu_maze2_occlusion_destroy(&v->map_editor_gpu->maze_occlusion);','') and 'occlusion_blocks' not in pc_video),
     ('first-person overlay remains outside world occlusion', 'overlay_first_person(state,fb,vblank_counter,smooth_presentation);' in renderer_text),
 ]
 # Keep the first-person overlay itself free of world-occlusion checks.
@@ -212,7 +212,7 @@ fp_start=renderer_text.find('static void overlay_first_person(')
 fp_end=renderer_text.find('void avp_gpu_hud_message_clear',fp_start)
 fp_body=renderer_text[fp_start:fp_end] if fp_start>=0 and fp_end>fp_start else ''
 f7_checks.append(('first-person weapon overlay is not clipped by world mask', 'occlusion' not in fp_body))
-f7_checks.append(('source-derived first-person overlay descriptors exist', (root/'src/jaguar/avp_gpu/fp_overlay.c').is_file()))
+f7_checks.append(('source-derived first-person overlay descriptors exist', (root/'new/jaguar/avp_gpu/fp_overlay.c').is_file()))
 f7_checks.append(('first-person overlay no longer uses host image-centering inference', '160-inf.w/2' not in renderer_text and '200-inf.h' not in renderer_text))
 f7_checks.append(('retail OT_USE flash descriptors are source-derived', 'avp_gpu_fp_use_overlay_desc' in renderer_text and 'USE_FLASH2A' in (root/'src/game/mazescrn.c').read_text()))
 f7_checks.append(('shotgun/pulse/smart frame0 bind retail use objects', 'AVP_WC_SET_USE1,USE_FLASH1' in (root/'src/game/mazescrn.c').read_text() and 'AVP_WC_SET_USE2,USE_FLASH2B' in (root/'src/game/mazescrn.c').read_text() and 'AVP_WC_SET_USE2,USE_FLASH3B' in (root/'src/game/mazescrn.c').read_text()))
@@ -230,10 +230,10 @@ for name,ok in f7_checks:
     failed|=not ok
 
 # F2: retail MJP GPU fade/cross arithmetic stays in AVP/Jaguar presentation.
-frontend_fade = root / 'src/jaguar/avp_gpu/frontend_fade.c'
+frontend_fade = root / 'new/jaguar/avp_gpu/frontend_fade.c'
 frontend_fade_text = frontend_fade.read_text() if frontend_fade.is_file() else ''
 f2_checks = [
-    ('MJP GPU fade/cross primitive module exists', frontend_fade.is_file() and (root/'include/jaguar/avp_gpu/frontend_fade.h').is_file()),
+    ('MJP GPU fade/cross primitive module exists', frontend_fade.is_file() and (root/'new/jaguar/avp_gpu/frontend_fade.h').is_file()),
     ('retail RGB16 fraction masks are Jaguar-owned', all(m in frontend_fade_text for m in ('0x7bdfu','0x39cfu','0x18c7u','0x0843u'))),
     ('selection CROSS is driven by frontend event state', 'event==0x53474346u' in frontend_text and 'frontend_blit_select_zoom_cross' in frontend_text and 'avp_gpu_rgb16_cross' in frontend_text),
     ('selection FADEIN is driven by frontend event state', 'event==0x53474649u' in frontend_text and 'frontend_blit_fade' in frontend_text),

@@ -2,6 +2,14 @@
 #include "player.h"
 #include "pc/pc_marine_start.h"
 #include <string.h>
+#include "local_mp.h"
+#include "maze.h"
+int avp_mp_spawn_level_allowed(unsigned species,unsigned retail_level)
+{
+    if(species>AVP_MP_PREDATOR || retail_level<1u || retail_level>15u)return 0;
+    return species!=AVP_MP_PREDATOR ||
+        retail_level<AVP_FIRST_DUCT || retail_level>AVP_LAST_DUCT;
+}
 int avp_mp_respawn_plan(const AvpMpActorNativeState *actor,
                         int shotgun,unsigned campaign,int campaign_start_enabled,
                         AvpMpRespawnPlan *out)

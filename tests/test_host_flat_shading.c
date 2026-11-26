@@ -33,7 +33,7 @@ int main(void)
     uint16_t *cry=malloc(W*H*sizeof(uint16_t));
     uint32_t *lut=malloc(65536u*sizeof(uint32_t));
     uint32_t seed=0x145a13e9u;
-    AvpGpuRgbImage t={W,H,rgb,cry};
+    AvpGpuRgbImage t={W,H,rgb,cry,NULL};
     const int deltas[]={-512,-255,-254,-129,-128,-50,-1,0,1,27,128,254,255,256,512};
     unsigned long long checks=0;
     assert(rgb && cry && lut);

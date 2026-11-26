@@ -5,13 +5,7 @@
 #include "eeprom.h"
 #include <string.h>
 
-/* Retail Check_EE ($0201E4) is EORI.L #$1234FAC3 (= $1234FACE-11).  The 1994
- * source tree in hand is revision 12 ($1234FAC2); the shipped cartridge is 11. */
-#define REVISION 11u
-/* Checksum key written by R001-R276 PC builds (source revision 12).  Accepted
- * on load ONLY so existing PC save files are not wiped; the next save writes
- * the retail key.  A real cartridge EEPROM never carries this value. */
-#define LEGACY_PC_REVISION 12u
+#define REVISION 12u
 #define CHECKPOS (AVP_EE_SIZE-4u)
 
 uintptr_t savegame;
@@ -39,17 +33,14 @@ static u32 load_be32(const u8 *p)
 static void store_be32(u8 *p,u32 v)
 { p[0]=(u8)(v>>24);p[1]=(u8)(v>>16);p[2]=(u8)(v>>8);p[3]=(u8)v; }
 
-static u32 ee_sum(void)
+u32 Check_EE(void)
 {
     u32 total=0;
     unsigned i;
     /* dbra #CART_LONGS-2 executes 31 times: longs 0..30. */
     for (i=0;i<31;++i) total+=load_be32(cartcopy+i*4u);
+    total^=(0x1234faceu-REVISION);
     return total;
-}
-u32 Check_EE(void)
-{
-    return ee_sum()^(0x1234faceu-REVISION);
 }
 
 void Read_EE(void)
@@ -81,12 +72,11 @@ void Default_EE(void)
     if (init_high) init_high(cartcopy+AVP_N_SAVES*AVP_SAVE_SIZE,
                              CHECKPOS-AVP_N_SAVES*AVP_SAVE_SIZE);
     else {
-        /* Retail Init_High/Init_Hig defaults ($2A954/$2A968: third score $927C0
-         * = 600000; the 1994 source tree has $A2990), already in the packed EEPROM
+        /* Retail Init_High/Init_Hig defaults, already in the packed EEPROM
          * representation used by MJP Pack_Fam: MIKE/ANDY/PURPLE/JAMES/KEONI. */
         static const u32 packed[10]={
             0x188513ffu,0x00129da0u,0x40d1e3ffu,0x000c3500u,
-            0x9f48bd64u,0x000927c0u,0x5206125fu,0x00061a80u,
+            0x9f48bd64u,0x000a2990u,0x5206125fu,0x00061a80u,
             0x1447351fu,0x00030d40u
         };
         u8 *p=cartcopy+AVP_N_SAVES*AVP_SAVE_SIZE;
@@ -98,11 +88,7 @@ void Default_EE(void)
 void Init_EE(void)
 {
     Read_EE();
-    {
-        const u32 stored=load_be32(cartcopy+CHECKPOS);
-        if (Check_EE()!=stored &&
-            (ee_sum()^(0x1234faceu-LEGACY_PC_REVISION))!=stored) Default_EE();
-    }
+    if (Check_EE()!=load_be32(cartcopy+CHECKPOS)) Default_EE();
 }
 
 void Trash_EE(void) { Default_EE(); Write_EE(); }

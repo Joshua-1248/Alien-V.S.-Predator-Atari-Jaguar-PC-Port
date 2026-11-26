@@ -1,6 +1,6 @@
 /* The Jaguar tracker brushes are composed in HUD-local, not screen, space.
  * This regression guards the R106 double application of the +14 OP offset. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

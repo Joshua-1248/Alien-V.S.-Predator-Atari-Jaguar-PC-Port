@@ -1,0 +1,32 @@
+{
+  "path": "include/player.h",
+  "base_sha256": "30b87f924b0b0a73a512d21e6a54c11d7c8c2bf2a49a5f25e3e4d8abe896f92c",
+  "output_sha256": "b04a8bbfef3f35cf84a23c3619970d575eeb531978bee0180cc21419bbe211e5",
+  "edits": [
+    {
+      "start": 11,
+      "end": 11,
+      "replacement": "#include \"../new/pc_host/integration/player_heading_declarations.inc\"\n\n"
+    },
+    {
+      "start": 21,
+      "end": 21,
+      "replacement": "extern u16 pred_vision_vmode;\n"
+    },
+    {
+      "start": 38,
+      "end": 38,
+      "replacement": "#include \"../new/pc_host/integration/player_movement_declarations.inc\"\n\n"
+    },
+    {
+      "start": 47,
+      "end": 47,
+      "replacement": "#include \"../new/pc_host/integration/player_audio_aim_declarations.inc\"\n\n"
+    },
+    {
+      "start": 48,
+      "end": 48,
+      "replacement": "#include \"../new/pc_host/integration/player_dm_declarations.inc\"\n\n"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ static void invalid_scaled(unsigned hs,unsigned vs,uint32_t expected)
     movel((uint32_t)(p2>>32),0x1010);movel((uint32_t)p2,0x1014);
     movel(0u,0x1018);movel(4u,0x101C);
     movew(28u,0xF00046u);movew(508u,0xF00048u);
-    movew(0x00CBu,0xF00038u);movew(0x0680u,0xF0003Cu);
+    movew(0x00CBu,0xF00038u);movew(0x07FFu,0xF0003Au);movew(0x0680u,0xF0003Cu);
     movel(0x10000000u,0xF00020u);
     movew(0x06C7u,0xF00028u);w16(0x60FEu);
     assert(jagm_init(&M,cart,sizeof cart)==0);
@@ -52,7 +52,7 @@ int main(void)
     obj(0x1000u,0x1010u,1,1,10);obj(0x1010u,0x1020u,0,0,50);
     movel(0u,0x1020u);movel(4u,0x1024u);
     movew(28u,0xF00046u);movew(508u,0xF00048u);
-    movew(0x00CBu,0xF00038u);movew(0x0680u,0xF0003Cu);
+    movew(0x00CBu,0xF00038u);movew(0x07FFu,0xF0003Au);movew(0x0680u,0xF0003Cu);
     movel(0x10000000u,0xF00020u);
     movew(0x06C7u,0xF00028u);w16(0x60FEu);
     assert(jagm_init(&M,cart,sizeof cart)==0);

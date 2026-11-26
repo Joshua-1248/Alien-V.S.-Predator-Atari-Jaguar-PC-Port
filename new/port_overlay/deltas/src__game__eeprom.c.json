@@ -1,0 +1,42 @@
+{
+  "path": "src/game/eeprom.c",
+  "base_sha256": "2a8c7f9e771d1a817222e1285fa4bd4488066d04febb57d83ce6b54fe833b1ea",
+  "output_sha256": "de37196b855551386d357cab5e13c7255246dd7c8b9367adc21773a37ba9cb3e",
+  "edits": [
+    {
+      "start": 7,
+      "end": 8,
+      "replacement": "/* Retail Check_EE ($0201E4) is EORI.L #$1234FAC3 (= $1234FACE-11).  The 1994\n * source tree in hand is revision 12 ($1234FAC2); the shipped cartridge is 11. */\n#define REVISION 11u\n/* Checksum key written by R001-R276 PC builds (source revision 12).  Accepted\n * on load ONLY so existing PC save files are not wiped; the next save writes\n * the retail key.  A real cartridge EEPROM never carries this value. */\n#define LEGACY_PC_REVISION 12u\n"
+    },
+    {
+      "start": 35,
+      "end": 36,
+      "replacement": "static u32 ee_sum(void)\n"
+    },
+    {
+      "start": 41,
+      "end": 42,
+      "replacement": ""
+    },
+    {
+      "start": 43,
+      "end": 43,
+      "replacement": "}\nu32 Check_EE(void)\n{\n    return ee_sum()^(0x1234faceu-REVISION);\n"
+    },
+    {
+      "start": 74,
+      "end": 75,
+      "replacement": "        /* Retail Init_High/Init_Hig defaults ($2A954/$2A968: third score $927C0\n         * = 600000; the 1994 source tree has $A2990), already in the packed EEPROM\n"
+    },
+    {
+      "start": 78,
+      "end": 79,
+      "replacement": "            0x9f48bd64u,0x000927c0u,0x5206125fu,0x00061a80u,\n"
+    },
+    {
+      "start": 90,
+      "end": 91,
+      "replacement": "    {\n        const u32 stored=load_be32(cartcopy+CHECKPOS);\n        if (Check_EE()!=stored &&\n            (ee_sum()^(0x1234faceu-LEGACY_PC_REVISION))!=stored) Default_EE();\n    }\n"
+    }
+  ]
+}

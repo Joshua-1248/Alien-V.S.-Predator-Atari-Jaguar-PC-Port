@@ -29,8 +29,8 @@ static void setup(void)
     main_floor[C(1u,2u)]=4u;
     main_floor[C(0u,1u)]=1u;
     duct_floor[C(4u,1u)]=1u;
-    layouts[2].map=(AvpMpBotMap){main_floor,5u,1u,wall_table,&main_meta,0,NULL,NULL};
-    layouts[7].map=(AvpMpBotMap){duct_floor,5u,1u,wall_table,&duct_meta,0,NULL,NULL};
+    layouts[2].map=(AvpMpBotMap){main_floor,5u,1u,wall_table,&main_meta,0,NULL,NULL,0u};
+    layouts[7].map=(AvpMpBotMap){duct_floor,5u,1u,wall_table,&duct_meta,0,NULL,NULL,0u};
     layouts[2].meta=&main_meta;
     layouts[7].meta=&duct_meta;
     layouts[2].panel_list[0]=5u;
@@ -74,6 +74,34 @@ int main(void)
     duct_floor[C(4u,1u)]=1u;
     CHECK(avp_mp_bot_plan_levels(layouts,0u,3u,0u,0u,8u,0u,0u,0,&plan));
     CHECK(plan.to_level==8u&&plan.hops==1u);
-    puts("PASS: jammed same-level storage detour via authored ducts, landing components, species restrictions, open-door direct route and no fake exits");
+    /* R125 DM: A vent exit is a real authored objective, not another
+     * randomly picked floor square. Find the closest legal surface exit
+     * and allow a separate real exit when the first portal has stalled. */
+    duct_exit[0]=(AvpDoorExitEntry){C(4u,1u),4u,0u,3u};
+    duct_floor[C(4u,1u)]=1u;
+    CHECK(avp_mp_bot_plan_levels(layouts,0u,8u,0u,0u,0u,0u,0u,0,&plan));
+    CHECK(plan.from_level==8u && plan.to_level==3u &&
+          plan.goal_level==3u && plan.x==4u && plan.hops==1u);
+    CHECK(avp_mp_bot_plan_levels(layouts,1u,8u,0u,0u,0u,0u,0u,0,&plan));
+    CHECK(!avp_mp_bot_plan_levels(layouts,2u,8u,0u,0u,0u,0u,0u,0,&plan));
+    CHECK(!avp_mp_bot_plan_levels(layouts,0u,3u,0u,0u,0u,0u,0u,0,&plan));
+    {
+        /* The ROM list enumerates the farther exit first. A source-legal
+         * nearer panel wins, rather than walking to the far end of vent. */
+        AvpDoorExitEntry exits[2]={
+            {C(4u,1u),4u,0u,3u},{C(0u,1u),0u,0u,3u}};
+        AvpMpBotLevelPlan near,other;
+        duct_meta.exits=exits;duct_meta.exit_count=2u;
+        duct_floor[C(0u,1u)]=1u;
+        CHECK(avp_mp_bot_plan_levels(layouts,0u,8u,0u,0u,
+                                     0u,0u,0u,0,&near));
+        CHECK(near.x==0u && near.goal_level==3u && near.hops==1u);
+        CHECK(avp_mp_bot_plan_levels_avoiding(layouts,0u,8u,0u,0u,
+                                        0u,0u,0u,0,&near,&other));
+        CHECK(other.x==4u && other.goal_level==3u);
+        duct_meta.exits=duct_exit;duct_meta.exit_count=1u;
+        duct_floor[C(0u,1u)]=0u;
+    }
+    puts("PASS: jammed same-level storage detour and R125 real vent escapes, nearest reachable exit, stalled-exit alternatives, no illegal Predator ducts");
     return 0;
 }

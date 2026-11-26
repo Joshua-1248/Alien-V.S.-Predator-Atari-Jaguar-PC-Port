@@ -1,0 +1,32 @@
+{
+  "path": "src/game/savegame.c",
+  "base_sha256": "07afeed5b5f3bf98cfc8702d7e595bb246dab32ebd1ec605e903f1f67ed316a7",
+  "output_sha256": "4863f3532aa0ae64adb7693e93841245375dfe68f32001764c313b761b9ffc54",
+  "edits": [
+    {
+      "start": 7,
+      "end": 7,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 15,
+      "end": 15,
+      "replacement": "#include \"music.h\"\n"
+    },
+    {
+      "start": 88,
+      "end": 88,
+      "replacement": "/* Pause-list object event: selected saved-game art briefly hidden/shown.\n * The Jaguar MAZESCRN.S::SaveGame flashes GAME[n] and NO[n] for 21 cycles,\n * independently of the MJP title save-selection frontend. */\nenum { PAUSE_EV_SAVE_FLASH=0x5053464cu }; /* PSFL */\n\n"
+    },
+    {
+      "start": 91,
+      "end": 94,
+      "replacement": "    unsigned i;\n    /* MAZESCRN.S SaveGame calls wep_sfx (PlacedEf voice 1), not generic TFX. */\n    (void)avp_music_placed_voice(AVP_FX_SHOTG,1u);\n"
+    },
+    {
+      "start": 96,
+      "end": 97,
+      "replacement": "\n    /* Retail DBRA #20 executes 21 times.  The first two VBLs precede\n     * hiding the selected game number, the third precedes showing it.\n     * These events belong to the in-game pause Object Processor, not to\n     * the title screen's SAVE frontend event (which has different meaning).\n     * A non-graphical backend can omit either callback safely. */\n    for(i=0;i<21u;i++){\n        if(o->wait_vblank){o->wait_vblank(o->user);o->wait_vblank(o->user);}\n        if(o->object_event)o->object_event(o->user,PAUSE_EV_SAVE_FLASH,(u32)slot,1u,0u);\n        if(o->wait_vblank)o->wait_vblank(o->user);\n        if(o->object_event)o->object_event(o->user,PAUSE_EV_SAVE_FLASH,(u32)slot,0u,0u);\n    }\n"
+    }
+  ]
+}

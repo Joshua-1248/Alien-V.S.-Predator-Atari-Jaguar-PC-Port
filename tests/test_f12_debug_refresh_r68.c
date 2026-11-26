@@ -19,7 +19,7 @@ static ssize_t avp_test_readlink(const char *path,char *target,size_t cap)
     return (ssize_t)n;
 }
 #define readlink avp_test_readlink
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 #undef readlink
 s16 cur_level=1;
 int avp_mm_select(AvpMapMaker *m,unsigned level){(void)m;(void)level;return 1;}
@@ -112,3 +112,5 @@ int main(void)
     puts("R68 F12 Debug routing and Return To Title state PASS");
     return 0;
 }
+
+#include "../new/audio/tests/sound_channels_menu_stub.inc"

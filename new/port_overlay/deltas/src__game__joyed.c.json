@@ -1,0 +1,17 @@
+{
+  "path": "src/game/joyed.c",
+  "base_sha256": "0a1eab929a128c631782974f56b333c1ada6d1f46dde996adc7dd8e363cb8053",
+  "output_sha256": "7466ae16a37207f0a0697bec71f4eb65fe38586b47e821e68b91cbe647569451",
+  "edits": [
+    {
+      "start": 11,
+      "end": 14,
+      "replacement": "    /* The original 68000 ADD/SUB operations on the editor's longword\n     * wrap modulo 2^32.  Keep that register behavior without signed-C\n     * overflow at the extremes of the editable value. */\n    u32 v=(u32)item->value; u32 edge=joy_edge;\n    if ((edge&(1u<<20))==0u) v-=step;\n    if ((edge&(1u<<21))==0u) v+=step;\n"
+    },
+    {
+      "start": 16,
+      "end": 17,
+      "replacement": "    item->value=v<=INT32_MAX?(s32)v:(s32)((int64_t)v-INT64_C(4294967296));\n"
+    }
+  ]
+}

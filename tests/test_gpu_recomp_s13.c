@@ -32,7 +32,11 @@ int main(void)
     JRiscBus b={0,nobus_r,nobus_w};FILE *f=fopen(GEN_BIN,"rb");uint8_t img[4096];
     AvpGpuRecompCtx g;uint32_t out;unsigned long k=0;
     assert(f&&fread(img,1,4096,f)==4096);fclose(f);
-    jrisc_init(&A,JRISC_GPU,b);memcpy(A.ram,img,4096);A.pc=0xF03000u;A.go=1;
+    jrisc_init(&A,JRISC_GPU,b);
+    /* The synthetic generator emits high-word-first instructions.
+     * R236 requires selecting that physical instruction layout explicitly. */
+    A.bigend=4u;
+    memcpy(A.ram,img,4096);A.pc=0xF03000u;A.go=1;
     memcpy(&Bj,&A,sizeof A);
     while(A.pc!=0xF03FF0u&&k<100000ul){jrisc_step(&A);k++;}
     assert(A.pc==0xF03FF0u);

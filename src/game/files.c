@@ -8,42 +8,10 @@
 static const u8 *base,*end,*fpos; static void *rgb_lut,*qc_pos,*lzw_buf; static u8 jpeg_quality=80; static u8 file_gpu_busy;
 static AvpDecodeFn jpeg_cb,gzip_cb;static void*decode_user;
 static u32 be32(const u8*p){return ((u32)p[0]<<24)|((u32)p[1]<<16)|((u32)p[2]<<8)|p[3];}
-void avp_files_bind(const void*d,size_t n)
-{
-    uintptr_t addr=(uintptr_t)d;
-    /* Reject impossible archive spans before producing an out-of-object
-     * end pointer. A corrupt size must not wrap around the host address. */
-    if(!d || n>UINTPTR_MAX-addr || n>PTRDIFF_MAX){
-        base=fpos=end=NULL;
-        return;
-    }
-    base=fpos=(const u8 *)d;
-    end=(const u8 *)(addr+n);
-}
+void avp_files_bind(const void*d,size_t n){base=fpos=d;end=base?base+n:NULL;}
 void avp_files_set_decode_callbacks(AvpDecodeFn j,AvpDecodeFn g,void*u){jpeg_cb=j;gzip_cb=g;decode_user=u;}
 void SetFPos(const void*p){fpos=p;} const void*GetFPos(void){return fpos;}
-static int record_at(const u8*p,AvpFileRecord*r,const u8**next)
-{
-    uintptr_t start=(uintptr_t)base,limit=(uintptr_t)end,addr=(uintptr_t)p;
-    uintptr_t payload,remain,size,aligned;
-    if(!base || !p || !r || !next || addr<start || addr>limit || limit-addr<8u)
-        return 0;
-    size=be32(p+4);
-    payload=addr+8u;
-    remain=limit-payload;
-    if(size>remain)return 0;
-    aligned=payload+size;
-    if(aligned>UINTPTR_MAX-3u)return 0;
-    aligned=(aligned+3u)&~(uintptr_t)3u;
-    if(aligned>limit)return 0;
-    memcpy(r->tag,p,4);
-    r->tag[4]=0;
-    r->stored_size=(u32)size;
-    r->header=p;
-    r->payload=p+8;
-    *next=(const u8 *)aligned;
-    return 1;
-}
+static int record_at(const u8*p,AvpFileRecord*r,const u8**next){if(!p||!end||p+8>end)return 0;memcpy(r->tag,p,4);r->tag[4]=0;r->stored_size=be32(p+4);r->header=p;r->payload=p+8;if(r->payload+r->stored_size>end)return 0;uintptr_t q=(uintptr_t)(r->payload+r->stored_size);q=(q+3u)&~(uintptr_t)3u;*next=(const u8*)q;return *next<=end;}
 const void*aFilePos(const void*archive,unsigned index){const u8*p=archive;AvpFileRecord r;const u8*n;for(unsigned i=0;i<index;i++)if(!record_at(p,&r,&n))return NULL;else p=n;return p;}
 const void*xFilePos(unsigned index){return aFilePos(fpos,index);}
 const void*GetFile(unsigned index){const u8*p=xFilePos(index);if(!p)return NULL;AvpFileRecord r;const u8*n;if(!record_at(p,&r,&n))return NULL;fpos=n;return p;}

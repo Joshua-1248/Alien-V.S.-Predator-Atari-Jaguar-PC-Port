@@ -1,0 +1,32 @@
+{
+  "path": "include/hud_message.h",
+  "base_sha256": "26cb92362ec6ecc52d53aaf7d4f977092df21985623ec8e871f59d1fa9a6422c",
+  "output_sha256": "dc902020368164b484471980e25803dea7242703c4322c5a33dd7285cd7b150c",
+  "edits": [
+    {
+      "start": 14,
+      "end": 14,
+      "replacement": "typedef void (*AvpHudMessageClearFn)(void);\nenum AvpCollectNotice;\n"
+    },
+    {
+      "start": 20,
+      "end": 20,
+      "replacement": "void avp_hudmsg_set_clear_callback(AvpHudMessageClearFn fn);\nvoid avp_hudmsg_pickup(enum AvpCollectNotice notice,unsigned detail);\n"
+    },
+    {
+      "start": 21,
+      "end": 21,
+      "replacement": "int avp_hudmsg_critical_active(void);\nint avp_hudmsg_countdown_active(void);\n"
+    },
+    {
+      "start": 29,
+      "end": 29,
+      "replacement": "extern const AvpHudMessageStep avp_msg_usecocoon[];\nextern const AvpHudMessageStep avp_msg_stun[],avp_msg_cocooned[],avp_msg_ccnfail[];\nextern const AvpHudMessageStep avp_msg_cheat_on[],avp_msg_cheat_off[];\nextern const AvpHudMessageStep avp_msg_gain_combi[],avp_msg_lose_combi[];\nextern const AvpHudMessageStep avp_msg_gain_disc[],avp_msg_lose_disc[];\nextern const AvpHudMessageStep avp_msg_gain_cannon[],avp_msg_lose_cannon[];\nextern AvpHudMessageStep avp_msg_newlevel[];\nextern AvpHudMessageStep avp_msg_newduct[];\nvoid avp_hudmsg_set_destination_level(unsigned level);\n"
+    },
+    {
+      "start": 34,
+      "end": 34,
+      "replacement": "/* Original HUD_MSG.S message commands pack RGB24 into bits 31..8;\n * the low byte is the message timing opcode. */\nu32 avp_hudmsg_rgb24(void);\n\n"
+    }
+  ]
+}

@@ -1,0 +1,237 @@
+{
+  "path": "src/game/player.c",
+  "base_sha256": "f9dcc8bb48e66383334ec47cd927a6ad004d10b58119517192ae02b439e31a95",
+  "output_sha256": "fd7b3a8695aaa858c9b733c4df6ef8d7490b7a378957c1b94cb7e8d7bdf0164a",
+  "edits": [
+    {
+      "start": 8,
+      "end": 8,
+      "replacement": "#include \"pc/pc_analog_aim.h\"\n#include \"pc/pc_double_movement.h\"\n#include \"pc/pc_mouse_look.h\"\n\n#include \"../../new/pc_video/pc_analog_velocity.h\"\n"
+    },
+    {
+      "start": 16,
+      "end": 16,
+      "replacement": "#include \"avp_sfx_ids.h\"\n#include \"music.h\"\n"
+    },
+    {
+      "start": 43,
+      "end": 43,
+      "replacement": "/* Retail RDB.DTA::predovision entries also contain the TOM VMODE word.\n * The original vision cannot be reproduced from xtra_c alone. */\nu16 pred_vision_vmode;\n"
+    },
+    {
+      "start": 61,
+      "end": 64,
+      "replacement": ""
+    },
+    {
+      "start": 97,
+      "end": 98,
+      "replacement": "    predo_ID=0; invis_act=0; invis_stat=0; medpak_act=0; predo=0; predo_count=0; invisflag=0; pred_vision_vmode=0;\n"
+    },
+    {
+      "start": 135,
+      "end": 136,
+      "replacement": "    /* PLAYER.S::BGSounds uses the ordinary `sfx` macro here, which allocates\n     * one of the Jaguar's priority-managed effect voices.  Directly calling\n     * the PC mixer bypasses those voice limits and can mask/restart effects. */\n    if (single<4u) (void)TFX(single<2u ? AVP_FX_AMB2 : AVP_FX_AMB3);\n"
+    },
+    {
+      "start": 139,
+      "end": 144,
+      "replacement": "        /* Shipped PLAYER.S::bg_fxs begins with dc.l 0 (the proposed repeating\n         * background cues are commented out).  Do not invent an active cue. */\n        bg_fx=0; bg_repeat=4; bg_delay=10; bg_count=1;\n"
+    },
+    {
+      "start": 152,
+      "end": 154,
+      "replacement": "/* Keep the ORIGINAL PLAYER.S actor order in one source-defined body. The\n * optional local co-op bridge needs to execute it with an already collected\n * player-specific input sample, then advance doors once for the shared world.\n * The ordinary single-player entry retains its historical readpad/door/sound\n * ordering, and never consults any multiplayer state. */\nstatic void update_player_actor_body(void)\n{\n"
+    },
+    {
+      "start": 165,
+      "end": 165,
+      "replacement": "}\n\nvoid UpdatePlayer(void) {\n    readpad();\n    update_player_actor_body();\n"
+    },
+    {
+      "start": 167,
+      "end": 167,
+      "replacement": "\n#include \"../../new/multiplayer/local_mp_player_step.inc\"\n"
+    },
+    {
+      "start": 194,
+      "end": 194,
+      "replacement": "#include \"../../new/pc_video/pc_player_input_state.inc\"\n"
+    },
+    {
+      "start": 198,
+      "end": 198,
+      "replacement": "    u16 mouse_angle_step=0;\n    u32 enhanced_angle=0;\n    int enhanced_angle_active=0;\n"
+    },
+    {
+      "start": 200,
+      "end": 201,
+      "replacement": "    /* Retail AVP.jag verified: unmodified LEFT/RIGHT turns; Alien OPTION and\n     * Marine/Predator C switch the horizontal direction into sidestep.\n     * The old C decomp reversed this condition. */\n    const int sidestep_modifier=pressed(keys,player_type==PT_ALIEN?OPTION:FIRE_C);\n    int turn_mode=!sidestep_modifier;\n    /* Enhanced analog must preserve the angle at rest as well as while the\n     * stick is moving. Retain retail snapping for active digital turns. */\n    /* PC mouse look must retain its precise stopping angle on idle ticks.\n     * An impulse already bypasses snapping below, but the following neutral\n     * tick must not retroactively snap it to a Jaguar cardinal angle.\n     * Preserve retail snapping for actual digital turns and for Jaguar mode. */\n    int bypass_jaguar_angle_snap=host_analog_aim&&\n        (host_enhanced_analog_aim||(host_mouse_aim&&host_aim_turn==0.0f))&&\n        !(turn_mode&&(pressed(keys,JOY_RIGHT)||pressed(keys,JOY_LEFT)));\n"
+    },
+    {
+      "start": 204,
+      "end": 206,
+      "replacement": "        /* Button/D-pad turning had ignored the per-player F12 tuning.\n         * Keep the original integer Jaguar acceleration bit-for-bit when\n         * both multipliers are at their default 1x. No analog control or\n         * mouse input is synthesized for digital turning. */\n        s32 step=ang_acc;\n        if(host_digital_turn_sensitivity!=1.0f){\n            step=(s32)((float)ang_acc*host_digital_turn_sensitivity+0.5f);\n            if(step<1)step=1;\n            if(step>32767)step=32767;\n        }\n        if(pressed(keys,JOY_RIGHT)) req_turn=(s16)-step;\n        if(pressed(keys,JOY_LEFT))  req_turn=(s16) step;\n"
+    },
+    {
+      "start": 207,
+      "end": 208,
+      "replacement": "    if(host_analog_aim && host_aim_turn!=0.0f && !hugkill){\n        /* Right-stick aim has an immediate proportional response. Digital\n         * turning still follows the original acceleration logic below. */\n        if(host_mouse_aim){\n            /* Mouse is an impulse, not a limited joystick velocity. Accumulate\n             * its full angle step modulo 16 bits, and never snap the result. */\n            av=0;\n            mouse_angle_step=avp_pc_mouse_angle_step(host_aim_turn,max_avel);\n            bypass_jaguar_angle_snap=1;\n        }else{\n            av=avp_pc_analog_aim_step(host_aim_turn,host_aim_sensitivity,\n                                      host_aim_speed,max_avel);\n            bypass_jaguar_angle_snap=host_enhanced_analog_aim;\n        }\n    }else if(req_turn){\n"
+    },
+    {
+      "start": 211,
+      "end": 211,
+      "replacement": "#include \"../../new/pc_video/player_digital_speed_limit.inc\"\n\n"
+    },
+    {
+      "start": 216,
+      "end": 216,
+      "replacement": "#include \"../../new/pc_video/player_continuous_heading.inc\"\n\n#include \"../../new/pc_video/player_quick_turn.inc\"\n\n"
+    },
+    {
+      "start": 219,
+      "end": 221,
+      "replacement": "        a=(u16)(a+mouse_angle_step);\n        if(!bypass_jaguar_angle_snap && low<(u16)ang_acc) a=(u16)(a&0xc000u);\n        centre_angle=enhanced_angle_active?enhanced_angle:\n                     ((centre_angle&0x0000ffffu)|((u32)a<<16));\n"
+    },
+    {
+      "start": 223,
+      "end": 225,
+      "replacement": "    /* Host-only adjustable movement; 1x retains native shifts. */\n    sa=avp_pc_move_accel(sa,acc_shift,host_double_movement,host_movement_dm_fast);\n    ca=avp_pc_move_accel(ca,acc_shift,host_double_movement,host_movement_dm_fast);\n    if(!lift_key){\n        if(pressed(keys,JOY_UP)){ax+=ca;ay-=sa;}\n        if(pressed(keys,JOY_DOWN)){ax-=ca;ay+=sa;}\n    }\n    const s32 digital_forward_ax=ax,digital_forward_ay=ay;\n"
+    },
+    {
+      "start": 226,
+      "end": 229,
+      "replacement": "#include \"../../new/pc_video/player_keyboard_strafe.inc\"\n\n    /* Retail: OPTION+horizontal strafes for Alien; C+horizontal for Marine\n     * and Predator. Modern analog sidestep is a separate host axis and remains\n     * available concurrently with digital or analog turning. */\n    if(sidestep_modifier){\n        if(pressed(keys,JOY_RIGHT)){ax+=sa;ay+=ca;}\n        if(pressed(keys,JOY_LEFT)){ax-=sa;ay-=ca;}\n    }\n    /* Retail Jaguar keypad 7/9 issue independent sidestep acceleration.\n     * They do not use the C/Option + D-pad modifier and may be pressed while\n     * turning. Keep each contribution in the original fixed-point math. */\n    if(pressed(keys,KEY_7)){ax-=sa;ay-=ca;}\n    if(pressed(keys,KEY_9)){ax+=sa;ay+=ca;}\n\n#include \"../../new/pc_video/player_analog_velocity.inc\"\n"
+    },
+    {
+      "start": 249,
+      "end": 250,
+      "replacement": "        if((ax||ay) && approx>\n           avp_pc_move_max(max_speed,host_double_movement,host_movement_dm_fast)*3u){\n"
+    },
+    {
+      "start": 260,
+      "end": 262,
+      "replacement": "    const int ignore_player_collision=ops->player_noclip && ops->player_noclip(ops->user);\n    #define WALL_SAFE(px,py) (ignore_player_collision || (ops->safe_pos ? (ops->safe_pos(ops->user,(px),(py),80,40)==AVP_COLL_SAFE) : (SafePos(80,(px),(py),40)==AVP_COLL_SAFE)))\n    #define AMP_SAFE(px,py)  (ignore_player_collision || (ops->amp_collision ? ops->amp_collision(ops->user,(px),(py)) : !AMPCollisions((px),(py))))\n"
+    },
+    {
+      "start": 276,
+      "end": 279,
+      "replacement": "/* PLAYER.S::do_predo: cloak activation waits for the six-step HUD fade.\n * Once active, the original vision setting remains unchanged until the\n * Predator vision key (6) is pressed.  Each requested change gets the\n * original three-frame flicker.  In particular, redraws or idle player\n * ticks must never cycle the CLUT or restart the sound on their own. */\n"
+    },
+    {
+      "start": 281,
+      "end": 284,
+      "replacement": "    /* Original retail RDB.DTA $44C8-$44DB: five {VMODE, X_FADE extra}\n     * word pairs. RGB16 $06C7 and RGB24 $0EC3 have different pixel\n     * interpretations, even for the two $8880 color entries. */\n    static const struct {u16 vmode,extra;} vision[5]={\n        {0x06c7u,0x9558u},{0x0ec3u,0x0cf8u},{0x0ec3u,0x8880u},\n        {0x06c7u,0x26f8u},{0x06c7u,0x8880u}\n    };\n    if(invis_stat==0)return;\n"
+    },
+    {
+      "start": 286,
+      "end": 288,
+      "replacement": "            /* VSX20 is a *looping* retail FullSynth descriptor.  Keep its\n             * AVPSOUND identity, not a boolean.  The voice can then be\n             * released through the original StopLoop lifecycle. */\n            u32 h=TFX(AVP_FX_VSX20);\n            predo_ID=(h!=(u32)-1)?h:0;\n            invis_stat=2;\n            invisflag=(u16)(1u<<AMP_INVHIT);\n            predo_count=3;\n"
+    },
+    {
+      "start": 289,
+      "end": 292,
+      "replacement": "        }else if(predo_count){\n            --predo_count;\n        }else{\n            if(!pressed(joy_edge,KEY_6))return;\n            predo_count=2;\n            /* Switching multispectrum modes replaces the cloak cue rather\n             * than leaving its old looping voice running in parallel. */\n            if(predo_ID)StopLoop(predo_ID);\n            {u32 h=TFX(AVP_FX_VSX20);predo_ID=(h!=(u32)-1)?h:0;}\n        }\n    }else{\n"
+    },
+    {
+      "start": 293,
+      "end": 295,
+      "replacement": "            /* Original Jaguar decloak also triggers VSX20.  Release the\n             * continuing cloak loop, play a fresh transition cue, then\n             * unloop that new cue immediately so it has its authored ending\n             * instead of persisting while the Predator is visible. */\n            if(predo_ID)StopLoop(predo_ID);\n            predo_ID=0;\n            {u32 end=TFX(AVP_FX_VSX20);\n             if(end!=(u32)-1 && end!=0u)StopLoop(end);}\n            invis_stat=1;\n            predo_count=3;\n"
+    },
+    {
+      "start": 296,
+      "end": 298,
+      "replacement": "        if(predo_count)--predo_count;\n        else{\n            invisflag=0;\n            invis_stat=0;\n            xtra_c=0x8880u;\n            pred_vision_vmode=0; /* standard CRY16 output */\n            return;\n        }\n"
+    },
+    {
+      "start": 300,
+      "end": 301,
+      "replacement": "    xtra_c=vision[predo/4u].extra;\n    pred_vision_vmode=vision[predo/4u].vmode;\n"
+    },
+    {
+      "start": 308,
+      "end": 309,
+      "replacement": "        if(pressed(e,OPTION)){\n            /* PLAYER.S keeps AMP_INVHIT set through the authored decloak\n             * fade; do_predo clears it only when that transition finishes.\n             * Do not clear it early in the PC input interception. */\n            invis_act=(u8)~invis_act;\n        }\n"
+    },
+    {
+      "start": 310,
+      "end": 313,
+      "replacement": "        /* Retail keypad 5 is the Predator medpak. Keypad 7/9 are independent\n         * strafing keys, so they must never activate the medpak. */\n        if(pressed(c,KEY_5)) medpak_act=(u8)~medpak_act;\n"
+    },
+    {
+      "start": 340,
+      "end": 341,
+      "replacement": "    if(allow_god && pressed(joy_edge,KEY_0) && pressed(joy_cur,OPTION)) {\n        const AvpRuntimeOps *o=avp_runtime_ops();\n        cheat=(s16)~cheat;\n        if(o->set_message)o->set_message(o->user,cheat?5u:6u);\n    }\n"
+    },
+    {
+      "start": 349,
+      "end": 362,
+      "replacement": "    AVP_SFX_HUMAN_AAGH_A = AVP_FX_UGH2A,\n    AVP_SFX_HUMAN_AAGH_B = AVP_FX_UGH2B,\n    AVP_SFX_HUMAN_UHH_A  = AVP_FX_UHH3A,\n    AVP_SFX_HUMAN_UHH_B  = AVP_FX_UHH3B,\n    AVP_SFX_HUMAN_UHH_C  = AVP_FX_UHH3C,\n    AVP_SFX_ALIEN_PAIN_A = AVP_FX_NALN1,\n    AVP_SFX_ALIEN_PAIN_B = AVP_FX_NALN2,\n    AVP_SFX_ALIEN_PAIN_C = AVP_FX_XALN1,\n    AVP_SFX_ALIEN_PAIN_D = AVP_FX_XALN2,\n    AVP_SFX_PRED_PAIN_A  = AVP_FX_PREDH,\n    AVP_SFX_PRED_PAIN_B  = AVP_FX_EDITR,\n    AVP_SFX_PRED_PAIN_C  = AVP_FX_PHIT3,\n    AVP_SFX_PRED_PAIN_D  = AVP_FX_PHIT4\n"
+    },
+    {
+      "start": 363,
+      "end": 363,
+      "replacement": "\n/* Retail sounds are descriptors 0x50 bytes apart, NOT consecutive integers.\n * Keep the original four-way random sound selection, but resolve the chosen\n * index to a real cartridge descriptor for each playable species. */\nstatic const unsigned alien_pain_fx[4]={\n    AVP_SFX_ALIEN_PAIN_A,AVP_SFX_ALIEN_PAIN_B,\n    AVP_SFX_ALIEN_PAIN_C,AVP_SFX_ALIEN_PAIN_D\n};\nstatic const unsigned predator_pain_fx[4]={\n    AVP_SFX_PRED_PAIN_A,AVP_SFX_PRED_PAIN_B,\n    AVP_SFX_PRED_PAIN_C,AVP_SFX_PRED_PAIN_D\n};\n\n#include \"../../new/audio/player_pain_options.inc\"\n"
+    },
+    {
+      "start": 366,
+      "end": 366,
+      "replacement": "    host_last_pain_sfx=id;\n"
+    },
+    {
+      "start": 403,
+      "end": 404,
+      "replacement": "                /* The original random draw must occur even when muted. */\n                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))HumanPain();\n                else (void)avp_random();\n"
+    },
+    {
+      "start": 406,
+      "end": 407,
+      "replacement": "                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))pain_sfx(alien_pain_fx[r]);\n"
+    },
+    {
+      "start": 409,
+      "end": 410,
+      "replacement": "                if(pc_player_pain_sounds_enabled && (!hugkill||pc_facehug_pain_sounds_enabled))pain_sfx(predator_pain_fx[r]);\n"
+    },
+    {
+      "start": 440,
+      "end": 440,
+      "replacement": "#include \"../../new/cheats/player_center_aim.inc\"\n\n"
+    },
+    {
+      "start": 441,
+      "end": 441,
+      "replacement": "#include \"../../new/multiplayer/player_shot_hook.inc\"\n\n"
+    },
+    {
+      "start": 459,
+      "end": 460,
+      "replacement": "        /* Original 68000 ADD/SUB are modulo 32 bits.  A negative d0.w\n         * must not be left-shifted as a signed C value (undefined behavior).\n         * Signed 16-bit spread * 512 fits s32; unsigned ADD/SUB then exactly\n         * preserves the Jaguar register's 32-bit wraparound. */\n        u32 a=centre_angle+(u32)((s32)(s16)avp_random()*512);\n"
+    },
+    {
+      "start": 464,
+      "end": 466,
+      "replacement": "        /* Optional PC enhancement: aim from the screen centre, not the\n         * swaying weapon. Leave Jaguar spread/RNG and all other trace rules\n         * untouched. No option = byte-identical source calculation. */\n        if(!avp_player_center_aim_applies(player_type,cur_wepno))\n            a-=(u32)((s64)(s16)swing_x*0x400000ll);\n        fire_angle=a;\n"
+    },
+    {
+      "start": 482,
+      "end": 484,
+      "replacement": "    /* PLAYER.S widens the signed fire-width word before *512.  Signed\n     * multiplication is defined for every s16 width; left-shifting a\n     * negative signed value was undefined C behavior. */\n    boxx=abs_s32_local(shotx)+(s32)(s16)fire_width*512;\n    boxy=abs_s32_local(shoty)+(s32)(s16)fire_width*512;\n"
+    },
+    {
+      "start": 503,
+      "end": 503,
+      "replacement": "#include \"../../new/multiplayer/player_avatar_shot.inc\"\n\n"
+    },
+    {
+      "start": 510,
+      "end": 510,
+      "replacement": "        /* PLAYER.S:1064-1067: OR invisflag in -- \"once set, stays set\". */\n"
+    },
+    {
+      "start": 546,
+      "end": 546,
+      "replacement": "\n/* PC local multiplayer: optional read/write snapshot of player.c globals.\n * The reconstructed original game routines above are never modified. */\n#ifdef AVP_LOCAL_MULTIPLAYER_PLAYER_BRIDGE\n#include \"../../new/multiplayer/local_mp_player_native.inc\"\n#endif\n"
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Regenerate editor-only read-only LEVDOOR.S map anchors from original C.
 
-Never changes src/game/door_retail_meta.c or the runtime's bound tables.
+Never changes new/jaguar/retail_data/door_retail_meta.c or the runtime's bound tables.
 Run from any directory: python3 new/map_maker/tools_gen_script_catalog.py
 """
 from pathlib import Path
 import re, json
 root = Path(__file__).resolve().parents[2]
-src = (root / 'src/game/door_retail_meta.c').read_text()
+src = (root / 'new/jaguar/retail_data/door_retail_meta.c').read_text()
 reference = json.loads((root / 'new/map_maker/RETAIL_LEVEL_METADATA_RESEARCH.json').read_text())
 anchors = []
 
@@ -43,7 +43,7 @@ for level in range(1, 16):
     assert ii == [(o['maze_byte_offset'],o['required_offsets']) for o in ref['interlocks']],f'interlock mismatch level {level}'
     for a in anchors:
         assert 0 <= a[2] < 64*64*8, f'bad offset {a}'
-output='''/* Generated from the original src/game/door_retail_meta.c by
+output='''/* Generated from the original new/jaguar/retail_data/door_retail_meta.c by
  * new/map_maker/tools_gen_script_catalog.py. Do not edit this by hand.
  * PC Map Maker read-only indices; never installed into game door tables. */
 static const AvpMmScriptRow avp_mm_retail_script_rows[] = {

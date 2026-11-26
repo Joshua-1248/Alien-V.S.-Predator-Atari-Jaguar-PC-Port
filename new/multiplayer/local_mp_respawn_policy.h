@@ -17,6 +17,10 @@ typedef struct AvpMpRespawnPlan {
     int reset_honor;
     int start_marine_shotgun;
 } AvpMpRespawnPlan;
+/* PC multiplayer: a Predator cannot be spawned/respawned into retail
+ * air-duct levels (6..13). Marine and Alien duct spawns remain legal.
+ * Only retail levels are accepted; custom maps use their own coordinates. */
+int avp_mp_spawn_level_allowed(unsigned species,unsigned retail_level);
 int avp_mp_respawn_plan(const AvpMpActorNativeState *player,
                         int marine_shotgun_option,unsigned campaign,
                         int campaign_start_enabled,AvpMpRespawnPlan *out);

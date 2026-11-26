@@ -1,7 +1,7 @@
 /* The five Predator retail modes include both TOM RGB16 and RGB24.
  * A 24-bit pixel consumes two original 16-bit line-buffer words; host
  * resolution must not turn that into independent 16-bit pixels. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>

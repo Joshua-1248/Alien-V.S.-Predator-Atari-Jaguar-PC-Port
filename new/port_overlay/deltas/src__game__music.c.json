@@ -1,0 +1,157 @@
+{
+  "path": "src/game/music.c",
+  "base_sha256": "c28379a7642044c73461b29569acbc3813744641b3be24af42f35752552e95a0",
+  "output_sha256": "06afe68ff49070b705d66c7da8ab94010eaf3c6fd4ade7c7701546ddd4536458",
+  "edits": [
+    {
+      "start": 6,
+      "end": 6,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 9,
+      "end": 10,
+      "replacement": "#include \"../../new/audio/sound_channels_cpu.inc\"\n"
+    },
+    {
+      "start": 34,
+      "end": 35,
+      "replacement": "static AvpVoiceState voice[AVP_SOUND_VOICE_CAPACITY];\n"
+    },
+    {
+      "start": 37,
+      "end": 37,
+      "replacement": "#include \"../../new/audio/pc_intro_voice_policy.inc\"\n\n"
+    },
+    {
+      "start": 44,
+      "end": 44,
+      "replacement": "/* The retail 98 effects are eighty-byte FullSynth modules at these RAM\n * addresses.  DoEffect reads word 1 for sampler types, word 6 for FM, then\n * compares their low 16 bits when choosing a voice (MUSIC.o 0x9C6C).\n * The high bit is the synthesizer's loop flag.  These are *not* all equal\n * priority: applying the generic fallback to retail cues lets quieter\n * ambient sounds steal important high-priority weapon/alert voices. */\n#define RETAIL_FX_FIRST 0x20cc8u\n#define RETAIL_FX_LAST  0x22b18u\n#define RETAIL_FX_STRIDE 80u\n#define RETAIL_FX_COUNT (((RETAIL_FX_LAST-RETAIL_FX_FIRST)/RETAIL_FX_STRIDE)+1u)\nstatic AvpSoundMeta retail_meta[RETAIL_FX_COUNT];\nstatic int retail_meta_valid;\nstatic u32 module_long(const u8 *p)\n{\n    return ((u32)p[0]<<24)|((u32)p[1]<<16)|((u32)p[2]<<8)|p[3];\n}\nvoid avp_music_bind_retail_sfx_descriptors(const u8 *rdb,size_t size)\n{\n    unsigned i;\n    retail_meta_valid=0;\n    if(!rdb||size<(size_t)(RETAIL_FX_LAST-0x20300u)+80u)return;\n    for(i=0;i<RETAIL_FX_COUNT;i++){\n        size_t off=(size_t)(RETAIL_FX_FIRST-0x20300u)+i*RETAIL_FX_STRIDE;\n        u32 type=module_long(rdb+off),control;\n        if(type!=4u&&type!=32u&&type!=44u)return;\n        control=module_long(rdb+off+(type==4u?24u:4u));\n        retail_meta[i].priority=(s16)(control&0xffffu);\n        retail_meta[i].synth_type=(u8)type;\n        retail_meta[i].looping=(u8)(control>>31);\n    }\n    retail_meta_valid=1;\n}\n"
+    },
+    {
+      "start": 47,
+      "end": 48,
+      "replacement": "    if(sound_meta&&id<sound_meta_count)return &sound_meta[id];\n    if(retail_meta_valid&&id>=RETAIL_FX_FIRST&&id<=RETAIL_FX_LAST&&\n       (id-RETAIL_FX_FIRST)%RETAIL_FX_STRIDE==0u)\n        return &retail_meta[(id-RETAIL_FX_FIRST)/RETAIL_FX_STRIDE];\n    return &default_meta;\n"
+    },
+    {
+      "start": 67,
+      "end": 67,
+      "replacement": "#include \"../../new/audio/sound_channels_cpu_resize.inc\"\n\n"
+    },
+    {
+      "start": 69,
+      "end": 69,
+      "replacement": "    const AvpRuntimeOps *o=avp_runtime_ops();\n    u32 h;\n"
+    },
+    {
+      "start": 70,
+      "end": 70,
+      "replacement": "    h=voice[i].handle;\n    if(h&&o->unloop_sfx)o->unloop_sfx(o->user,h);\n"
+    },
+    {
+      "start": 87,
+      "end": 88,
+      "replacement": "    /* TFX's positive D1 overrides BOTH the occupied-voice comparator and\n     * the new DSP module's low volume word. Send it atomically with start;\n     * a post-start ModSfx would change a different host gain and race audio. */\n    if(mod_value>=0 && o->play_sfx_handle_d1)\n        o->play_sfx_handle_d1(o->user,id,h,i,mod_value);\n    else if(o->play_sfx_handle)o->play_sfx_handle(o->user,id,h,i);\n    else if(o->play_sfx)o->play_sfx(o->user,id);\n"
+    },
+    {
+      "start": 90,
+      "end": 90,
+      "replacement": "\n#include \"../../new/multiplayer/local_mp_music_native.inc\"\n"
+    },
+    {
+      "start": 111,
+      "end": 111,
+      "replacement": "    {const AvpRuntimeOps *o=avp_runtime_ops();\n     if(o->set_master_volume)o->set_master_volume(o->user,0x7fffu);}\n"
+    },
+    {
+      "start": 119,
+      "end": 119,
+      "replacement": "#include \"../../new/audio/intro_voice_reset.inc\"\n\n"
+    },
+    {
+      "start": 183,
+      "end": 183,
+      "replacement": "    {const AvpRuntimeOps *o=avp_runtime_ops();\n     if(o->set_master_volume)o->set_master_volume(o->user,(u32)v);}\n"
+    },
+    {
+      "start": 189,
+      "end": 189,
+      "replacement": "    avp_runtime_set_fx_vblank(fade_tick);\n"
+    },
+    {
+      "start": 195,
+      "end": 195,
+      "replacement": "    avp_runtime_set_fx_vblank(fade_tick);\n"
+    },
+    {
+      "start": 237,
+      "end": 238,
+      "replacement": "static u32 do_effect_d1(unsigned id,s32 d1)\n"
+    },
+    {
+      "start": 241,
+      "end": 242,
+      "replacement": "    unsigned search_start=protected_voices;\n    /* MUSIC.o $9C6E TST.W D1 / $9C70 BPL: nonnegative D1 is\n     * the caller's explicit DSP volume and allocation priority, not the\n     * cartridge module's default. MJP Do_Escap supplies $2600. */\n    s16 p=((d1&0x8000)==0)?(s16)(d1&0xffff):m->priority;\n#include \"../../new/audio/intro_voice_search_gate.inc\"\n\n    /* The Jaguar DSP marks a completed voice stopped in shared DSP RAM.\n       The native mixer keeps its own voice state; synchronize completed\n       one-shots here, at the next allocation, on the game thread.  Without\n       this, six short effects permanently exhaust the generic voice pool. */\n    {const AvpRuntimeOps *o=avp_runtime_ops();\n     if(o->sfx_handle_active){\n        for(i=protected_voices;i<AVP_SOUND_VOICES;i++){\n            if(voice[i].type>=0 &&\n               (voice[i].handle\n                ? !o->sfx_handle_active(o->user,voice[i].handle)\n                : (o->sfx_voice_active && !o->sfx_voice_active(o->user,i)))){\n                voice[i].type=AVP_SOUND_TYPE_STOPPED;\n                voice[i].handle=0;\n                voice[i].looping=0;\n            }\n        }\n     }\n    }\n"
+    },
+    {
+      "start": 243,
+      "end": 244,
+      "replacement": "    for(i=search_start;i<AVP_SOUND_VOICES;i++){\n"
+    },
+    {
+      "start": 246,
+      "end": 249,
+      "replacement": "    /* The retail MC68000 at $9CC4-$9CC6 executes CMP.W D4,D1; BGT.W\n     * $9CE8, where D1 is the incoming priority and D4 the occupied slot's.\n     * Therefore only a STRICTLY higher signed priority can steal an occupied\n     * retail voice.  Equal priority is rejected.  Keep the longstanding PC\n     * fallback for explicitly supplied non-retail/test metadata so existing\n     * host control enhancements retain their established behavior. */\n"
+    },
+    {
+      "start": 250,
+      "end": 252,
+      "replacement": "        const int original_retail=retail_meta_valid && !sound_meta;\n        for(i=search_start;i<AVP_SOUND_VOICES;i++){\n            if(original_retail ? (p>voice[i].priority) : (p>=voice[i].priority)){\n                best=i;break;\n            }\n        }\n    }\n    /* Retail code has no third \"same sound ID\" exception.  Leave the\n     * existing same-ID recovery strictly on the non-retail host/test path. */\n    if(best==AVP_SOUND_VOICES && (!retail_meta_valid || sound_meta)){\n        for(i=search_start;i<AVP_SOUND_VOICES;i++){\n            if(voice[i].sound_id==id&&voice[i].type>=0){best=i;break;}\n"
+    },
+    {
+      "start": 256,
+      "end": 257,
+      "replacement": "    /* $9D3C-$9D42: a type-4 voice keeps its priority word LSR.W #2 in the\n     * DSP voice long that the next steal scan reads at $9CD4-$9CDA, so later\n     * effects compare against the quartered word, not the module word. */\n    if(retail_meta_valid && !sound_meta && m->synth_type==4u)\n        return begin_voice(best,id,(s16)((u16)p>>2),d1);\n    return begin_voice(best,id,p,d1);\n"
+    },
+    {
+      "start": 258,
+      "end": 259,
+      "replacement": "u32 DoEffect(unsigned id){return do_effect_d1(id,-1);}\nu32 TFX(unsigned id){return do_effect_d1(id,-1);}\nu32 avp_music_tfx_d1(unsigned id,s32 d1){return do_effect_d1(id,d1);}\n/* Retail MUSIC.o PlacedEf $9C3A: start an effect directly in reserved DSP\n * voice D3 (no free/steal search), then share DoEffect's store path $9CE8.\n * MAZESCRN.S `wep_sfx` uses voice 1 (weapon), `pause_sfx` voice 0. */\nu32 avp_music_placed_voice(unsigned id,unsigned v)\n{\n    const AvpSoundMeta *m=meta_for(id);\n    s16 p=m->priority;\n    if(v>=AVP_SOUND_VOICES)return (u32)-1;\n    if(retail_meta_valid && !sound_meta && m->synth_type==4u)p=(s16)((u16)p>>2);\n    if(voice[v].type>=0)request_stop(v,0);\n    return begin_voice(v,id,p,-1);\n}\n"
+    },
+    {
+      "start": 263,
+      "end": 264,
+      "replacement": "    /* DoEffect already created the retail logical voice/handle.  PlacedEf\n       modifies that same voice; it must not start a second host sample. */\n    if(h!=(u32)-1&&o->position_sfx)o->position_sfx(o->user,h,x,y);\n"
+    },
+    {
+      "start": 306,
+      "end": 306,
+      "replacement": "    if(o->set_master_volume)o->set_master_volume(o->user,0u);\n"
+    },
+    {
+      "start": 310,
+      "end": 310,
+      "replacement": "    if(o->pause_sfx_save)o->pause_sfx_save(o->user);\n"
+    },
+    {
+      "start": 315,
+      "end": 315,
+      "replacement": "    if(o->set_master_volume)o->set_master_volume(o->user,0x7fffu);\n"
+    },
+    {
+      "start": 326,
+      "end": 326,
+      "replacement": "    if(o->set_master_volume)o->set_master_volume(o->user,0u);\n"
+    },
+    {
+      "start": 331,
+      "end": 331,
+      "replacement": "    if(o->set_master_volume)o->set_master_volume(o->user,0x7fffu);\n    /* Restore the actual held synthesizer phase of the weapon and alarm\n       when the host supports it.  The fallback is retained for non-PC\n       backends that only implement individual effect launches. */\n    if(o->pause_sfx_restore)\n        o->pause_sfx_restore(o->user,\n            voice[1].type>=0?voice[1].handle:0u,\n            voice[2].type>=0?voice[2].handle:0u);\n    else if(voice[1].type>=0&&voice[1].handle&&o->play_sfx_handle)\n        o->play_sfx_handle(o->user,voice[1].sound_id,voice[1].handle,1u);\n"
+    },
+    {
+      "start": 332,
+      "end": 333,
+      "replacement": ""
+    }
+  ]
+}

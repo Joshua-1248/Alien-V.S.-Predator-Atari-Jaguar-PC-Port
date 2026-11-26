@@ -49,7 +49,7 @@ int main(void)
     }
     assert(avp_pc_title_native_copy_rgb(native_source,W,H,W,&native));
     avp_gpu_frontend_enter_mode(&st,AVP_MJP_TITLE);
-    st.frontend_img[AVP_MJP_TITLE][0]=(AvpGpuRgbImage){W,SOURCE_H,backdrop,NULL};
+    st.frontend_img[AVP_MJP_TITLE][0]=(AvpGpuRgbImage){W,SOURCE_H,backdrop,NULL,NULL}; /* alpha is optional */
     st.frontend_loaded[AVP_MJP_TITLE][0]=1u;
     /* Menu requested, but not dimmed and lettering still pending: the title
      * bitmap must be IDENTICAL to the final full-bright native scanout. */

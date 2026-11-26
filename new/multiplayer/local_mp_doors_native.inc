@@ -139,3 +139,42 @@ int avp_mp_doors_native_pending_lift(uint16_t *x,uint16_t *y)
     *x=lift_x;*y=lift_y;
     return 1;
 }
+
+/* Reuse the native closing predicate and reversal, in native slot order.
+ * The out-of-map pose suppresses only the legacy single-player position
+ * check; AMP collision remains active. Never advance animation per actor.
+ * Restoring XY before returning preserves the host's actor/lift ownership. */
+static int mp_door_occupied(const DoorState *door,
+                            const AvpMpDoorOccupant *actors,unsigned count)
+{
+    unsigned p;
+    x_pos=y_pos=UINT32_MAX;
+    if(door_collides(door))return 1;
+    for(p=0;p<count;++p){
+        x_pos=actors[p].x;y_pos=actors[p].y;
+        if(door_collides(door))return 1;
+    }
+    return 0;
+}
+unsigned avp_mp_doors_native_step_occupied(const AvpMpDoorOccupant *actors,
+                                           unsigned count,int lift_passenger)
+{
+    const u32 saved_x=x_pos,saved_y=y_pos;
+    unsigned reversed=0;
+    if(!actors)count=0;
+    if(door1.ptr && door1.dir<0 && mp_door_occupied(&door1,actors,count)){
+        x_pos=saved_x;y_pos=saved_y;
+        ping_door(&door1);reversed|=1u;
+    }
+    if(door2.ptr && door2.dir<0 && mp_door_occupied(&door2,actors,count)){
+        x_pos=saved_x;y_pos=saved_y;
+        ping_door(&door2);reversed|=2u;
+    }
+    /* The only player-dependent operation left is the native delayed lift
+     * check. A passenger must be physically present in this world. */
+    x_pos=lift_passenger?saved_x:UINT32_MAX;
+    y_pos=lift_passenger?saved_y:UINT32_MAX;
+    MoveDoors();
+    x_pos=saved_x;y_pos=saved_y;
+    return reversed;
+}

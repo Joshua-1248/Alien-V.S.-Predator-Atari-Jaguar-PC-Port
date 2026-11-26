@@ -46,11 +46,16 @@ int main(void){
     assert(m.players==8u);
     for(unsigned i=0;i<3u;i++)avp_mp_dm_kill(&m,7u,0u);
     assert(m.finished&&m.winner==7u&&m.kills[7u]==3u&&m.deaths[0u]==3u);
-    setup.players=4u;setup.bot_count=12u;
+    setup.players=4u;setup.bot_count=16u;
     avp_mp_dm_init(&m,&setup);
-    assert(m.players==16u);
-    for(unsigned i=0;i<3u;i++)avp_mp_dm_kill(&m,15u,3u);
-    assert(m.finished&&m.winner==15u&&m.kills[15u]==3u&&m.deaths[3u]==3u);
+    assert(m.players==20u);
+    for(unsigned i=0;i<3u;i++)avp_mp_dm_kill(&m,19u,3u);
+    assert(m.finished&&m.winner==19u&&m.kills[19u]==3u&&m.deaths[3u]==3u);
+    setup.bot_count=32u;
+    avp_mp_dm_init(&m,&setup);
+    assert(m.players==36u);
+    for(unsigned i=0;i<3u;i++)avp_mp_dm_kill(&m,35u,3u);
+    assert(m.finished && m.winner==35u && m.kills[35u]==3u);
     assert(avp_mp_dm_shot_candidate(65536,0,140000,140000,128,0,64,UINT32_MAX,&depth));
     assert(!avp_mp_dm_shot_candidate(-65536,0,140000,140000,128,0,64,UINT32_MAX,&depth));
     /* PvP-only damage table. Values below are the exact limits the user
@@ -100,6 +105,29 @@ int main(void){
     setup.dm_cloak_damage=1u;
     avp_mp_dm_init(&m,&setup);
     assert(m.cloak_damage==1u);
+    assert(m.predator_uncloaked_damage==0u);
+    setup.dm_predator_uncloaked_damage=1u;
+    avp_mp_dm_init(&m,&setup);
+    assert(m.predator_uncloaked_damage==1u);
+    /* PvP-only damage: the Predator damage modifier is independent of the
+     * existing cloaked-Predator victim vulnerability modifier. */
+    assert(avp_mp_dm_predator_attacker_damage(0u,1u,100)==100);
+    assert(avp_mp_dm_predator_attacker_damage(1u,0u,100)==100);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,100)==400);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,0)==0);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,-7)==-7);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,INT32_MAX)==INT32_MAX);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,INT32_MAX/4)==
+           (INT32_MAX/4)*4);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,INT32_MAX/4+1)==INT32_MAX);
+    /* Existing per-weapon PvP base damage is unchanged; the multiplier is
+     * applied only at the common selected PLAYER hit path. */
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,
+        avp_mp_dm_direct_damage(PT_PREDATOR,1,50))==400);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,
+        avp_mp_dm_projectile_damage(7))==400);
+    assert(avp_mp_dm_predator_attacker_damage(1u,1u,200)==800);
+    assert(avp_mp_dm_predator_attacker_damage(1u,0u,200)==200);
     assert(avp_mp_dm_victim_damage(0u,PT_PREDATOR,1u,100)==100);
     assert(avp_mp_dm_victim_damage(1u,PT_PREDATOR,0u,100)==100);
     assert(avp_mp_dm_victim_damage(1u,PT_HUMAN,1u,100)==100);

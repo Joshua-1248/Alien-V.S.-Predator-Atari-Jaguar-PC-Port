@@ -10,6 +10,9 @@
 AvpAmp amps[AVP_NUM_AMPS],*amps_at=amps;
 u32 x_pos=0x100000u,y_pos=0x100000u,centre_angle=0,fire_angle=0;
 s16 swing_x=0;
+/* R196 TestSpark now checks the equipped slot for optional center-aim.
+ * Keep this older Predator melee fixture linkable with the real player.c. */
+s16 cur_wepno=4;
 s16 fire_damage=30;
 u32 fire_distance=0x90u<<8;
 u16 fire_width=20;

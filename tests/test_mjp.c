@@ -14,6 +14,9 @@ volatile u32 joy_edge,joy2_edge,joy_cur,joy2_cur;
 volatile s8 joy_special_mode,reset_enabled,pad_flag2,pad_flag3;
 volatile u16 reset_wait;
 volatile u32 reset_time,frame_counter;
+/* InitVideo normally owns this Jaguar PAL/NTSC field; the standalone MJP
+ * test requires its own 60-VBlank reference instead of linking the video. */
+volatile u32 one_second_ticks=60u;
 void (*x_read)(void);
 s16 player_type;
 s32 score;
@@ -32,6 +35,10 @@ static unsigned selection_reads,selection_moves,selection_direction;
 static s32 last_visible_species=-1;
 static unsigned cancel_events,credit_events,credit_begin_events,credit_end_events,credit_open_events,credit_close_events,selection_sound_events,menu_events;
 static unsigned select_cross_at,select_fade_at,select_brief_at,select_cross_events;
+/* Host Escape-spoken cue timing is 1.000 s per cue in the PC
+ * presentation seam. Capture six original cue IDs on the first pass. */
+static int capture_escape_cues;
+static unsigned escape_cue_count,escape_cue_fields[6];
 static unsigned fade_start_count;
 static s32 last_fade_step;
 void FXFadeDo(s32 step){++fade_start_count;last_fade_step=step;}
@@ -79,6 +86,15 @@ static const char *empty_retail_text(void *user,u32 text_id)
 static void frontend_event(void *u,unsigned event,s32 a,s32 b)
 {
     (void)u;
+    if(event==0x4d4a5041u && capture_escape_cues &&
+       escape_cue_count<6u){
+        const u32 id=(u32)a;
+        static const u32 expected[6]={
+            0x00022848u,0x00022898u,0x000228e8u,
+            0x00022938u,0x00022988u,0x00021718u};
+        if(id==expected[escape_cue_count])
+            escape_cue_fields[escape_cue_count++]=vblanks;
+    }
     if(event==0x4d4a5054u && intro_text_count<8u)
         intro_text_ids[intro_text_count++]=(u32)a; /* MJPT */
     if(event==0x4d4a5050u && intro_transition_count<9u){ /* MJPP */
@@ -449,11 +465,21 @@ int main(void)
     /* Escape keeps BEE0 clear throughout its timed presentation.  A held from
      * entry therefore cannot shorten its 70/30/300-tick sequence. */
     vblanks=0;loads=0;slide_count=0u;
+    escape_cue_count=0u;capture_escape_cues=1;
     MTEST(AVP_MJP_ESCAPE);
+    capture_escape_cues=0;
+    assert(escape_cue_count==6u);
+    for(unsigned i=1u;i<6u;i++)
+        assert(escape_cue_fields[i]-escape_cue_fields[i-1u]==60u);
     assert(slide_count==7u*24u); /* Do_Escap $01DB82: $4BED4=0 */
     for(unsigned n=0u;n<slide_count;n++)assert(slide_x[n]==58);
     assert(loads==6u);
-    assert(vblanks==2578u+7u*32u); /* 7 $01DF2C calls, 16 two-VBL CROSS stages each (R280) */
+    /* The old 2802-field assertion predated the PC-only 60-Hz/60-field
+     * spoken countdown (previously 70). Preserve the seven 40-field
+     * original-model CROSS transitions, but assert the CURRENT intended
+     * PC pacing and exact six-cue cadence. Retail 70-field timing is
+     * intentionally distinct and is not claimed here. */
+    assert(vblanks==2730u);
 
     /* Full Do_Win continues through $020190.  With the hardware completion
      * backend absent, each OP poll resolves after its first CPU tick. */
@@ -552,6 +578,16 @@ int main(void)
     assert(vblanks==5u);
     assert(fade_start_count==1u&&last_fade_step==0xfau);
     scripted_pad=0;joy_cur=0xffffffffu;
+
+    /* Hosted SELECT consumed a second A/B/C during text: proceed directly
+     * to the original fade instead of requiring a third confirmation. */
+    vblanks=0;
+    unsigned fade_before_skip=fade_start_count;
+    avp_mjp_select_request_briefing_skip();
+    End_Sele();
+    assert(vblanks==0u);
+    assert(fade_start_count==fade_before_skip+1u);
+    assert(last_fade_step==0xfau);
 
     avp_runtime_reset_ops();
     return 0;

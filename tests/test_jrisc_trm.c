@@ -19,7 +19,7 @@ static JRisc J; static uint32_t at;
 static uint16_t I(unsigned op,unsigned r1,unsigned r2){return (uint16_t)((op<<10)|((r1&31)<<5)|(r2&31));}
 static void emit(uint16_t w){J.ram[at-J.ram_base]=(uint8_t)(w>>8);J.ram[at-J.ram_base+1]=(uint8_t)w;at+=2;}
 static void movei(uint32_t v,unsigned r){emit(I(38,0,r));emit((uint16_t)v);emit((uint16_t)(v>>16));}
-static void start(int kind){JRiscBus b={0,bus_read,bus_write};jrisc_init(&J,kind,b);at=J.ram_base;}
+static void start(int kind){JRiscBus b={0,bus_read,bus_write};jrisc_init(&J,kind,b);jrisc_local_write(&J,J.base+0x10Cu,4u);at=J.ram_base;}
 static void run_n(unsigned n){J.go=1;for(unsigned i=0;i<n;i++)jrisc_step(&J);}
 #define R(n) (jrisc_regs(&J)[n])
 #define FZ ((J.flags&1u)!=0)

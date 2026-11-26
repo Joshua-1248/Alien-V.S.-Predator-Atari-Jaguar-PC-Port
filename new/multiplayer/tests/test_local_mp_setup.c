@@ -36,33 +36,61 @@ int main(void)
         assert(n==4u); /* P1–P4 AI controls, no inactive Bot 1+ selectors */
         for(unsigned i=0;i<n;i++)assert(rows[i]==9u+i);
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_MODIFIERS,rows);
-        assert(n==1u && rows[0]==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW);
+        assert(n==4u && rows[0]==AVP_LOCAL_MP_MARINE_SHOTGUN_ROW &&
+               rows[1]==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW &&
+               rows[2]==AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW &&
+               rows[3]==AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW);
+        assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_MARINE_SHOTGUN_ROW));
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_OPTIONS,rows);
-        assert(n==3u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
+        assert(n==4u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
                rows[1]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
-               rows[2]==AVP_LOCAL_MP_WHOLE_MAP_ROW);
+               rows[2]==AVP_LOCAL_MP_WHOLE_MAP_ROW &&
+               rows[3]==AVP_LOCAL_MP_MENU_SPYCAM_ROW);
+        n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_SPYCAM,rows);
+        assert(n==3u && rows[0]==AVP_LOCAL_MP_SPYCAM_PLAYER_ROW &&
+               rows[1]==AVP_LOCAL_MP_SPYCAM_NEXT_ROW &&
+               rows[2]==AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW);
+        assert(avp_local_mp_menu_next_row(&s,AVP_LOCAL_MP_MENU_SPYCAM,
+               AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW,+1)==AVP_LOCAL_MP_SPYCAM_PLAYER_ROW);
         assert(!avp_local_mp_menu_rows(&s,999u,rows));
-        s.game_mode=AVP_MP_DEATHMATCH;s.bot_count=12u;
+        s.game_mode=AVP_MP_DEATHMATCH;s.bot_count=16u;
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_BOTS,rows);
-        assert(n==28u && rows[4]==AVP_LOCAL_MP_BOT_SPECIES_ROW &&
+        assert(n==36u && rows[4]==AVP_LOCAL_MP_BOT_SPECIES_ROW &&
                rows[15]==AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+7u &&
-               rows[16]==AVP_LOCAL_MP_BOT_BEHAVIOR_ROW &&
-               rows[27]==AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+7u);
+               rows[19]==AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+3u &&
+               rows[20]==AVP_LOCAL_MP_BOT_BEHAVIOR_ROW &&
+               rows[31]==AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+7u &&
+               rows[35]==AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+3u);
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_MODIFIERS,rows);
-        assert(n==4u && rows[0]==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW &&
-               rows[1]==AVP_LOCAL_MP_FAST_ROW &&
-               rows[2]==AVP_LOCAL_MP_EQUIP_ROW &&
-               rows[3]==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW);
+        assert(n==8u && rows[0]==AVP_LOCAL_MP_MARINE_SHOTGUN_ROW &&
+               rows[1]==AVP_LOCAL_MP_RANDOM_RESPAWN_ROW &&
+               rows[2]==AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW &&
+               rows[3]==AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW &&
+               rows[4]==AVP_LOCAL_MP_FAST_ROW &&
+               rows[5]==AVP_LOCAL_MP_EQUIP_ROW &&
+               rows[6]==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW &&
+               rows[7]==AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW);
         n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_OPTIONS,rows);
-        assert(n==5u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
+        assert(n==6u && rows[0]==AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW &&
                rows[1]==AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW &&
                rows[2]==AVP_LOCAL_MP_WHOLE_MAP_ROW &&
                rows[3]==AVP_LOCAL_MP_TRAVEL_ROW &&
-               rows[4]==AVP_LOCAL_MP_ENEMIES_ROW);
+               rows[4]==AVP_LOCAL_MP_ENEMIES_ROW &&
+               rows[5]==AVP_LOCAL_MP_MENU_SPYCAM_ROW);
         s.game_mode=AVP_MP_COOP;s.bot_count=0u;
     }
     assert(s.enabled == 0 && s.players == 2 && s.campaign == 0);
     assert(s.respawn_campaign_start==1);
+    assert(!s.spawn_in_random_level && !s.respawn_on_random_level);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW,1));
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW,1));
+    assert(s.spawn_in_random_level && s.respawn_on_random_level);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW,1));
+    assert(!s.spawn_in_random_level && s.respawn_on_random_level);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW,1));
+    assert(s.spawn_in_random_level && s.respawn_on_random_level);
+    avp_local_mp_validate(&s);
+    assert(s.spawn_in_random_level && s.respawn_on_random_level);
     assert(s.show_other_players_on_automap==1u);
     assert(s.player_collisions==1u);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW,+1));
@@ -140,6 +168,25 @@ int main(void)
     assert(s.dm_cloak_damage==1u);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW,-1));
     assert(s.dm_cloak_damage==0u);
+    assert(s.dm_predator_uncloaked_damage==0u);
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW));
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW,+1));
+    assert(s.dm_predator_uncloaked_damage==1u);
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW,-1));
+    assert(s.dm_predator_uncloaked_damage==0u);
+    /* Appending a DM row must never index a nonexistent Bot #33. */
+    s.bot_count=AVP_LOCAL_MP_MAX_BOTS;
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW));
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW,+1));
+    assert(s.dm_predator_uncloaked_damage==1u);
+    assert(s.bot_behavior[31u]==AVP_MP_BOT_BALANCED);
+    s.game_mode=AVP_MP_COOP;
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW));
+    assert(!avp_local_mp_adjust(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW,+1));
+    s.game_mode=AVP_MP_DEATHMATCH;
+    s.bot_count=0u;
+    assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW,+1));
+    assert(!s.dm_predator_uncloaked_damage);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_TRAVEL_ROW,+1));
     assert(s.dm_level_travel==1u);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_TRAVEL_ROW,-1));
@@ -206,20 +253,22 @@ int main(void)
     assert(avp_local_mp_total_actors(&s)==3u);
     assert(s.bot_enabled[2u] && s.species[2u]==AVP_MP_ALIEN);
     assert(s.bot_enabled[0u]==0u && s.bot_enabled[1u]==0u);
-    /* R19: twelve independent headless bots, while P1-P4 remain the
-     * only display/input seats. The original 31 F2 row IDs stay stable. */
-    assert(AVP_LOCAL_MP_MAX_PLAYERS==4u && AVP_LOCAL_MP_MAX_BOTS==12u);
-    assert(AVP_LOCAL_MP_MAX_ACTORS==16u);
+    /* R119: sixteen independent headless bots, while P1-P4 remain the
+     * only display/input seats. Settings rows 0..52 stay stable. */
+    assert(AVP_LOCAL_MP_MAX_PLAYERS==4u && AVP_LOCAL_MP_MAX_BOTS==32u);
+    assert(AVP_LOCAL_MP_MAX_ACTORS==36u);
     memset(s.bot_species,0,sizeof(s.bot_species));
     memset(s.bot_behavior,0,sizeof(s.bot_behavior));
-    s.players=4u;s.bot_count=12u;
+    s.players=4u;s.bot_count=16u;
     avp_local_mp_validate(&s);
-    assert(avp_local_mp_total_actors(&s)==16u);
-    for(unsigned bot=0;bot<12u;bot++){
+    assert(avp_local_mp_total_actors(&s)==20u);
+    for(unsigned bot=0;bot<16u;bot++){
         unsigned species_row=bot<4u?AVP_LOCAL_MP_BOT_SPECIES_ROW+bot:
-            AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+(bot-4u);
+            bot<12u?AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+(bot-4u):
+            AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+(bot-12u);
         unsigned behavior_row=bot<4u?AVP_LOCAL_MP_BOT_BEHAVIOR_ROW+bot:
-            AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+(bot-4u);
+            bot<12u?AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+(bot-4u):
+            AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+(bot-12u);
         assert(avp_local_mp_row_visible(&s,species_row));
         assert(avp_local_mp_row_visible(&s,behavior_row));
         assert(avp_local_mp_adjust(&s,species_row,+1));
@@ -229,7 +278,7 @@ int main(void)
         assert(s.species[bot+4u]==AVP_MP_MARINE); /* refreshed on validation */
     }
     avp_local_mp_validate(&s);
-    for(unsigned bot=0;bot<12u;bot++){
+    for(unsigned bot=0;bot<16u;bot++){
         assert(s.species[bot+4u]==AVP_MP_ALIEN);
         assert(s.bot_enabled[bot+4u]);
     }
@@ -240,12 +289,95 @@ int main(void)
     assert(!s.show_other_players_on_automap);
     avp_local_mp_validate(&s);
     assert(!s.show_other_players_on_automap);
+    /* Preserve old 12-bot config and enable the appended rows only when
+     * the selected number actually reaches Bot 13. */
+    s.bot_count=12u;
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW));
+    s.bot_count=13u;
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW));
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW));
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+1u));
+    /* R131: 32 independent headless bots, with 64-bit slot identity. */
+    s.bot_count=32u;
+    avp_local_mp_validate(&s);
+    assert(s.bot_count==32u && avp_local_mp_total_actors(&s)==36u);
+    assert(AVP_MP_ACTOR_BIT(35u)==UINT64_C(0x800000000));
+    assert(AVP_MP_ACTOR_VALID_MASK==(UINT64_C(1)<<36u)-1u);
+    {unsigned rows[AVP_LOCAL_MP_MENU_ROWS];
+     const unsigned n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_BOTS,rows);
+     assert(n==68u);
+     assert(rows[n-1u]==AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+15u);
+     /* R132: the menu is ordered by SETTING TYPE, not by the historical
+      * allocation order of row IDs. Do not renumber rows: existing saved
+      * bot species/AI settings and Left/Right bindings must still work. */
+     for(unsigned bot=0u;bot<32u;bot++){
+         const unsigned char_row=bot<4u?
+             AVP_LOCAL_MP_BOT_SPECIES_ROW+bot:
+             bot<12u?AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+bot-4u:
+             bot<16u?AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+bot-12u:
+             AVP_LOCAL_MP_BOT_SPECIES_17_ROW+bot-16u;
+         const unsigned behavior_row=bot<4u?
+             AVP_LOCAL_MP_BOT_BEHAVIOR_ROW+bot:
+             bot<12u?AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+bot-4u:
+             bot<16u?AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+bot-12u:
+             AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+bot-16u;
+         assert(rows[4u+bot]==char_row);
+         assert(rows[36u+bot]==behavior_row);
+         assert(avp_local_mp_menu_next_row(&s,AVP_LOCAL_MP_MENU_BOTS,
+                     char_row,+1)==(bot==31u?rows[36u]:rows[4u+bot+1u]));
+         assert(avp_local_mp_menu_next_row(&s,AVP_LOCAL_MP_MENU_BOTS,
+                     behavior_row,-1)==(bot==0u?rows[35u]:rows[36u+bot-1u]));
+     }
+     assert(avp_local_mp_menu_next_row(&s,AVP_LOCAL_MP_MENU_BOTS,
+                AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+15u,+1)==9u);
+     assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_17_ROW+15u));
+     assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+15u));
+     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_BOT_SPECIES_17_ROW+15u,+1));
+     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+15u,+1));
+     assert(s.bot_species[31u]==AVP_MP_ALIEN);
+     assert(s.bot_behavior[31u]==AVP_MP_BOT_BERSERKER);
+     avp_local_mp_validate(&s);
+     assert(s.species[35u]==AVP_MP_ALIEN && s.bot_enabled[35u]);
+    }
+    /* The same grouping must remain intact when only some bots are
+     * enabled; inactive rows are filtered, never renumbered. */
+    for(unsigned selected=0u;selected<=32u;selected++){
+        unsigned rows[AVP_LOCAL_MP_MENU_ROWS];
+        s.bot_count=selected;
+        const unsigned n=avp_local_mp_menu_rows(&s,AVP_LOCAL_MP_MENU_BOTS,rows);
+        assert(n==4u+2u*selected);
+        for(unsigned bot=0u;bot<selected;bot++){
+            const unsigned char_row=bot<4u?
+                AVP_LOCAL_MP_BOT_SPECIES_ROW+bot:
+                bot<12u?AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+bot-4u:
+                bot<16u?AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+bot-12u:
+                AVP_LOCAL_MP_BOT_SPECIES_17_ROW+bot-16u;
+            const unsigned behavior_row=bot<4u?
+                AVP_LOCAL_MP_BOT_BEHAVIOR_ROW+bot:
+                bot<12u?AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+bot-4u:
+                bot<16u?AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+bot-12u:
+                AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+bot-16u;
+            assert(rows[4u+bot]==char_row);
+            assert(rows[4u+selected+bot]==behavior_row);
+        }
+    }
+    s.bot_count=33u;
+    avp_local_mp_validate(&s);
+    assert(s.bot_count==32u);
     assert(avp_local_mp_adjust(&s,AVP_LOCAL_MP_BOT_COUNT_ROW,+1));
     assert(s.bot_count==0u);
     avp_local_mp_validate(&s);
     assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW));
     assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW));
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW));
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW));
     assert(avp_local_mp_total_actors(&s)==4u);
+    s.bot_count=12u;
+    assert(!avp_local_mp_row_visible(&s,AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW));
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW));
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW));
+    assert(avp_local_mp_row_visible(&s,AVP_LOCAL_MP_CUSTOM_NAME_ROW)==
+           (s.dm_level==AVP_MP_CUSTOM_LEVEL));
     s.players = 99; s.campaign = 10; s.species[3] = 99; s.respawn_campaign_start=77; s.bot_enabled[0]=17;s.bot_enabled[3]=99;
     avp_local_mp_validate(&s);
     assert(s.players == 4 && s.campaign == 0 && s.species[3] == 0);

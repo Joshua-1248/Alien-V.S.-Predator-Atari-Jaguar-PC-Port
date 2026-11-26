@@ -1,0 +1,32 @@
+{
+  "path": "include/mazescrn.h",
+  "base_sha256": "5ab6f77c33defe39204f012047846ef57079dfd05b7dab94e3d32610e9653e1a",
+  "output_sha256": "8c0aa055e9dfe80c06a7fd03624f0b17cd8e1f335eedec8559a154510e06a800",
+  "edits": [
+    {
+      "start": 23,
+      "end": 23,
+      "replacement": "    AVP_WC_SET_USE1,\n    AVP_WC_SET_USE2,\n"
+    },
+    {
+      "start": 78,
+      "end": 78,
+      "replacement": "#include \"../new/pc_host/integration/mazescrn_pain_declarations.inc\"\n\n"
+    },
+    {
+      "start": 81,
+      "end": 81,
+      "replacement": "#include \"../new/pc_host/integration/mazescrn_multiplayer_declarations.inc\"\n\n"
+    },
+    {
+      "start": 87,
+      "end": 87,
+      "replacement": "#include \"../new/pc_host/integration/mazescrn_cheat_declarations.inc\"\n\n"
+    },
+    {
+      "start": 94,
+      "end": 94,
+      "replacement": "\n#include \"../new/pc_host/integration/mazescrn_overlay_declarations.inc\"\n"
+    }
+  ]
+}

@@ -1,13 +1,14 @@
 #ifndef AVP_NEW_LOCAL_MP_MOVE_GUARD_H
 #define AVP_NEW_LOCAL_MP_MOVE_GUARD_H
 #include <stdint.h>
+#include "local_mp.h"
 /* Multiplayer-only validation layered over, NEVER replacing, the original
  * COLLIDE.S SafePos.  Original Jaguar movement is unmodified. */
 typedef int (*AvpMpMovementSample)(int32_t x,int32_t y,void *user);
 /* Source player half-width is 40<<9 (0x5000). Two player footprints
  * overlap iff their centres are closer than 2 * that width on BOTH axes. */
 #define AVP_MP_PEER_CLEARANCE 0xa000u
-#define AVP_MP_PEER_COUNT 16u
+#define AVP_MP_PEER_COUNT AVP_LOCAL_MP_MAX_ACTORS
 typedef struct AvpMpPeerCollisionView {
     uint32_t x[AVP_MP_PEER_COUNT],y[AVP_MP_PEER_COUNT];
     uint8_t active[AVP_MP_PEER_COUNT]; /* only living, same-world opponents */
@@ -19,12 +20,12 @@ int avp_mp_move_guard_peers(const AvpMpPeerCollisionView *view,
 /* Arrival/respawn exemptions are retained only until a pair has enough
  * independent room. World identity is a host address, not just a level ID. */
 typedef struct AvpMpPeerGrace {
-    uint16_t ignore[AVP_MP_PEER_COUNT];
+    AvpMpActorMask ignore[AVP_MP_PEER_COUNT];
 } AvpMpPeerGrace;
 void avp_mp_peer_grace_update(AvpMpPeerGrace *grace,
-    uint32_t present_mask,const uintptr_t worlds[AVP_MP_PEER_COUNT],
+    AvpMpActorMask present_mask,const uintptr_t worlds[AVP_MP_PEER_COUNT],
     const uint32_t x[AVP_MP_PEER_COUNT],const uint32_t y[AVP_MP_PEER_COUNT],
-    uint32_t arriving_mask);
+    AvpMpActorMask arriving_mask);
 int avp_mp_peer_grace_exempt(const AvpMpPeerGrace *grace,
                              unsigned p,unsigned q);
 /* Test all corners of a player-sized footprint against the actual eight-byte

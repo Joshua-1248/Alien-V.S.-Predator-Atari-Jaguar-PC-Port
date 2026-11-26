@@ -14,7 +14,6 @@
 #include "levels.h"
 #include "maze.h"
 #include "music.h"
-#include "avp_sfx_ids.h"
 #include "player.h"
 #include "avp_runtime.h"
 #include <stddef.h>
@@ -39,43 +38,20 @@
  * names are preserved in comments; a host resource layer may remap them to
  * the user's ROM-derived sound table. */
 enum {
-    DSFX_RISE2=AVP_FX_RISE2, DSFX_DDOORS=AVP_FX_DDOOR, DSFX_FLUP1=AVP_FX_FLUP1, DSFX_EL10X=AVP_FX_EL10X,
-    DSFX_AIRLOCK=AVP_FX_AIRLO, DSFX_ACCD=AVP_FX_ACCD, DSFX_ACCG=AVP_FX_ACCG
+    DSFX_RISE2=11, DSFX_DDOORS=12, DSFX_FLUP1=13, DSFX_EL10X=14,
+    DSFX_AIRLOCK=15, DSFX_ACCD=16, DSFX_ACCG=17
 };
 
 u8 fullbits[256];
 u8 acs_level;
 u8 lift_key,comp_panel;
 u16 comp_offset;
-/* Local multiplayer adapter only; does not modify original Jaguar behavior. */
-static int mp_dm_no_terminal,mp_dm_no_travel;
-void avp_doors_mp_restrict_interactions(int deathmatch,int level_travel)
-{
-    mp_dm_no_terminal=!!deathmatch;
-    mp_dm_no_travel=!!deathmatch && !level_travel;
-}
 
 static u8 *maze_data;
 static u16 maze_w,maze_h;
 static u8 l2l_area[AVP_L2L_SIZE];
 static u16 l2l_used;
 static s16 l2l_off[AVP_MAX_LEVEL];
-/* Reserve a small bookkeeping trailer INSIDE the existing Jaguar door-state
- * arena. No new BSS or quicksave fields are introduced by this host safety
- * guard, so pre-existing quickstate core sizes remain unchanged. */
-#define L2L_META_BYTES (AVP_MAX_LEVEL*2u)
-#define L2L_DOOR_BYTES (AVP_L2L_SIZE-L2L_META_BYTES)
-static unsigned l2l_span_length(unsigned level)
-{
-    unsigned offset=L2L_DOOR_BYTES+level*2u;
-    return ((unsigned)l2l_area[offset]<<8)|l2l_area[offset+1u];
-}
-static void l2l_store_length(unsigned level,unsigned length)
-{
-    unsigned offset=L2L_DOOR_BYTES+level*2u;
-    l2l_area[offset]=(u8)(length>>8);
-    l2l_area[offset+1u]=(u8)length;
-}
 
 static const AvpDoorLevelMeta *level_meta;
 static unsigned level_meta_count;
@@ -96,9 +72,6 @@ static u8 dbl_door;
 static s8 lift_dir;
 static u8 *lift_ptr;
 static u16 lift_x,lift_y;
-static unsigned host_exit_kind;
-void avp_doors_host_clear_exit_kind(void){host_exit_kind=AVP_DOORS_EXIT_NONE;}
-unsigned avp_doors_host_exit_kind(void){return host_exit_kind;}
 
 static const u8 init_wbits[16]={
     AVP_WB_SOLID,AVP_WB_SOLID,AVP_WB_SOLID,AVP_WB_SOLID,
@@ -155,7 +128,7 @@ void InitDoors(void)
         fullbits[0x80u+type*8u+n]=init_wbits[type];
     }
     fullbits[0]=0;fullbits[0x80]=0;
-    for(n=0;n<AVP_MAX_LEVEL;++n){l2l_off[n]=-1;l2l_store_length(n,0);}
+    for(n=0;n<AVP_MAX_LEVEL;++n)l2l_off[n]=-1;
     l2l_used=0;
     memset(&door1,0,sizeof door1);memset(&door2,0,sizeof door2);
     dbl_door=0;comp_panel=0;lift_key=0;lift_dir=0;lift_ptr=NULL;lift_x=lift_y=0;
@@ -176,16 +149,7 @@ void SaveDoors(void)
     unsigned i,cells,need,pos=0;u8 *out;
     if(!maze_data||cur_level<1||cur_level>AVP_MAX_LEVEL)return;
     need=door_byte_count();
-    /* Each level owns exactly the number of door bytes originally saved.
-     * If a rebound map has a different layout, writing into the old slot
-     * would overwrite the next level's saved doors. Allocate a new span;
-     * previously saved spans remain untouched until InitDoors resets them. */
-    if(l2l_off[cur_level-1]<0 || l2l_span_length((unsigned)cur_level-1u)!=need){
-        if(need>L2L_DOOR_BYTES-(unsigned)l2l_used)return;
-        l2l_off[cur_level-1]=(s16)l2l_used;
-        l2l_store_length((unsigned)cur_level-1u,need);
-        l2l_used=(u16)(l2l_used+need);
-    }
+    if(l2l_off[cur_level-1]<0){if((unsigned)l2l_used+need>AVP_L2L_SIZE)return;l2l_off[cur_level-1]=(s16)l2l_used;l2l_used=(u16)(l2l_used+need);}
     out=l2l_area+(unsigned)l2l_off[cur_level-1];cells=(unsigned)maze_w*(unsigned)maze_h;
     for(i=0;i<cells;++i){u8 *c=maze_data+i*CELL;
         if(fullbits[c[LEFT_WALL]]&AVP_WB_DOOR)out[pos++]=c[LEFT_DOOR];
@@ -213,11 +177,7 @@ static ptrdiff_t maze_move(unsigned side)
 void ResetDoors(void)
 {
     unsigned i,cells,pos=0;const u8 *in=NULL;
-    /* Never apply saved bytes to a map with a different number of doors.
-     * Otherwise ResetDoors reads into another level's stored state. */
-    if(maze_data&&cur_level>=1&&cur_level<=AVP_MAX_LEVEL&&
-       l2l_off[cur_level-1]>=0 && l2l_span_length((unsigned)cur_level-1u)==door_byte_count())
-        in=l2l_area+(unsigned)l2l_off[cur_level-1];
+    if(maze_data&&cur_level>=1&&cur_level<=AVP_MAX_LEVEL&&l2l_off[cur_level-1]>=0)in=l2l_area+(unsigned)l2l_off[cur_level-1];
     if(in){cells=(unsigned)maze_w*(unsigned)maze_h;for(i=0;i<cells;++i){u8 *c=maze_data+i*CELL;
         if(fullbits[c[LEFT_WALL]]&AVP_WB_DOOR)c[LEFT_DOOR]=in[pos++];
         if(fullbits[c[TOP_WALL]]&AVP_WB_DOOR)c[TOP_DOOR]=in[pos++];
@@ -232,29 +192,6 @@ static unsigned facing_side(void)
     /* neg.l / rol.l #3 / add.w #5 / ror.w #1 / and #3 */
     u32 d=0u-centre_angle;d=(d<<3)|(d>>29);{u16 w=(u16)d;w=(u16)(w+5u);w=(u16)((w>>1)|(w<<15));return w&3u;}
 }
-/* Host input adapter query only. DOORS.S::DoorKeys is left intact: the
- * original active-low FIRE_B + JOY_UP/JOY_DOWN decision runs unchanged.
- * Resolve precisely the same cell, facing side and panel-file-id as DoorKeys
- * so a PC analog stick is converted to Jaguar lift input only at a real lift. */
-int avp_doors_player_facing_lift(void)
-{
-    u8 *cell;
-    u8 panel,clean,file_id;
-    unsigned side;
-    if(!maze_data)return 0;
-    if(new_pos<(u32)((size_t)maze_w*maze_h*CELL))
-        cell=maze_data+new_pos;
-    else
-        cell=cell_at((unsigned)(x_pos>>16),(unsigned)(y_pos>>16));
-    if(!cell)return 0;
-    side=facing_side();
-    panel=cell[side];
-    clean=(u8)(panel&0x7fu);
-    file_id=(clean>=1u&&clean<=AVP_MAX_PANELS)?panel_list[clean-1u]:0xffu;
-    return panel_id_is(file_id,panel_ids.lift_back)||
-           panel_id_is(file_id,panel_ids.lift_side);
-}
-
 static u8 door_limit(u8 panel)
 {
     /* Source doorlims[] contains word offsets into the byte table which follows
@@ -299,7 +236,6 @@ static int airlock_exit(u16 door_off,u16 panel_off)
      * the authored record is absent; do_airlock still selects msg_pressure and
      * plays the airlock effect once all interlocks are secure. */
     (void)apply_exit(panel_off);
-    if(new_level)host_exit_kind=AVP_DOORS_EXIT_AIRLOCK;
     avp_hudmsg_queue(avp_msg_pressure);levfx_ID=DoEffect(DSFX_AIRLOCK);return 1;
 }
 static int access_ok(u8 *door,u16 panel_off)
@@ -309,10 +245,7 @@ static int access_ok(u8 *door,u16 panel_off)
     ae=find_access((u16)(door-maze_data));if(!ae)return 1;code=ae->code;
     if(code==AVP_ACC_UNUSED){avp_hudmsg_queue(avp_msg_airlocked);return 0;}
     if(code==AVP_ACC_JAMMED){avp_hudmsg_queue(avp_msg_jammed);return 0;}
-    if(code==AVP_ACC_EXIT){
-        if(mp_dm_no_travel){avp_hudmsg_queue(avp_msg_airlocked);return 0;}
-        (void)airlock_exit((u16)(door-maze_data),panel_off);return 0;
-    }
+    if(code==AVP_ACC_EXIT){(void)airlock_exit((u16)(door-maze_data),panel_off);return 0;}
     if(code==AVP_ACC_ESCAPE){if((u16)(y_pos>>16)==50u)avp_hudmsg_queue(avp_msg_escape);return 1;}
     if(code>0&&(u16)code>acs_level){avp_hudmsg_set_access_code((unsigned)code);avp_hudmsg_queue(avp_msg_access_denied);play(DSFX_ACCD);return 0;}
     if(player_type==PT_HUMAN)play(DSFX_ACCG);
@@ -325,10 +258,7 @@ static void init_dcoll(DoorState *d,unsigned side,int dx,int dy)
     static const s16 grid_other[4]={-1,-64,-1,-64};
     s16 x=(s16)(x_pos>>16),y=(s16)(y_pos>>16);unsigned idx;
     x=(s16)(x+dx+std_xy[side&3u][0]);y=(s16)(y+dy+std_xy[side&3u][1]);
-    /* A signed 16-bit room coordinate scaled by 65536 always fits s32.
-     * Unlike a signed left shift, multiplication also defines negative
-     * door-edge positions while preserving the original 16.16 word. */
-    d->xpos=(s32)x*65536;d->ypos=(s32)y*65536;d->index=(u16)(((side&1u)!=0u)?4u:0u);
+    d->xpos=(s32)x<<16;d->ypos=(s32)y<<16;d->index=(u16)(((side&1u)!=0u)?4u:0u);
     idx=(unsigned)((u16)y*64u+(u16)x);d->grid1=(u16)idx;d->grid2=(u16)(idx+grid_other[side&3u]);
 }
 static void install_door(DoorState *d,u8 *ptr,u8 panel,unsigned side,int dx,int dy)
@@ -339,28 +269,16 @@ static void install_door(DoorState *d,u8 *ptr,u8 panel,unsigned side,int dx,int 
 static int amp_grid_hit(u16 grid,unsigned axis,int second)
 {
     u16 n;if(grid>=AVP_AMP_GRID_W*AVP_AMP_GRID_H)return 0;n=collmap[grid];if(n==0||n>AVP_NUM_AMPS)return 0;
-    {
-        const AvpAmp *a=&amp_data[n-1u];
-        unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;
-        u16 frac;
-        /* Stale grid entries must not bounce a closing door. This follows
-         * the same live-owner checks already used by projectile hits. */
-        if((!a->mode&&!a->host_static) || x>=AVP_AMP_GRID_W ||
-           y>=AVP_AMP_GRID_H || y*AVP_AMP_GRID_W+x!=grid)return 0;
-        frac=(u16)((axis==0u?a->xpos:a->ypos)&0xffffu);
-        return second?(frac>=(u16)(0u-DC_SIZE)):(frac<=DC_SIZE);
-    }
+    {const AvpAmp *a=&amp_data[n-1u];u16 frac=(u16)((axis==0u?a->xpos:a->ypos)&0xffffu);return second?(frac>=(u16)(0u-DC_SIZE)):(frac<=DC_SIZE);}
 }
-/* 68000 SUB/NEG are modulo-2^32.  Interpret the wrapped sign bit
- * without a C signed subtraction/negation overflow at INT32_MIN. */
 static int door_collides(const DoorState *d)
 {
     u8 threshold;if(!d||!d->ptr)return 0;threshold=(u8)(d->lim-DC_MIN);if(*d->ptr>=threshold)return 0;
     if(d->index==0u){
-        if((u16)(y_pos>>16)==(u16)(d->ypos>>16)){u32 delta=x_pos-(u32)d->xpos;if(delta&0x80000000u)delta=0u-delta;if(delta<=DC_SIZE)return 1;}
+        if((u16)(y_pos>>16)==(u16)(d->ypos>>16)){s32 delta=(s32)x_pos-d->xpos;if(delta<0)delta=-delta;if((u32)delta<=DC_SIZE)return 1;}
         if(amp_grid_hit(d->grid1,0,0)||amp_grid_hit(d->grid2,0,1))return 1;
     }else{
-        if((u16)(x_pos>>16)==(u16)(d->xpos>>16)){u32 delta=y_pos-(u32)d->ypos;if(delta&0x80000000u)delta=0u-delta;if(delta<=DC_SIZE)return 1;}
+        if((u16)(x_pos>>16)==(u16)(d->xpos>>16)){s32 delta=(s32)y_pos-d->ypos;if(delta<0)delta=-delta;if((u32)delta<=DC_SIZE)return 1;}
         if(amp_grid_hit(d->grid1,1,0)||amp_grid_hit(d->grid2,1,1))return 1;
     }
     return 0;
@@ -374,7 +292,7 @@ static void ping_door(DoorState *d)
 
 static void lift_exit(void)
 {
-    lift_ptr=NULL;new_level=(s16)(cur_level+lift_dir);new_x=(s32)x_pos;new_y=(s32)y_pos;levfx_ID=DoEffect(DSFX_EL10X);host_exit_kind=AVP_DOORS_EXIT_LIFT;
+    lift_ptr=NULL;new_level=(s16)(cur_level+lift_dir);new_x=(s32)x_pos;new_y=(s32)y_pos;levfx_ID=DoEffect(DSFX_EL10X);
 }
 static void check_lift(void)
 {
@@ -448,41 +366,21 @@ static int do_duct(unsigned side,u16 panel_off)
     new_x=(s32)(((u32)new_x&0xffff0000u)|lx[side&3u]);new_y=(s32)(((u32)new_y&0xffff0000u)|ly[side&3u]);centre_angle=ang[side&3u];return apply_exit(panel_off);
 }
 
-static int pc_alien_use_active,pc_alien_use_down,pc_alien_use_previous;
-void avp_doors_pc_alien_use(int active,int down)
-{
-    if(!active){pc_alien_use_active=pc_alien_use_down=pc_alien_use_previous=0;return;}
-    if(!pc_alien_use_active)pc_alien_use_previous=0;
-    pc_alien_use_active=1;pc_alien_use_down=down?1:0;
-}
 void DoorKeys(void)
 {
     u32 key=lift_key?joy_cur:joy_edge;u8 *cell,*panelp;unsigned side;u8 panel,clean,file_id;
-    int do_use;
-    if(pc_alien_use_active){
-        do_use=pc_alien_use_down&&(lift_key||!pc_alien_use_previous);
-        pc_alien_use_previous=pc_alien_use_down;
-    }else do_use=pressed(key,FIRE_B);
     if(!maze_data)return;
-    /* In Jaguar mode keep retail B. In Alien PC-action mode, host Use is
-       independent of B so biting cannot operate a door or terminal. */
-    if(!do_use){if(lift_key)lift_key=0;return;}
+    /* Source uses active-low door button; held only while lift_key is active. */
+    if(!pressed(key,FIRE_B)){if(lift_key)lift_key=0;return;}
     if(new_pos<(u32)((size_t)maze_w*maze_h*CELL))cell=maze_data+new_pos;else cell=cell_at((unsigned)(x_pos>>16),(unsigned)(y_pos>>16));
     if(!cell)return;
     side=facing_side();panelp=cell+side;panel=*panelp;
     if(!panel){if(player_type!=PT_ALIEN)play(DSFX_FLUP1);lift_key=0;return;}
     clean=(u8)(panel&0x7fu);file_id=(clean>=1u&&clean<=AVP_MAX_PANELS)?panel_list[clean-1u]:0xffu;
-    if(panel_id_is(file_id,panel_ids.lift_back)||panel_id_is(file_id,panel_ids.lift_side)){
-        if(mp_dm_no_travel){avp_hudmsg_queue(avp_msg_jlift);lift_key=0;return;}
-        (void)do_lifts(cell,side);return;
-    }
+    if(panel_id_is(file_id,panel_ids.lift_back)||panel_id_is(file_id,panel_ids.lift_side)){(void)do_lifts(cell,side);return;}
     if(lift_key){if(player_type!=PT_ALIEN)play(DSFX_FLUP1);lift_key=0;return;}
-    if(player_type!=PT_PREDATOR&&(panel_id_is(file_id,panel_ids.wall2)||panel_id_is(file_id,panel_ids.airduct1))){
-        if(!mp_dm_no_travel)(void)do_duct(side,(u16)(panelp-maze_data));
-        lift_key=0;return;
-    }
+    if(player_type!=PT_PREDATOR&&(panel_id_is(file_id,panel_ids.wall2)||panel_id_is(file_id,panel_ids.airduct1))){(void)do_duct(side,(u16)(panelp-maze_data));lift_key=0;return;}
     if(player_type==PT_HUMAN&&(panel_id_is(file_id,panel_ids.computer1)||panel_id_is(file_id,panel_ids.computer2)||panel_id_is(file_id,panel_ids.medical_computer))){
-        if(mp_dm_no_terminal){lift_key=0;return;}
         comp_panel=file_id;comp_offset=(u16)(panelp-maze_data);lift_key=0;return;
     }
     if(!start_normal_or_double(cell,panelp,panel,side,0)&&player_type!=PT_ALIEN)play(DSFX_FLUP1);
@@ -497,9 +395,3 @@ void MoveDoors(void)
     if(door2.ptr){u8 *p=door2.ptr;u8 v=(u8)(*p+(u8)door2.dir);if(v==0||v==door2.lim){door2.ptr=NULL;dbl_door=0;}*p=v;}
     check_lift();
 }
-
-/* Optional PC-only state bridge: all implementation stays in new/.
- * No effect on the original Jaguar/single-player build when compiled out. */
-#ifdef AVP_LOCAL_MULTIPLAYER_DOOR_BRIDGE
-#include "../../new/multiplayer/local_mp_doors_native.inc"
-#endif

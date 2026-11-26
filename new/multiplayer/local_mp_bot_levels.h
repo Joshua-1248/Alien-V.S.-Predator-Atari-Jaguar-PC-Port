@@ -18,12 +18,21 @@ typedef struct AvpMpBotLevelPlan {
     enum AvpMpBotTransitionKind kind;
     unsigned landing_x,landing_y;
     unsigned hops;
+    unsigned goal_level; /* destination actually reached, including any-surface search */
 } AvpMpBotLevelPlan;
 
 /* Finds the FIRST actual source-authored vent, airlock or lift to operate.
  * Can leave and re-enter the SAME level via ducts to bypass jammed doors.
  * goal_known=0 seeks ANY reachable portion of the goal level (campaign hop).
  * It never modifies world state and cannot teleport or grant access. */
+/* Deathmatch exploration may request goal_level=0, goal_known=0 to find
+ * an authored route OUT of a vent into any non-vent level. An optional
+ * failed first portal is excluded only for bot route-recovery planning. */
+int avp_mp_bot_plan_levels_avoiding(
+    const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
+    unsigned species,unsigned current,unsigned sx,unsigned sy,
+    unsigned goal_level,unsigned gx,unsigned gy,int goal_known,
+    const AvpMpBotLevelPlan *avoid_first,AvpMpBotLevelPlan *out);
 int avp_mp_bot_plan_levels(const AvpMpBotLevelLayout layouts[AVP_MAX_LEVEL],
     unsigned species,unsigned current,unsigned sx,unsigned sy,
     unsigned goal_level,unsigned gx,unsigned gy,int goal_known,

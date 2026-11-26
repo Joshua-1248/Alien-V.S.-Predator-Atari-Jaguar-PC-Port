@@ -105,7 +105,35 @@ int main(void)
             ++flames;
     assert(flames==4u);
     assert(discflag!=0);
+    /* RE39 R179: the real Marine launch state must use the same 68000 ADD.L
+     * wrap as player projectile spawns. Force the source near signed-long
+     * limits after selecting the normal authored attack animation, avoiding
+     * unrealistic combat-range gates during the arithmetic boundary probe.
+     * The test links production amp.c, not an imitation launch routine. */
+    for(unsigned edge=0;edge<2u;edge++){
+        s32 sx=edge?(s32)(INT32_MIN+30):(s32)(INT32_MAX-30);
+        s32 target=edge?INT32_MIN:INT32_MAX;
+        a=new_marine(0x00140000,0x00180000);
+        x_pos=0x00180000u;y_pos=0x00180000u;
+        sampled_beam=3;
+        chase_player(a);
+        assert(a->animseq==AS_FIGHT2 && a->mode!=chase_player);
+        a->xpos=sx;a->ypos=sx;
+        x_pos=(u32)target;y_pos=(u32)target;
+        a->mode(a); /* authored flame damage frame: allocates four AMPs */
+        unsigned count=0;
+        for(unsigned i=0;i<AVP_NUM_AMPS;i++){
+            AvpAmp *p=&level1amps[i];
+            if(p->creature!=AC_FIRE || p->mode!=pre_flame_on)continue;
+            assert((u32)p->xpos==(u32)sx+(u32)p->xvector);
+            assert((u32)p->ypos==(u32)sx+(u32)p->yvector);
+            if(!edge){assert(p->xvector>30);assert((u32)p->xpos>=(u32)INT32_MIN);}
+            else{assert(p->xvector< -30);assert((u32)p->xpos<=(u32)INT32_MAX);}
+            count++;
+        }
+        assert(count==4u);
+    }
     avp_amp_set_beam_weapon_sample(NULL);
-    puts("Jaguar enemy Marine search, cloak detection, pulse/flame attack and reacquisition PASS");
+    puts("R179 Jaguar Marine search, cloaking, ranged flame and ADD.L wrap PASS");
     return 0;
 }

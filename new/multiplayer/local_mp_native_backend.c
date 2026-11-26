@@ -53,24 +53,24 @@ static int enter_level(void *u,void *w,unsigned player,void *a)
     return h->join_level(h->user,(AvpMpNativeWorld *)w,player,
                          (AvpMpActorNativeState *)a);
 }
-static int enter_level_group(void *u,void *w,unsigned mask,
+static int enter_level_group(void *u,void *w,AvpMpActorMask mask,
                              void *const players[AVP_LOCAL_MP_MAX_ACTORS])
 {
     AvpMpNativeBackendHost *h=(AvpMpNativeBackendHost *)u;
     AvpMpActorNativeState staged[AVP_LOCAL_MP_MAX_ACTORS];
     AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS]={0};
     unsigned p;
-    if(!h||!h->join_group||!w||!mask||(mask&~((1u<<AVP_LOCAL_MP_MAX_ACTORS)-1u))||!players)return 0;
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)){
+    if(!h||!h->join_group||!w||!mask||(mask&~(AVP_MP_ACTOR_VALID_MASK))||!players)return 0;
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         if(!players[p])return 0;
         staged[p]=*(const AvpMpActorNativeState *)players[p];
         actors[p]=&staged[p];
     }
     if(!h->join_group(h->user,(AvpMpNativeWorld *)w,mask,actors))return 0;
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)){
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))){
         if(!avp_mp_actor_native_valid(&staged[p]))return 0;
     }
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p))
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p)))
         *(AvpMpActorNativeState *)players[p]=staged[p];
     return 1;
 }
@@ -84,7 +84,8 @@ static void exit_level(void *u,void *w,unsigned player,void *a)
 typedef struct AvpMpBackendTick {
     AvpMpNativeBackendHost *host;
     AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS];
-    unsigned mask;
+    AvpMpActorMask mask;
+    AvpMpNativeWorld *world;
 } AvpMpBackendTick;
 static int actor_step(void *u,unsigned p)
 {
@@ -98,13 +99,26 @@ static int world_step(void *u)
      * snapshot: that player's movement callback intentionally does not run. */
     if(t->host->snapshot_world_presentation &&
        !t->host->snapshot_world_presentation(t->host->user,t->mask))return 0;
-    if(t->host->choose_amp_target &&
-       !avp_mp_amp_step_targets(t->actors,t->mask,
-                                 t->host->choose_amp_target,t->host->user))
-        return 0;
+    if(t->host->choose_amp_target){
+        AvpMpActorMask active_mask=t->mask;
+        if(t->host->actor_world_present)
+            for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)
+                if((active_mask&AVP_MP_ACTOR_BIT(p)) &&
+                   !t->host->actor_world_present(t->host->user,p))
+                    active_mask&=~AVP_MP_ACTOR_BIT(p);
+        /* No living avatar physically occupies this world while all its
+         * passengers fade through a duct; continue the normal world tick
+         * without choosing an artificial victim for native AMP modes. */
+        if(active_mask &&
+           !avp_mp_amp_step_targets_with_health(t->actors,active_mask,
+                t->host->choose_amp_target,t->host->user,
+                t->host->on_acid_contact ? t->world->acid_contact_masks : NULL,
+                t->host->on_acid_contact,t->host->on_enemy_sound_scope,t->host->on_actor_damage))
+            return 0;
+    }
     if(!t->host->advance_level(t->host->user))return 0;
     if(t->host->advance_actor_post_world){
-        for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(t->mask&(1u<<p)){
+        for(unsigned p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(t->mask&(AVP_MP_ACTOR_BIT(p))){
             AvpMpActorNativeScope scope={0};
             int stepped,restored;
             if(!avp_mp_actor_scope_enter(&scope,t->actors[p]))return 0;
@@ -115,7 +129,7 @@ static int world_step(void *u)
     }
     return 1;
 }
-static int tick_level(void *u,void *level,unsigned mask,
+static int tick_level(void *u,void *level,AvpMpActorMask mask,
                       void *const players[AVP_LOCAL_MP_MAX_ACTORS],
                       const AvpMpPlayerCommand commands[AVP_LOCAL_MP_MAX_ACTORS],
                       uint64_t tick)
@@ -134,9 +148,9 @@ static int tick_level(void *u,void *level,unsigned mask,
     AvpMpBackendTick native_tick={0};
     (void)tick;
     if(!avp_mp_native_backend_valid(h)||!level||!players||!commands||
-       !mask||(mask&~((1u<<AVP_LOCAL_MP_MAX_ACTORS)-1u)))return 0;
+       !mask||(mask&~(AVP_MP_ACTOR_VALID_MASK)))return 0;
     /* Validate ALL input samples before publishing any player mutation. */
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)) {
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))) {
         if(!players[p])return 0;
         staged[p]=*(const AvpMpActorNativeState *)players[p];
         if(p==0) {
@@ -144,18 +158,19 @@ static int tick_level(void *u,void *level,unsigned mask,
         }else if(!avp_mp_native_input_prepare(&staged[p],&commands[p],
                                                p<AVP_LOCAL_MP_MAX_PLAYERS?&h->profiles->player[p]:&headless))return 0;
     }
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(1u<<p)) {
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)if(mask&(AVP_MP_ACTOR_BIT(p))) {
         *(AvpMpActorNativeState *)players[p]=staged[p];
         a[p]=(AvpMpActorNativeState *)players[p];
     }
     native_tick.host=h;
+    native_tick.world=(AvpMpNativeWorld *)level;
     native_tick.mask=mask;
     for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)native_tick.actors[p]=a[p];
     return avp_mp_native_run_world((AvpMpNativeWorld *)level,a,mask,
                                    actor_step,world_step,&native_tick);
 }
-static int render_actor(void *u,void *level,unsigned player,void *actor,
-                        AvpLocalMpSourceFrame *out)
+static int render_scoped_actor(void *u,void *level,unsigned subject,void *actor,
+                               unsigned viewer,AvpLocalMpSourceFrame *out)
 {
     AvpMpNativeBackendHost *h=(AvpMpNativeBackendHost *)u;
     AvpMpNativeScope scope={0};
@@ -166,12 +181,23 @@ static int render_actor(void *u,void *level,unsigned player,void *actor,
         (void)avp_mp_native_world_leave(&scope,(AvpMpNativeWorld *)level);
         return 0;
     }
-    drawn=h->draw_actor(h->user,(AvpMpNativeWorld *)level,player,
-                        (AvpMpActorNativeState *)actor,out);
+    if(subject==viewer)
+        drawn=h->draw_actor(h->user,(AvpMpNativeWorld *)level,subject,
+                            (AvpMpActorNativeState *)actor,out);
+    else
+        drawn=h->draw_spy_actor && h->draw_spy_actor(h->user,
+                  (AvpMpNativeWorld *)level,subject,viewer,
+                  (AvpMpActorNativeState *)actor,out);
     actor_ok=avp_mp_native_actor_leave(&scope,(AvpMpActorNativeState *)actor);
     level_ok=avp_mp_native_world_leave(&scope,(AvpMpNativeWorld *)level);
     return drawn && actor_ok && level_ok && out->pixels;
 }
+static int render_actor(void *u,void *level,unsigned player,void *actor,
+                        AvpLocalMpSourceFrame *out)
+{return render_scoped_actor(u,level,player,actor,player,out);}
+static int render_spy_actor(void *u,void *level,unsigned subject,void *actor,
+                            unsigned viewer,AvpLocalMpSourceFrame *out)
+{return render_scoped_actor(u,level,subject,actor,viewer,out);}
 AvpMpWorldBackend avp_mp_native_backend_ops(void)
 {
     AvpMpWorldBackend ops;
@@ -185,5 +211,6 @@ AvpMpWorldBackend avp_mp_native_backend_ops(void)
     ops.exit_world=exit_level;
     ops.tick_world=tick_level;
     ops.render_player=render_actor;
+    ops.render_spy_player=render_spy_actor;
     return ops;
 }

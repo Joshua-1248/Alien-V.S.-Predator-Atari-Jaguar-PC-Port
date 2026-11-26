@@ -174,8 +174,15 @@ int main(int argc,char **argv)
             CHECK(avp_pc_prototype_textures_apply_search(&swap,state,NULL,exe_path,
                   "/missing/current_working_directory",1,selected,sizeof(selected))==1u,
                   "source build parent pack fallback");
-            CHECK(strcmp(selected,parent_pack)==0&&one->rgb[0]==66,
-                  "source build parent pack selected incorrectly");
+            /* Search retains the literal /../ path segment; compare
+             * the exact selected lexical path rather than falsely
+             * requiring canonical spelling for the same directory. */
+            { char selected_parent[1024];
+              CHECK(snprintf(selected_parent,sizeof(selected_parent),
+                    "%s/../prototype_texture_restoration",exe_dir)
+                    <(int)sizeof(selected_parent),"selected parent path");
+              CHECK(strcmp(selected,selected_parent)==0&&one->rgb[0]==66,
+                    "source build parent pack selected incorrectly"); }
             CHECK(avp_pc_prototype_textures_apply_search(&swap,state,NULL,exe_path,
                   parent_pack,0,selected,sizeof(selected))==0u&&one->rgb[0]==17,
                   "parent pack disable restore");

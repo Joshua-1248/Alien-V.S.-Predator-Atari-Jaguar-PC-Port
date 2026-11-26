@@ -55,7 +55,13 @@ int main(void)
     CHECK((avp_mp_terminal_actions_pad(1u<<AVP_MP_TERMINAL_EXIT)&(1u<<FIRE_C))==0u);
     CHECK((avp_mp_terminal_actions_pad(1u<<AVP_MP_OPTION)&(1u<<FIRE_C))==0u);
     CHECK((avp_mp_terminal_actions_pad(1u<<AVP_MP_TERMINAL_EXIT)&(1u<<FIRE_A))!=0u);
-    CHECK(!avp_mp_input_parse_setting(&c,"local_multiplayer.input.p4.key_25","5"));
+    CHECK(AVP_MP_SPY_NEXT_PLAYER==25u && AVP_MP_SPY_PREVIOUS_PLAYER==26u);
+    CHECK(!strcmp(avp_mp_input_action_name(AVP_MP_SPY_NEXT_PLAYER),"Spy Next Player"));
+    CHECK(!strcmp(avp_mp_input_action_name(AVP_MP_SPY_PREVIOUS_PLAYER),"Spy Previous Player"));
+    CHECK(avp_mp_input_parse_setting(&c,"local_multiplayer.input.p4.key_25","5"));
+    CHECK(avp_mp_input_parse_setting(&c,"local_multiplayer.input.p1.key_26","0xff54"));
+    CHECK(avp_mp_input_parse_setting(&c,"local_multiplayer.input.p1.gamepad_button_25","9"));
+    CHECK(!avp_mp_input_parse_setting(&c,"local_multiplayer.input.p4.key_27","5"));
     CHECK(!avp_mp_input_parse_setting(&c,"local_multiplayer.input.p3.mouse_button_2","999"));
     CHECK(!avp_mp_input_parse_setting(&c,"local_multiplayer.input.p3.mouse_device","/dev/input/by-id/mouse-one-event-mouse"));
     CHECK(avp_mp_input_parse_setting(&c,"local_multiplayer.input.p3.gamepad_button_2","7"));

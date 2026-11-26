@@ -7,7 +7,7 @@
 /* PC-only, isolated profile data. Player 1 continues to use the original
  * PC settings and input implementation; profiles 1..3 are Players 2..4. */
 #define AVP_MP_INPUT_PLAYERS 4u
-#define AVP_MP_INPUT_ACTIONS 25u
+#define AVP_MP_INPUT_ACTIONS 27u
 #define AVP_MP_DEVICE_PATH 192u
 #define AVP_MP_MOUSE_BUTTONS 16u
 
@@ -21,7 +21,8 @@ enum AvpMpAction {
     AVP_MP_QUICK_TURN, AVP_MP_PAUSE, AVP_MP_OPTION,
     AVP_MP_TERMINAL_NEXT, AVP_MP_TERMINAL_PREVIOUS,
     AVP_MP_MAP_ZOOM_IN, AVP_MP_MAP_ZOOM_OUT,
-    AVP_MP_TERMINAL_EXIT /* append: preserve every existing settings/action ID */
+    AVP_MP_TERMINAL_EXIT, /* append: preserve existing setting/action IDs */
+    AVP_MP_SPY_NEXT_PLAYER, AVP_MP_SPY_PREVIOUS_PLAYER
 };
 
 typedef struct AvpMpInputProfile {
@@ -46,7 +47,10 @@ typedef struct AvpMpInputProfile {
     int cheat_no_facehug,cheat_no_enemy_attack; /* per-target AMP restrictions */
     int audio_motion_tracker,audio_player_pain,audio_facehug_pain,audio_facehug_shake;
     int remember_automap; /* PC enhancement, isolated for each participant */
+    int crosshair_enabled,crosshair_weapon_sway; /* R193 per-player crosshair */
+    int low_health_energy_flash; /* R305; defaults ON (Jaguar). */
     int cheat_reveal_map; /* Per-player full geometry reveal, all visited levels */
+    int cheat_show_enemies_on_map; /* Host-only per-view HUD labels, off by default. */
 } AvpMpInputProfile;
 
 typedef struct AvpMpInputConfig { AvpMpInputProfile player[AVP_MP_INPUT_PLAYERS]; } AvpMpInputConfig;

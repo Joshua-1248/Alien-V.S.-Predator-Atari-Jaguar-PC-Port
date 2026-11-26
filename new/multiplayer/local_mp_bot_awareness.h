@@ -92,6 +92,32 @@ static inline int avp_bot_in_view(uint32_t heading,uint32_t x,uint32_t y,
     if(distance>=((double)AVP_BOT_SIGHT_TILES*65536.0))return 0;
     return (dx*cos(angle)-dy*sin(angle))>=distance*AVP_BOT_FOV_COS;
 }
+/* R298: Local close-range awareness complements the normal 140-degree
+ * forward view; it does not extend the original eight-cell optical range.
+ * An active Facehugger approaching from behind is an immediate audible/
+ * peripheral threat four tiles away; other active melee threats are sensed
+ * within three tiles and hostile armed actors within two. The HOST must
+ * still check original LineOfSight before granting the contact: neither
+ * walls nor closed doors reveal enemies. These are bot-only observations,
+ * never extra vision for the Jaguar player or a change to source AI.
+ * A contact can be turned toward, but original weapon aim/FireDistance and
+ * the bot's aim gate still prohibit shooting behind the player's facing. */
+static inline int avp_bot_nearby_peripheral(uint32_t eye_x,uint32_t eye_y,
+    uint32_t x,uint32_t y,unsigned radius_tiles)
+{
+    const int64_t dx=(int64_t)x-(int64_t)eye_x;
+    const int64_t dy=(int64_t)y-(int64_t)eye_y;
+    const uint64_t reach=(uint64_t)radius_tiles*65536u;
+    return radius_tiles && (uint64_t)(dx*dx+dy*dy)<=reach*reach;
+}
+static inline int avp_bot_in_view_or_nearby(uint32_t heading,
+    uint32_t eye_x,uint32_t eye_y,uint32_t x,uint32_t y,
+    unsigned peripheral_radius_tiles)
+{
+    return avp_bot_nearby_peripheral(eye_x,eye_y,x,y,
+               peripheral_radius_tiles) ||
+           avp_bot_in_view(heading,eye_x,eye_y,x,y);
+}
 /* Serial is the actual original per-world AMP slot generation. For player
  * contacts it is the target's death count + 1: respawns invalidate old intel.
  * Sight and radar flags represent THIS tick ONLY. Cached positions never

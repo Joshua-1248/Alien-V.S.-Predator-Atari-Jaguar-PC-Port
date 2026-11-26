@@ -1,0 +1,102 @@
+{
+  "path": "src/game/collectables.c",
+  "base_sha256": "b034bbf118be76e2583e05c50cdca8424d38cc7fe835cc19fb31d1867ec934aa",
+  "output_sha256": "12213f75b30d021e4214ad40944e4fb299186d4b90dc4ced39c356171b248beb",
+  "edits": [
+    {
+      "start": 12,
+      "end": 12,
+      "replacement": "#include \"avp_runtime.h\"\n#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 24,
+      "end": 24,
+      "replacement": "#include \"../../new/multiplayer/collectables_ownership.inc\"\n"
+    },
+    {
+      "start": 26,
+      "end": 29,
+      "replacement": "    CSFX_SECURITY=AVP_FX_SECUR, CSFX_WEAPON_SHOT=AVP_FX_WHATO,\n    CSFX_WEAPON_PULSE=AVP_FX_BUGSO, CSFX_WEAPON_FLAME=AVP_FX_ILLTE,\n    CSFX_WEAPON_SMART=AVP_FX_ROKNR, CSFX_PICKUP=AVP_FX_DIST1,\n    CSFX_MTRACK=AVP_FX_RUNBU, CSFX_PRED_ENERGY=AVP_FX_CHATC\n"
+    },
+    {
+      "start": 46,
+      "end": 46,
+      "replacement": "static const BodyLoot *body_loot_for_level(unsigned level)\n{\n    static const BodyLoot *const table[AVP_MAX_LEVEL]={l1_bodies,l2_bodies,l3_bodies,l4_bodies,l5_bodies,no_bodies,no_bodies,no_bodies,no_bodies,no_bodies,no_bodies,no_bodies,no_bodies,l14_bodies,l15_bodies};\n    return level>=1u && level<=AVP_MAX_LEVEL ? table[level-1u] : no_bodies;\n}\n"
+    },
+    {
+      "start": 48,
+      "end": 50,
+      "replacement": "    cur_bodies=body_loot_for_level((unsigned)cur_level);\n"
+    },
+    {
+      "start": 71,
+      "end": 71,
+      "replacement": "#include \"../../new/multiplayer/collectables_bot_peek.inc\"\n\n/* MAZE/PLAYER.S uses the authored per-level body table to resolve loot\n * against a corpse AMP.  The host must also recover such a corpse when its\n * grid entry has not been written yet (or was overwritten by another AMP),\n * without creating a separate pickup or losing the original collected bit.\n * This applies to weapons/ammo/medkits as well as access cards. */\nstatic u16 authored_body_at(unsigned x,unsigned y)\n{\n    const BodyLoot *b;\n    unsigned i;\n    for(b=cur_bodies;b->x>=0;++b){\n        if((unsigned)b->x!=x||(unsigned)b->y!=y)continue;\n        for(i=0;i<AVP_NUM_AMPS;++i){\n            const AvpAmp *a=&amp_data[i];\n            if(a->astype!=18&&a->astype!=38&&a->astype!=39&&a->astype!=40)continue;\n            if(((u32)a->xpos>>16)==x&&((u32)a->ypos>>16)==y&&\n               !(a->flags&(1u<<AMP_COLLECT)))return (u16)(i+1u);\n        }\n    }\n    return 0;\n}\n\n#include \"../../new/multiplayer/collectables_coop_card_body.inc\"\n\n"
+    },
+    {
+      "start": 74,
+      "end": 75,
+      "replacement": "    u16 no,grid_no,coop_card_no=0;AvpAmp *a;s16 type,amount;int body=0;\n#include \"../../new/multiplayer/collectables_world_table.inc\"\n\n"
+    },
+    {
+      "start": 78,
+      "end": 79,
+      "replacement": "    grid_no=no;\n#include \"../../new/multiplayer/collectables_coop_card_select.inc\"\n\n    if(!no||no>AVP_NUM_AMPS ||\n       /* objmap can outlive a moved/reused AMP slot.  A stale owner\n        * must never collect a pickup from a different square.  Keep the\n        * authored corpse fallback for legitimate missing grid entries. */\n       ((u32)amp_data[no-1u].xpos>>16)!=x ||\n       ((u32)amp_data[no-1u].ypos>>16)!=y ||\n       !collect_info_for(amp_data[no-1u].astype,&type,&amount) ||\n       (type==-1 && (amp_data[no-1u].flags&(1u<<AMP_COLLECT)) &&\n        no!=coop_card_no) ||\n       /* Collecting a normal pickup marks its AMP inactive.  If the old\n        * objmap number is restored later, its previous item must not be\n        * awarded a second time from a dead/recycled slot.  Corpse fallback\n        * is handled independently below. */\n       (type!=-1 && !amp_data[no-1u].mode && !amp_data[no-1u].host_static)){\n        /* Preserve the live object-grid's normal priority.  Only fall back\n           to an actual, unlooted authored body if its entry is unavailable. */\n        no=authored_body_at(x,y);\n        if(!no){\n            /* The obsolete owner occupies no live item at this square.\n             * Clearing this entry prevents it from shadowing later items. */\n            objmap[off]=objmap[off+1u]=0;\n            return;\n        }\n    }\n"
+    },
+    {
+      "start": 80,
+      "end": 81,
+      "replacement": "    if(!collect_info_for(a->astype,&type,&amount))return;\n"
+    },
+    {
+      "start": 84,
+      "end": 85,
+      "replacement": "        if((a->flags&(1u<<AMP_COLLECT)) && no!=coop_card_no){\n            if(grid_no==no)objmap[off]=objmap[off+1]=0;\n            return;\n        }\n"
+    },
+    {
+      "start": 90,
+      "end": 91,
+      "replacement": "            else if(mp_body_loot){type=COLL_NONE;amount=0;}\n            else {if(grid_no==no)objmap[off]=objmap[off+1]=0;return;}\n"
+    },
+    {
+      "start": 93,
+      "end": 93,
+      "replacement": "#include \"../../new/multiplayer/collectables_dm_loot.inc\"\n\n#include \"../../new/multiplayer/collectables_coop_item_claim.inc\"\n\n#include \"../../new/multiplayer/collectables_coop_keycard_claim.inc\"\n\n"
+    },
+    {
+      "start": 94,
+      "end": 96,
+      "replacement": "    if(body)a->flags|=(1u<<AMP_COLLECT);\n    else {\n        /* A collected pickup is a free AMP, not an unchanging display prop.\n         * Do not save its old host_static state on the next level exit. */\n        a->mode=NULL;\n        a->host_static=0;\n    }\n    /* When the original slot is held by another AMP, an authored corpse\n       fallback must not erase that unrelated grid entry. */\n    if(grid_no==no)objmap[off]=objmap[off+1]=0;\n    /* PLAYER.S .killamp only does CLR.L amp_mode: the collected pickup's\n     * slot is NOT returned to l1_amp_free (AMP.S calls amp_release only for\n     * specific events).  Releasing it here let the next amp_req reuse the\n     * slot, changing later AMP numbering and UpdateAMPs order vs retail. */\n"
+    },
+    {
+      "start": 101,
+      "end": 102,
+      "replacement": "{\n    if (!n) return;\n    if (sfx_fn) sfx_fn(n);\n    else {\n        const AvpRuntimeOps *o=avp_runtime_ops();\n        if (o->play_sfx) o->play_sfx(o->user,n);\n    }\n}\n"
+    },
+    {
+      "start": 113,
+      "end": 113,
+      "replacement": "    /* On Jaguar the Predator's medpak charge is also weapon slot 6's ammo\n     * word, used by the HUD and EEPROM save.  The C reconstruction keeps\n     * the two names in separate objects, so mirror the retail alias. */\n    if (player_type==PT_PREDATOR) ammo_info[5].cur=(u16)medpak;\n"
+    },
+    {
+      "start": 128,
+      "end": 128,
+      "replacement": "    if(player_type==PT_PREDATOR&&weapon==6u)medpak=(s16)a->cur;\n"
+    },
+    {
+      "start": 136,
+      "end": 136,
+      "replacement": "    int newly_given;\n"
+    },
+    {
+      "start": 137,
+      "end": 138,
+      "replacement": "    newly_given=!(cur_weps&(1u<<weapon));\n    if (newly_given) {\n"
+    },
+    {
+      "start": 143,
+      "end": 146,
+      "replacement": "    /* PLAYER.S give_wep sets a0 to the weapon notice before falling through\n     * into give_ammo.  The fall-through writes that same notice again.  A\n     * separately collected ammo item instead writes its own new_message. */\n    (void)avp_give_ammo(weapon,initial_ammo,\n                       newly_given?weapon_notice:ammo_notice,ammo_sfx);\n"
+    }
+  ]
+}

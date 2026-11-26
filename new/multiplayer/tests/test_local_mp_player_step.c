@@ -119,7 +119,8 @@ int main(void)
         AvpMpPlayerEngineState stock, quick, slow, original_host;
         CHECK(avp_mp_player_native_restore(&host));
         player_type=PT_HUMAN;hugkill=0;key_lock=0;use_cocoon=0;
-        joy_cur=UINT32_MAX & ~(1u<<FIRE_C) & ~(1u<<JOY_RIGHT);
+        /* FIRE_C held on Marine means strafing, not turning (R258). */
+        joy_cur=UINT32_MAX & ~(1u<<JOY_RIGHT);
         joy_edge=joy_cur;
         InitMove();ResetMove();
         cos_ang=32767;sin_ang=0;

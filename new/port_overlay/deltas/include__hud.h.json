@@ -1,0 +1,27 @@
+{
+  "path": "include/hud.h",
+  "base_sha256": "253dd9f4d1286111b342fefcb027f992254ac41b0acfa08bf381ba85ed42e09b",
+  "output_sha256": "fd17686bc5c42f9a7df3450ebfaf8663094947dc125c1a98526374a5af355991",
+  "edits": [
+    {
+      "start": 28,
+      "end": 28,
+      "replacement": "#include \"../new/pc_host/integration/hud_coop_declarations.inc\"\n\n"
+    },
+    {
+      "start": 56,
+      "end": 56,
+      "replacement": "unsigned avp_hud_tracker_frame(void);\nu32 avp_hud_tracker_nearest(void);\n"
+    },
+    {
+      "start": 57,
+      "end": 57,
+      "replacement": "void avp_hud_pred_meter_span(unsigned row,s16 *from,s16 *to);\n"
+    },
+    {
+      "start": 58,
+      "end": 59,
+      "replacement": "void InitNrg(void); void UpdtNrg(void);\n/* PC-only per-active-actor preference. Default is original Jaguar flashing. */\nvoid avp_hud_set_low_health_energy_flash(int enabled);\n/* Last CPU-selected energy frame and effective width, including low-health blink. */\nunsigned avp_hud_energy_frame(void);\nunsigned avp_hud_energy_pixels(void); void extract_cocoon(u32 packed,AvpCocoonState *out); void DrawCocoon(void);\n"
+    }
+  ]
+}

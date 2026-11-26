@@ -8,7 +8,7 @@ operation and does not alter physical x_pos/y_pos.
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 maze=(root/'src/game/maze.c').read_text()
-host=(root/'src/platform/pc/pc_main.c').read_text()
+host=(root/'new/pc_host/src/pc_main.c').read_text()
 for name,source,add,sub in (
     ('MAZE.S',maze,'view_cos','view_sin'),
     ('PC host',host,'cos_ang','sin_ang'),

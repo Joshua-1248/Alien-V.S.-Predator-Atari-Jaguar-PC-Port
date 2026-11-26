@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FAIL %s:%d %s\n",__FILE__,__LINE__,#x);return 1;}}while(0)
 /* Globals in unlinked original hardware, levels, and MAZE.S. */
@@ -32,6 +33,13 @@ AvpAmmoInfo ammo_info[6];
  * animation transitions. No fake physics or artificial AI is executed. */
 const AvpRuntimeOps *avp_runtime_ops(void){return NULL;}
 s32 cos_d0(u16 a){(void)a;return 0;}
+/* Under ASan/UBSan, unused AMP combat/audio sections can survive the
+ * linker's section collection. They must never execute in this allocator/
+ * actor snapshot test; abort rather than silently simulate audio or AI. */
+s32 sin_d0(u16 a){(void)a;abort();}
+void StartAla(unsigned id){(void)id;abort();}
+void KillAlar(void){abort();}
+u32 DoEffect(unsigned id){(void)id;abort();}
 u32 avp_music_placed_voice(unsigned a,unsigned b){(void)a;(void)b;return 0;}
 u32 TFX(unsigned a){(void)a;return 0;}
 void StopLoop(u32 a){(void)a;}
@@ -117,14 +125,14 @@ int main(void)
     }
     CHECK(avp_mp_actor_native_restore(&host_actor));
     avp_mp_input_defaults(&profiles);
-    /* P2 Alien: Option+left is source-defined turning, with independent
-     * right sidestep through the EXISTING host movement bridge. */
+    /* P2 Alien: unmodified LEFT turns; simultaneous RIGHT sidestep goes
+     * through the independent host movement bridge (not OPTION). */
     cmd.actions=(1u<<AVP_MP_TURN_LEFT)|(1u<<AVP_MP_STRAFE_RIGHT)|
                 (1u<<AVP_MP_ALIEN_TAIL)|(1u<<AVP_MP_FORWARD);
     cmd.mouse_dx=120;
     actors[1].player.joy_cur=UINT32_MAX;
     CHECK(avp_mp_native_input_prepare(&actors[1],&cmd,&profiles.player[1]));
-    CHECK(!(actors[1].player.joy_cur&(1u<<OPTION)) &&
+    CHECK((actors[1].player.joy_cur&(1u<<OPTION)) &&
           !(actors[1].player.joy_cur&(1u<<JOY_LEFT)) &&
           !(actors[1].player.joy_cur&(1u<<JOY_UP)) &&
           !(actors[1].player.joy_cur&(1u<<FIRE_C)));
@@ -136,17 +144,62 @@ int main(void)
     cmd.actions=0;cmd.mouse_dx=0;
     CHECK(avp_mp_native_input_prepare(&actors[1],&cmd,&profiles.player[1]));
     CHECK((actors[1].player.joy_cur&(1u<<JOY_UP))!=0);
-    /* Nonalien turning uses FIRE_C instead of OPTION; no Predator cloak. */
+    /* Predator turns without the FIRE_C sidestep modifier; no cloak. */
     actors[2].player.joy_cur=UINT32_MAX;
     cmd.actions=(1u<<AVP_MP_TURN_RIGHT)|(1u<<AVP_MP_PRED_VISION)|
                 (1u<<AVP_MP_PRED_MEDKIT)|(1u<<AVP_MP_FIRE);
     CHECK(avp_mp_native_input_prepare(&actors[2],&cmd,&profiles.player[2]));
-    CHECK(!(actors[2].player.joy_cur&(1u<<FIRE_C)) &&
+    CHECK((actors[2].player.joy_cur&(1u<<FIRE_C)) &&
           !(actors[2].player.joy_cur&(1u<<JOY_RIGHT)) &&
           !(actors[2].player.joy_cur&(1u<<KEY_6)) &&
           !(actors[2].player.joy_cur&(1u<<KEY_7)) &&
           !(actors[2].player.joy_cur&(1u<<FIRE_A)) &&
           (actors[2].player.joy_cur&(1u<<OPTION)));
+    /* R258: prove AI TURN commands make the ORIGINAL MovePlayer rotate.
+     * R257 accidentally asserted the source sidestep modifier for turns,
+     * making all three bot species slide instead of rotating. The bot AI
+     * already emits the correct logical TURN_LEFT/RIGHT bits. */
+    for(unsigned species_slot=0u;species_slot<3u;species_slot++){
+        const unsigned modifier=types[species_slot]==PT_ALIEN?OPTION:FIRE_C;
+        for(unsigned direction=0u;direction<2u;direction++){
+            const unsigned button=direction?AVP_MP_TURN_RIGHT:AVP_MP_TURN_LEFT;
+            const unsigned pad_bit=direction?JOY_RIGHT:JOY_LEFT;
+            AvpMpPlayerEngineState saved={0};
+            cmd=(AvpMpPlayerCommand){0};
+            cmd.actions=1u<<button;
+            actors[species_slot].player.joy_cur=UINT32_MAX;
+            CHECK(avp_mp_native_input_prepare(&actors[species_slot],&cmd,
+                                                &profiles.player[species_slot]));
+            CHECK(!(actors[species_slot].player.joy_cur&(1u<<pad_bit)));
+            CHECK(actors[species_slot].player.joy_cur&(1u<<modifier));
+            CHECK(avp_mp_player_native_capture(&saved));
+            CHECK(avp_mp_player_native_restore(&actors[species_slot].player));
+            InitMove();ResetMove();centre_angle=0u;
+            MovePlayer(); /* real Jaguar-derived movement, turn only */
+            if(direction)CHECK((s16)(centre_angle>>16)<0);
+            else CHECK((s16)(centre_angle>>16)>0);
+            CHECK(avp_mp_player_native_restore(&saved));
+        }
+        /* Strafing alone MUST assert the original species-specific modifier;
+         * simultaneous turning+strafe uses host sidestep and no modifier. */
+        for(unsigned both=0u;both<2u;both++){
+            cmd=(AvpMpPlayerCommand){0};
+            cmd.actions=(1u<<AVP_MP_STRAFE_RIGHT)|
+                (both?(1u<<AVP_MP_TURN_LEFT):0u);
+            actors[species_slot].player.joy_cur=UINT32_MAX;
+            CHECK(avp_mp_native_input_prepare(&actors[species_slot],&cmd,
+                                                &profiles.player[species_slot]));
+            CHECK(((actors[species_slot].player.joy_cur&(1u<<modifier))==0u)==!both);
+            if(both){
+                CHECK(!(actors[species_slot].player.joy_cur&(1u<<JOY_LEFT)));
+                CHECK(actors[species_slot].player.joy_cur&(1u<<JOY_RIGHT));
+                CHECK(actors[species_slot].player.host_keyboard_strafe_during_turn==1);
+            }else{
+                CHECK(!(actors[species_slot].player.joy_cur&(1u<<JOY_RIGHT)));
+                CHECK(actors[species_slot].player.host_keyboard_strafe_during_turn==0);
+            }
+        }
+    }
     cmd.actions=UINT32_MAX;
     CHECK(!avp_mp_native_input_prepare(&actors[2],&cmd,&profiles.player[2]));
     for(i=0;i<2u;i++) {
@@ -161,6 +214,7 @@ int main(void)
         CHECK(avp_mp_doors_world_init(&worlds[i].doors,map_bytes[i]+8,5,5,3u+i));
         worlds[i].amp=host_amp;
         worlds[i].amp.free_count=AVP_NUM_AMPS;
+        worlds[i].amp.host_amp_capacity=AVP_NUM_AMPS;
         for(unsigned n=0;n<AVP_NUM_AMPS;n++)
             worlds[i].amp.free_list[n]=(u16)(AVP_NUM_AMPS-1u-n);
         CHECK(avp_mp_native_world_valid(&worlds[i]));

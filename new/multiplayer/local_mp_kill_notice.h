@@ -14,7 +14,7 @@ enum {
 
 typedef struct AvpMpKillNotice {
     unsigned kind;
-    unsigned other_player; /* 1-based roster number, includes bots P5..P16 */
+    unsigned other_player; /* 1-based roster number, includes bots P5..P36 */
     uint64_t expires_at;
 } AvpMpKillNotice;
 
@@ -72,5 +72,15 @@ static inline unsigned avp_mp_kill_notice_visible(
     return avp_mp_kill_notice_active(n,tick,other_player);
 }
 
+/* The HUD belongs to the VIEWER, even while the camera spies on another
+ * actor. This wrapper guards the four human viewports; bots have no HUD. */
+static inline unsigned avp_mp_kill_notice_visible_for_viewer(
+    const AvpMpKillNotice notices[AVP_LOCAL_MP_MAX_PLAYERS],
+    unsigned humans,unsigned viewer,uint64_t tick,unsigned *other_player)
+{
+    if(!notices||humans>AVP_LOCAL_MP_MAX_PLAYERS||viewer>=humans)
+        return AVP_MP_NOTICE_NONE;
+    return avp_mp_kill_notice_visible(&notices[viewer],tick,other_player);
+}
 
 #endif

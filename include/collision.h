@@ -18,8 +18,6 @@ u8 *avp_collision_maze_data(void);
 u16 avp_collision_maze_width(void);
 u16 avp_collision_maze_height(void);
 u8 SafePos(u8 height,s32 xpos,s32 ypos,u16 width);
-/* A passable open-door panel on the boundary ahead (never overrides SafePos). */
-int avp_collision_open_door_ahead(s32 xpos,s32 ypos,int dx,int dy,u8 height);
 u8 AllowedMoves(u16 x,u16 y);
 u16 NMoves(u16 x,u16 y,u8 dir,u16 wanted);
 int LineOfSight(const AvpXY *from,const AvpXY *to); /* 0 = visible */

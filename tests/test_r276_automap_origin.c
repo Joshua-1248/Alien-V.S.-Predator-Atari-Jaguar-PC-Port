@@ -6,7 +6,7 @@
 #include <string.h>
 /* Include the original renderer TU to exercise its private overlay_automap
  * with a deterministic one-pixel observation and a minimal RGB framebuffer. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 
 /* Only the original symbols actually referenced by the retained overlay are
  * linked, courtesy of function/data sections and --gc-sections. */
@@ -15,6 +15,18 @@ u8 map_on;
 AvpMapInfo map_info;
 u32 x_pos,y_pos,centre_angle;
 s32 sin_ang,cos_ang;
+/* Renderer-only calls introduced by R223/R227 are deliberately inert in
+ * this R276 origin test.  Both cheats default off, so the overlay must not
+ * request hatch completion or actor interpolation; retain linkable symbols
+ * without importing unrelated gameplay engine state. */
+AvpAmp level1amps[AVP_NUM_AMPS];
+u32 avp_amp_slot_generation(unsigned slot)
+{(void)slot;assert(!"R276 origin test queried disabled enemy markers");return 0u;}
+s32 avp_presentation_interpolate_fixed(s32 previous,s32 current,double alpha,s32 max_step)
+{(void)previous;(void)alpha;(void)max_step;assert(!"R276 origin test interpolated disabled enemy markers");return current;}
+void avp_gpu_automap_hatch_completion(const AvpAvpGpuState *state,
+    const u8 *maze,u16 mw,u16 mh,u8 completed[64u*64u])
+{(void)state;(void)maze;(void)mw;(void)mh;(void)completed;assert(!"R276 origin test filled disabled hatch option");}
 u32 avp_jaguar_rmw_xrgb8888(u32 dst,u16 src,const u8 *qconv,size_t n)
 { (void)dst;(void)src;(void)qconv;(void)n; return 0x00335577u; }
 u32 avp_jaguar_rmw_fixed_hue_xrgb8888(u32 dst,u16 src,const u8 *qconv,size_t n)

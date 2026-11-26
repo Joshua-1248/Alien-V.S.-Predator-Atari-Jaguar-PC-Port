@@ -65,7 +65,7 @@ if command -v wine >/dev/null 2>&1; then
   wine "$exe" --help >/dev/null 2>&1 || { echo "ERROR: --help failed under Wine" >&2; exit 1; }
   qs="$build/test_quickstate_pe_r284.exe"
   "$triple-gcc" -O2 -I"$root/include" "$root/tests/test_quickstate_pe_r284.c" \
-    "$root/src/platform/pc/pc_quickstate.c" "$root/src/platform/pc/pc_time.c" \
+    "$root/new/pc_host/src/pc_quickstate.c" "$root/new/pc_host/src/pc_time.c" \
     -Wl,--start-group "$build/libavp_pc_core.a" "$build/libavp_jaguar_compat.a" -Wl,--end-group \
     -Wl,-T,"$root/cmake/avp_game_state_pe.ld" -static -o "$qs"
   wine "$qs"

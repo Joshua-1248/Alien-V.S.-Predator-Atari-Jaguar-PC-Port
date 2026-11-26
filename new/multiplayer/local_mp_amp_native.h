@@ -21,6 +21,7 @@ typedef struct AvpMpAmpNativeState {
     u16 ngens, reset_counter;
     u16 free_list[AVP_NUM_AMPS];
     unsigned free_count;
+    unsigned host_amp_capacity;
     u32 slot_generation[AVP_NUM_AMPS];
     u32 next_slot_generation;
     AvpAmpSavedPlacement saved_levels[AVP_MAX_LEVEL][AVP_NUM_AMPS+1];

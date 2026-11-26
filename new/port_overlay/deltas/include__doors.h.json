@@ -1,0 +1,27 @@
+{
+  "path": "include/doors.h",
+  "base_sha256": "f5c6b5e66c9aa6190766511a109eb986631a84ed1954cc590677cb83b357cb0f",
+  "output_sha256": "341fea86ea3e8a5c88c1b359c2948a275fdf057571f35ba8629c1df0b96288ba",
+  "edits": [
+    {
+      "start": 39,
+      "end": 39,
+      "replacement": "#include \"../new/pc_host/integration/doors_alien_use_declarations.inc\"\n\n"
+    },
+    {
+      "start": 40,
+      "end": 40,
+      "replacement": "#include \"../new/pc_host/integration/doors_jammed_declarations.inc\"\n\n"
+    },
+    {
+      "start": 44,
+      "end": 44,
+      "replacement": "void avp_doors_bind_retail_meta(void);\n"
+    },
+    {
+      "start": 46,
+      "end": 46,
+      "replacement": "#include \"../new/pc_host/integration/doors_host_declarations.inc\"\n"
+    }
+  ]
+}

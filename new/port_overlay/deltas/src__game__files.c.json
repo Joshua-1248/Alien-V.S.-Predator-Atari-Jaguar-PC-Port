@@ -1,0 +1,17 @@
+{
+  "path": "src/game/files.c",
+  "base_sha256": "78a9edded9069f8b3e9b890399ce04a2881e7881544641d79f7d4f49b4ce8170",
+  "output_sha256": "227785d867c1e7a57b06d23b294a102e3ddaa37413a917353eb156a4453907da",
+  "edits": [
+    {
+      "start": 10,
+      "end": 11,
+      "replacement": "void avp_files_bind(const void*d,size_t n)\n{\n    uintptr_t addr=(uintptr_t)d;\n    /* Reject impossible archive spans before producing an out-of-object\n     * end pointer. A corrupt size must not wrap around the host address. */\n    if(!d || n>UINTPTR_MAX-addr || n>PTRDIFF_MAX){\n        base=fpos=end=NULL;\n        return;\n    }\n    base=fpos=(const u8 *)d;\n    end=(const u8 *)(addr+n);\n}\n"
+    },
+    {
+      "start": 13,
+      "end": 14,
+      "replacement": "static int record_at(const u8*p,AvpFileRecord*r,const u8**next)\n{\n    uintptr_t start=(uintptr_t)base,limit=(uintptr_t)end,addr=(uintptr_t)p;\n    uintptr_t payload,remain,size,aligned;\n    if(!base || !p || !r || !next || addr<start || addr>limit || limit-addr<8u)\n        return 0;\n    size=be32(p+4);\n    payload=addr+8u;\n    remain=limit-payload;\n    if(size>remain)return 0;\n    aligned=payload+size;\n    if(aligned>UINTPTR_MAX-3u)return 0;\n    aligned=(aligned+3u)&~(uintptr_t)3u;\n    if(aligned>limit)return 0;\n    memcpy(r->tag,p,4);\n    r->tag[4]=0;\n    r->stored_size=(u32)size;\n    r->header=p;\n    r->payload=p+8;\n    *next=(const u8 *)aligned;\n    return 1;\n}\n"
+    }
+  ]
+}

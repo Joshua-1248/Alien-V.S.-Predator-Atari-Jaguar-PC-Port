@@ -43,11 +43,14 @@ void avp_local_mp_copy_session_options(AvpLocalMpSetup *dst,
     memcpy(dst->custom_map_stem,src->custom_map_stem,sizeof dst->custom_map_stem);
     dst->dm_level_travel=src->dm_level_travel;
     dst->dm_cloak_damage=src->dm_cloak_damage;
+    dst->dm_predator_uncloaked_damage=src->dm_predator_uncloaked_damage;
     dst->bot_count=src->bot_count;
     dst->show_whole_map=src->show_whole_map;
     dst->show_other_players_on_automap=src->show_other_players_on_automap;
     dst->player_collisions=src->player_collisions;
     dst->random_species_on_respawn=src->random_species_on_respawn;
+    dst->spawn_in_random_level=src->spawn_in_random_level;
+    dst->respawn_on_random_level=src->respawn_on_random_level;
     memcpy(dst->bot_species,src->bot_species,sizeof dst->bot_species);
     memcpy(dst->bot_behavior,src->bot_behavior,sizeof dst->bot_behavior);
 }
@@ -66,6 +69,7 @@ void avp_local_mp_validate(AvpLocalMpSetup *s)
     s->dm_enemies=!!s->dm_enemies;
     s->dm_level_travel=!!s->dm_level_travel;
     s->dm_cloak_damage=!!s->dm_cloak_damage;
+    s->dm_predator_uncloaked_damage=!!s->dm_predator_uncloaked_damage;
     if(s->dm_level<1u||s->dm_level>AVP_MP_CUSTOM_LEVEL)s->dm_level=3u;
     s->level_explicit=!!s->level_explicit;
     s->custom_session_id=s->custom_session_id==AVP_MP_CUSTOM_LEVEL?AVP_MP_CUSTOM_LEVEL:0u;
@@ -74,6 +78,8 @@ void avp_local_mp_validate(AvpLocalMpSetup *s)
     s->show_other_players_on_automap=!!s->show_other_players_on_automap;
     s->player_collisions=!!s->player_collisions;
     s->random_species_on_respawn=!!s->random_species_on_respawn;
+    s->spawn_in_random_level=!!s->spawn_in_random_level;
+    s->respawn_on_random_level=!!s->respawn_on_random_level;
     if(s->bot_count>AVP_LOCAL_MP_MAX_BOTS)s->bot_count=AVP_LOCAL_MP_MAX_BOTS;
     if (s->campaign > AVP_MP_PREDATOR) s->campaign = AVP_MP_MARINE;
     if (s->layout > AVP_MP_TOP_BOTTOM) s->layout = AVP_MP_SIDE_BY_SIDE;
@@ -94,7 +100,16 @@ void avp_local_mp_validate(AvpLocalMpSetup *s)
  * Keep the raw row IDs stable for saved bindings and existing menus. */
 int avp_local_mp_row_visible(const AvpLocalMpSetup *s,unsigned row)
 {
-    if(!s || row>=AVP_LOCAL_MP_ROWS)return 0;
+    if(!s || row>=AVP_LOCAL_MP_MENU_ROWS)return 0;
+    if(row>=AVP_LOCAL_MP_MENU_BOTS_ROW && row<=AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW)
+        return 0; /* Stable UI-only submenu IDs, not setting selectors. */
+    if(row==AVP_LOCAL_MP_MARINE_SHOTGUN_ROW)return 1;
+    if(row==AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW ||
+       row==AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW)return 1;
+    if(row>=AVP_LOCAL_MP_BOT_SPECIES_17_ROW && row<AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW)
+        return row-AVP_LOCAL_MP_BOT_SPECIES_17_ROW+16u<s->bot_count;
+    if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW && row<AVP_LOCAL_MP_BOT_LAST_ROW)
+        return row-AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+16u<s->bot_count;
     if(row>=2u && row<=5u && row-2u>=s->players)return 0;
     if(row==7u && s->game_mode==AVP_MP_DEATHMATCH)return 0;
     if((row==AVP_LOCAL_MP_CUSTOM_NAME_ROW||row==AVP_LOCAL_MP_CUSTOM_LOAD_ROW) &&
@@ -106,10 +121,15 @@ int avp_local_mp_row_visible(const AvpLocalMpSetup *s,unsigned row)
     if(row>=AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW &&
        row<AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW &&
        row-AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+4u>=s->bot_count)return 0;
-    if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW && row<AVP_LOCAL_MP_ROWS &&
-       row<AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+AVP_LOCAL_MP_MAX_BOTS-4u &&
+    if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW && row<AVP_LOCAL_MP_TRAVEL_ROW &&
        row-AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+4u>=s->bot_count)return 0;
-    if((row==AVP_LOCAL_MP_TRAVEL_ROW || row==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW) &&
+    if(row>=AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW &&
+       row<AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW &&
+       row-AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+12u>=s->bot_count)return 0;
+    if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW && row<AVP_LOCAL_MP_MENU_BOTS_ROW &&
+       row-AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+12u>=s->bot_count)return 0;
+    if((row==AVP_LOCAL_MP_TRAVEL_ROW || row==AVP_LOCAL_MP_CLOAK_DAMAGE_ROW ||
+        row==AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW) &&
        s->game_mode!=AVP_MP_DEATHMATCH)return 0;
     if(row>=AVP_LOCAL_MP_SCORE_ROW && row<20u &&
        row!=AVP_LOCAL_MP_LEVEL_ROW &&
@@ -128,15 +148,35 @@ unsigned avp_local_mp_menu_rows(const AvpLocalMpSetup *s,unsigned page,
         AVP_LOCAL_MP_CUSTOM_LOAD_ROW,AVP_LOCAL_MP_MENU_BOTS_ROW,
         AVP_LOCAL_MP_MENU_MODIFIERS_ROW,AVP_LOCAL_MP_MENU_OPTIONS_ROW,
         AVP_LOCAL_MP_START_ROW};
-    static const unsigned bots[]={9u,10u,11u,12u,
+    /* R132: Keep every existing setting row ID (and its saved value)
+     * unchanged, but present all 32 species selectors before all 32 AI
+     * behaviors. The F2 scrolling cursor operates on this display order. */
+    static const unsigned bots[]={
+        /* Human P1-P4 bot-enable controls. */
+        9u,10u,11u,12u,
+        /* Bot 1-16 Character. */
         21u,22u,23u,24u,31u,32u,33u,34u,35u,36u,37u,38u,
-        25u,26u,27u,28u,39u,40u,41u,42u,43u,44u,45u,46u};
-    static const unsigned modifiers[]={AVP_LOCAL_MP_RANDOM_RESPAWN_ROW,
-        AVP_LOCAL_MP_FAST_ROW,AVP_LOCAL_MP_EQUIP_ROW,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW};
+        53u,54u,55u,56u,
+        /* Bot 17-32 Character. */
+        70u,71u,72u,73u,74u,75u,76u,77u,
+        78u,79u,80u,81u,82u,83u,84u,85u,
+        /* Bot 1-16 Behavior. */
+        25u,26u,27u,28u,39u,40u,41u,42u,43u,44u,45u,46u,
+        57u,58u,59u,60u,
+        /* Bot 17-32 Behavior. */
+        86u,87u,88u,89u,90u,91u,92u,93u,
+        94u,95u,96u,97u,98u,99u,100u,101u};
+    static const unsigned modifiers[]={AVP_LOCAL_MP_MARINE_SHOTGUN_ROW,
+        AVP_LOCAL_MP_RANDOM_RESPAWN_ROW,
+        AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW,AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW,
+        AVP_LOCAL_MP_FAST_ROW,AVP_LOCAL_MP_EQUIP_ROW,AVP_LOCAL_MP_CLOAK_DAMAGE_ROW,
+        AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW};
     static const unsigned options[]={AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW,
         AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW,
         AVP_LOCAL_MP_WHOLE_MAP_ROW,AVP_LOCAL_MP_TRAVEL_ROW,
-        AVP_LOCAL_MP_ENEMIES_ROW};
+        AVP_LOCAL_MP_ENEMIES_ROW,AVP_LOCAL_MP_MENU_SPYCAM_ROW};
+    static const unsigned spycam[]={AVP_LOCAL_MP_SPYCAM_PLAYER_ROW,
+        AVP_LOCAL_MP_SPYCAM_NEXT_ROW,AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW};
     const unsigned *items=NULL;unsigned size=0,count=0,i;
     if(!s||!out)return 0u;
     switch(page){
@@ -144,11 +184,14 @@ unsigned avp_local_mp_menu_rows(const AvpLocalMpSetup *s,unsigned page,
     case AVP_LOCAL_MP_MENU_BOTS:items=bots;size=sizeof(bots)/sizeof(bots[0]);break;
     case AVP_LOCAL_MP_MENU_MODIFIERS:items=modifiers;size=sizeof(modifiers)/sizeof(modifiers[0]);break;
     case AVP_LOCAL_MP_MENU_OPTIONS:items=options;size=sizeof(options)/sizeof(options[0]);break;
+    case AVP_LOCAL_MP_MENU_SPYCAM:items=spycam;size=sizeof(spycam)/sizeof(spycam[0]);break;
     default:return 0u;
     }
     for(i=0;i<size;i++){
         unsigned row=items[i];
-        if(row>=AVP_LOCAL_MP_ROWS || avp_local_mp_row_visible(s,row))
+        if((row>=AVP_LOCAL_MP_MENU_BOTS_ROW &&
+            row<=AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW) ||
+           avp_local_mp_row_visible(s,row))
             out[count++]=row;
     }
     return count;
@@ -166,8 +209,11 @@ unsigned avp_local_mp_menu_next_row(const AvpLocalMpSetup *s,unsigned page,
 
 unsigned avp_local_mp_next_row(const AvpLocalMpSetup *s,unsigned row,int direction)
 {
-    for(unsigned i=0;i<AVP_LOCAL_MP_ROWS;i++){
-        row=(row+(direction<0?AVP_LOCAL_MP_ROWS-1u:1u))%AVP_LOCAL_MP_ROWS;
+    /* Legacy flat selector preserves its original row range. New bot rows
+     * are reached via the F2 Bots page's avp_local_mp_menu_next_row(). */
+    const unsigned legacy_rows=AVP_LOCAL_MP_MENU_BOTS_ROW;
+    for(unsigned i=0;i<legacy_rows;i++){
+        row=(row+(direction<0?legacy_rows-1u:1u))%legacy_rows;
         if(avp_local_mp_row_visible(s,row))return row;
     }
     return AVP_LOCAL_MP_START_ROW;
@@ -178,13 +224,27 @@ int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction)
 {
     unsigned *value = NULL, limit = 0;
     if (!s || !direction || !avp_local_mp_row_visible(s,row)) return 0;
-    if(row>=AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW &&
+    if(row>=AVP_LOCAL_MP_BOT_SPECIES_17_ROW && row<AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW){
+        value=&s->bot_species[row-AVP_LOCAL_MP_BOT_SPECIES_17_ROW+16u];
+        limit=4u;
+    }else if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW && row<AVP_LOCAL_MP_BOT_LAST_ROW){
+        value=&s->bot_behavior[row-AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+16u];
+        limit=3u;
+    }else if(row>=AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW &&
        row<AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW){
         value=&s->bot_species[row-AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW+4u];
         limit=4u;
     }else if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW &&
              row<AVP_LOCAL_MP_TRAVEL_ROW){
         value=&s->bot_behavior[row-AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW+4u];
+        limit=3u;
+    }else if(row>=AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW &&
+             row<AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW){
+        value=&s->bot_species[row-AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW+12u];
+        limit=4u;
+    }else if(row>=AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW &&
+             row<AVP_LOCAL_MP_MENU_BOTS_ROW){
+        value=&s->bot_behavior[row-AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW+12u];
         limit=3u;
     }else switch (row) {
     case 0: value = &s->players; limit = AVP_LOCAL_MP_MAX_PLAYERS; break;
@@ -201,6 +261,10 @@ int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction)
         value=&s->bot_species[row-AVP_LOCAL_MP_BOT_SPECIES_ROW];limit=4u;break;
     case 25:case 26:case 27:case 28:
         value=&s->bot_behavior[row-AVP_LOCAL_MP_BOT_BEHAVIOR_ROW];limit=3u;break;
+    case AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW:
+        s->spawn_in_random_level=!s->spawn_in_random_level;return 1;
+    case AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW:
+        s->respawn_on_random_level=!s->respawn_on_random_level;return 1;
     case AVP_LOCAL_MP_RANDOM_RESPAWN_ROW:
         s->random_species_on_respawn=!s->random_species_on_respawn;return 1;
     case AVP_LOCAL_MP_WHOLE_MAP_ROW:
@@ -213,6 +277,8 @@ int avp_local_mp_adjust(AvpLocalMpSetup *s, unsigned row, int direction)
         s->dm_level_travel=!s->dm_level_travel;return 1;
     case AVP_LOCAL_MP_CLOAK_DAMAGE_ROW:
         s->dm_cloak_damage=!s->dm_cloak_damage;return 1;
+    case AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW:
+        s->dm_predator_uncloaked_damage=!s->dm_predator_uncloaked_damage;return 1;
     case AVP_LOCAL_MP_MODE_ROW: value=&s->game_mode;limit=2u;break;
     case AVP_LOCAL_MP_SCORE_ROW:
         if(s->game_mode!=AVP_MP_DEATHMATCH)return 0;
@@ -330,7 +396,7 @@ unsigned avp_local_mp_group_worlds(const AvpLocalMpSetup *s,
             out[n].level = s->level[p];
             ++n;
         }
-        out[j].member_mask |= 1u << p;
+        out[j].member_mask |= AVP_MP_ACTOR_BIT(p);
     }
     return n;
 }

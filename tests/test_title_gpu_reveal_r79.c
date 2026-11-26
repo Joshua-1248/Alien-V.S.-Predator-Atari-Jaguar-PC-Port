@@ -2,7 +2,7 @@
  * The title equations are PC presentation only; game state never changes. */
 #define _DEFAULT_SOURCE 1
 #define AVP_PC_REFERENCE_TITLE_TIMING 1
-#include "../src/jaguar/avp_gpu/frontend_renderer.c"
+#include "../new/jaguar/avp_gpu/frontend_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 char mjp_games[4]="xxx";

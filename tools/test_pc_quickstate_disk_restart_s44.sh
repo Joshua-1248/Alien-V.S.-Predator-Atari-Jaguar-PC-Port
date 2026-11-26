@@ -7,9 +7,9 @@ trap 'rm -rf "$TMP"' EXIT
 CC="${CC:-gcc}"
 "$CC" -std=gnu99 -O2 -Wall -Wextra -Werror -I"$ROOT/include" \
   "$ROOT/tests/test_pc_quickstate_disk_restart_s44.c" \
-  "$ROOT/src/platform/pc/pc_quickstate.c" \
-  "$ROOT/src/platform/pc/pc_quickstate_disk.c" \
-  "$ROOT/src/platform/pc/pc_sha256.c" -lz -lcrypto -o "$TMP/restart"
+  "$ROOT/new/pc_host/src/pc_quickstate.c" \
+  "$ROOT/new/pc_host/src/pc_quickstate_disk.c" \
+  "$ROOT/new/pc_host/src/pc_sha256.c" -lz -lcrypto -o "$TMP/restart"
 export XDG_DATA_HOME="$TMP/userdata"
 mkdir -p "$XDG_DATA_HOME"
 "$TMP/restart" save

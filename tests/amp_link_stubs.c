@@ -3,10 +3,12 @@
 u8 cur_weps;
 s16 hugkill;
 #ifndef AVP_TEST_REAL_COLLISION
+#ifndef AVP_TEST_NPC_VECTOR_OVERRIDE
 void Vector(const AvpXY *from,const AvpXY *to,s32 *vx,s32 *vy)
 {
     *vx=to->x-from->x;*vy=to->y-from->y;
 }
+#endif /* AVP_TEST_NPC_VECTOR_OVERRIDE: test supplies controlled heading */
 
 void HumanPain(void){}
 
@@ -17,10 +19,19 @@ void AreaDamage(s32 xpos,s32 ypos,s32 radius,s16 damage,u16 damage_flags)
     (void)xpos;(void)ypos;(void)radius;(void)damage;(void)damage_flags;
 }
 
+/* R180 test-only: force all native SafePos probes to fail, so the real
+ * chase state machine selects its original random fake-direction detour. */
+int avp_test_amp_force_blocked;
+/* R182: observe the real AMP chase's candidate positions BEFORE its
+ * destination clamping. Only regression binaries link these symbols. */
+unsigned avp_test_amp_safe_calls;
+s32 avp_test_amp_safe_x,avp_test_amp_safe_y;
 u8 SafePos(u8 height,s32 xpos,s32 ypos,u16 width)
 {
-    (void)height;(void)xpos;(void)ypos;(void)width;
-    return AVP_COLL_SAFE;
+    (void)height;(void)width;
+    avp_test_amp_safe_x=xpos;avp_test_amp_safe_y=ypos;
+    ++avp_test_amp_safe_calls;
+    return avp_test_amp_force_blocked?AVP_COLL_WALL:AVP_COLL_SAFE;
 }
 #endif
 int avp_doors_cell_is_liftside(s32 xpos,s32 ypos){(void)xpos;(void)ypos;return 0;}

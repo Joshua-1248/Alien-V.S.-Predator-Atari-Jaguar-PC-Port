@@ -19,6 +19,11 @@ typedef struct AvpMpNativeWorld {
     AvpMpRetailMap *map; /* borrowed, never freed here */
     AvpMpHudWorldState hud_world;
     uint32_t pad_frame_counter; /* original readpad clock, ticked once/world */
+    /* PC multiplayer ONLY: the original puddle has one ALTFRAME bit, but
+     * each of up to 20 actors needs an independent contact-entry sound edge.
+     * Keep that bookkeeping inside the owning level world so unrelated
+     * sub-levels and subsequent sessions never share acid cue state. */
+    AvpMpActorMask acid_contact_masks[AVP_NUM_AMPS];
 } AvpMpNativeWorld;
 
 typedef struct AvpMpNativeScope {
@@ -73,7 +78,7 @@ int avp_mp_native_world_leave(AvpMpNativeScope *scope, AvpMpNativeWorld *world);
 typedef int (*AvpMpNativeActorStep)(void *user, unsigned player);
 typedef int (*AvpMpNativeWorldStep)(void *user);
 int avp_mp_native_run_world(AvpMpNativeWorld *world,
-                            AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS], unsigned member_mask,
+                            AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS], AvpMpActorMask member_mask,
                             AvpMpNativeActorStep actor_step,
                             AvpMpNativeWorldStep world_step, void *user);
 #endif

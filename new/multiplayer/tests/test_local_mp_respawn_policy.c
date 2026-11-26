@@ -13,6 +13,17 @@ int avp_mp_actor_native_valid(const AvpMpActorNativeState *a){return a!=NULL;}
 int main(void)
 {
     AvpMpActorNativeState a={0}; AvpMpRespawnPlan p;
+    /* Original LEVELS.S ducts are 6..13. Predator spawn/respawn, including
+     * random-level and deathmatch restart paths, must never select them. */
+    for(unsigned level=1;level<=15u;level++){
+        CK(avp_mp_spawn_level_allowed(AVP_MP_MARINE,level));
+        CK(avp_mp_spawn_level_allowed(AVP_MP_ALIEN,level));
+        CK(avp_mp_spawn_level_allowed(AVP_MP_PREDATOR,level)==
+           (level<6u || level>13u));
+    }
+    CK(!avp_mp_spawn_level_allowed(AVP_MP_PREDATOR,0u));
+    CK(!avp_mp_spawn_level_allowed(AVP_MP_PREDATOR,16u));
+    CK(!avp_mp_spawn_level_allowed(AVP_MP_RANDOM,8u));
     a.player.player_type=PT_HUMAN;a.player.player_energy=1000;
     CK(avp_mp_respawn_plan(&a,1,AVP_MP_MARINE,0,&p)&&p.kind==AVP_MP_RESPAWN_NONE);
     a.player.player_energy=0;

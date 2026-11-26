@@ -1,4 +1,5 @@
 #include "local_mp_chamber.h"
+#include "doors.h"
 #include <string.h>
 #include <stdlib.h>
 /* Original DOORS.S InitDoors() maps wall high-nibble types 1..3 to solid,
@@ -113,4 +114,165 @@ int avp_mp_shared_arrival_exempt(const AvpMpSharedArrivalGrace *state,
     return state&&p<4u&&q<4u&&p!=q &&
            (state->ignore_player_collision[p]&(1u<<q)) &&
            (state->ignore_player_collision[q]&(1u<<p));
+}
+
+/* Convert the exact LEVDOOR panel to its underlying left/top door byte.
+ * RIGHT and BOTTOM use the neighboring cell's canonical byte; this is
+ * identical to DOORS.S::door_ptr_for, not a guessed room-side index. */
+static int airlock_panel_door(const AvpMpRetailMap *m,unsigned off,
+                              unsigned *door)
+{
+    unsigned cell,side,x,y;
+    if(!m||!m->bytes||!m->width||!m->height ||
+       off>=m->width*m->height*8u)return 0;
+    cell=off/8u;side=off%8u;
+    x=cell%m->width;y=cell/m->width;
+    switch(side){
+    case 0u:*door=cell*8u+6u;break;
+    case 1u:*door=cell*8u+7u;break;
+    case 2u:if(x+1u>=m->width)return 0;
+        *door=(cell+1u)*8u+6u;break;
+    case 3u:if(y+1u>=m->height)return 0;
+        *door=(cell+m->width)*8u+7u;break;
+    default:return 0;
+    }
+    return 1;
+}
+int avp_mp_airlock_room(const AvpMpRetailMap *map,
+                       const AvpDoorLevelMeta *meta,
+                       unsigned exit_panel_offset,AvpMpAirlockRoom *out)
+{
+    unsigned door,ex,ey,side,rx,ry,required;
+    const AvpDoorInterlockEntry *inter=NULL;
+    const AvpDoorExitEntry *exit=NULL;
+    if(out)memset(out,0,sizeof *out);
+    if(!out||!map||!map->bytes||!meta||map->width!=64u||
+       map->height!=64u||!airlock_panel_door(map,exit_panel_offset,&door))
+        return 0;
+    for(size_t i=0;i<meta->exit_count;i++)
+        if(meta->exits[i].panel_offset==exit_panel_offset){
+            exit=&meta->exits[i];break;
+        }
+    for(size_t i=0;i<meta->interlock_count;i++)
+        if(meta->interlocks[i].door_offset==door){
+            inter=&meta->interlocks[i];break;
+        }
+    if(!exit||!inter||inter->required_count!=1u ||
+       (required=inter->required_offsets[0])>=map->width*map->height*8u ||
+       required%8u!=7u)return 0;
+    ex=(exit_panel_offset/8u)%map->width;
+    ey=(exit_panel_offset/8u)/map->width;
+    side=exit_panel_offset%8u;
+    rx=(required/8u)%map->width;
+    ry=(required/8u)/map->width;
+    /* The retail ship chambers are fore/aft passages with exactly two
+     * recessed lateral standing bays. Reject unfamiliar level designs. */
+    if(rx!=ex || (side!=1u && side!=3u) ||
+       (ey>ry?ey-ry:ry-ey)<3u ||
+       (ey>ry?ey-ry:ry-ey)>5u || ex<1u||ex+1u>=map->width)
+        return 0;
+    out->exit_x=ex;out->exit_y=ey;out->exit_side=side;
+    out->destination=exit->level;
+    out->exit_door_offset=door;out->entry_door_offset=required;
+    out->entry_x=ex;
+    out->entry_y=ey<ry?ry-1u:ry;
+    out->entry_side=ey<ry?3u:1u;
+    /* The actual interior-side panel MUST resolve to the authored closing
+     * door. If it doesn't, never create an imaginary Use command. */
+    {
+        unsigned check;
+        if(!airlock_panel_door(map,
+           ((out->entry_y*map->width+ex)*8u)+out->entry_side,&check)||
+           check!=required)return 0;
+    }
+    {
+        unsigned low=ey<ry?ey:ry,high=ey>ry?ey:ry;
+        const unsigned mid=(low+high)/2u;
+        /* Fill by rows near chamber centre; pair left/right before the
+         * next row so two companions stand side-by-side. */
+        for(unsigned pass=0;pass<2u;pass++){
+            unsigned y=pass?(ey<ry?mid-1u:mid+1u):mid;
+            if(y<=low || y>=high)continue;
+            for(unsigned lr=0;lr<2u;lr++){
+                unsigned x=lr?ex+1u:ex-1u,wall_side=lr?2u:0u;
+                const uint8_t *c=avp_mp_retail_map_cell_const(map,x,y);
+                const uint8_t *origin=avp_mp_retail_map_cell_const(map,ex,ey);
+                if(!c||!origin||!c[5]||!origin[5] ||
+                   !wall_boundary(c[wall_side]) ||
+                   !avp_mp_chamber_contains(map,
+                       (ex<<16)|0x8000u,(ey<<16)|0x8000u,
+                       (x<<16)|0x8000u,(y<<16)|0x8000u))continue;
+                if(out->seat_count>=AVP_MP_AIRLOCK_SEATS)break;
+                out->seats[out->seat_count].x=x;
+                out->seats[out->seat_count].y=y;
+                out->seats[out->seat_count].face_side=lr?0u:2u;
+                out->seat_count++;
+            }
+        }
+    }
+    return out->seat_count>=2u;
+}
+
+/* R299: the pressure panel is a ONE-WAY completed transaction until an
+ * actual new crossing intent is established. Merely seeing a human standing
+ * in the destination chamber (or replanning FOLLOW across levels) is not
+ * evidence that anyone wants to pressurize straight back. */
+void avp_mp_airlock_cycle_arrived(AvpMpAirlockCycle *cycle,
+    unsigned from_level,unsigned to_level,uint64_t tick)
+{
+    if(!cycle)return;
+    if(!from_level||!to_level||from_level==to_level){
+        memset(cycle,0,sizeof *cycle);return;
+    }
+    cycle->arrived_from=from_level;
+    cycle->arrived_level=to_level;
+    cycle->arrived_tick=tick;
+}
+int avp_mp_airlock_cycle_reverse_block(AvpMpAirlockCycle *cycle,
+    unsigned level,unsigned destination,int bot_inside,
+    int human_disembarked,int any_living_human,uint64_t tick)
+{
+    if(!cycle||!cycle->arrived_level)return 0;
+    /* A legitimate new level change through another passage ends this
+     * particular ship airlock arrival guard. */
+    if(level!=cycle->arrived_level){
+        memset(cycle,0,sizeof *cycle);return 0;
+    }
+    /* A return passage can be newly requested once both participants have
+     * LEFT the original arrival chamber, not merely after a time delay.
+     * If all human players are dead, let autonomous bots rearm once they
+     * have moved outside and the original transition has settled. */
+    if(!bot_inside && (human_disembarked ||
+       (!any_living_human && tick>=cycle->arrived_tick &&
+        tick-cycle->arrived_tick>=60u))){
+        memset(cycle,0,sizeof *cycle);return 0;
+    }
+    return destination==cycle->arrived_from;
+}
+
+/* R425: Do not discard a real crossing while its operator is physically
+ * inside. Outside, refresh only with a matching authored exit request or
+ * an existing chamber invitation. Native transitions clear the commitment. */
+int avp_mp_airlock_commitment_valid(uint64_t now,uint64_t last_intent,
+    int inside,int matching_exit_goal)
+{
+    return inside || matching_exit_goal ||
+        (now>=last_intent && now-last_intent<=200u);
+}
+AvpMpAirlockAction avp_mp_airlock_action(const AvpMpAirlockRoom *room,
+    const uint8_t *cells,size_t cell_bytes,
+    const uint32_t *active_offsets,unsigned active_count)
+{
+    if(!room||!cells||room->entry_door_offset>=cell_bytes||
+       room->exit_door_offset>=cell_bytes||
+       room->entry_door_offset==room->exit_door_offset||
+       active_count>2u||(active_count&&!active_offsets))return AVP_MP_AIRLOCK_WAIT;
+    /* Even a zero byte can belong to a just-started opening animation.
+     * Do not send pressure or reverse an in-flight close. */
+    for(unsigned i=0;i<active_count;i++)
+        if(active_offsets[i]==room->entry_door_offset ||
+           active_offsets[i]==room->exit_door_offset)return AVP_MP_AIRLOCK_WAIT;
+    if(cells[room->entry_door_offset])return AVP_MP_AIRLOCK_CLOSE_ENTRY;
+    if(cells[room->exit_door_offset])return AVP_MP_AIRLOCK_CLOSE_EXIT;
+    return AVP_MP_AIRLOCK_PRESSURE;
 }

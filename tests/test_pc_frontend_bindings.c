@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 static int menu_contains(AvpPcVideo *v,int page,int id){
     v->menu_page=page;
     for(int i=0;i<menu_count(v);i++)if(menu_id(v,i)==id)return 1;

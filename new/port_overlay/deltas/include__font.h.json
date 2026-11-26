@@ -1,0 +1,12 @@
+{
+  "path": "include/font.h",
+  "base_sha256": "041606143361bdf8763cdbd6eaf745c6d954b31995f5e7f4e499cb0e43ec7313",
+  "output_sha256": "22182a6ca92fc54572597f56cec787aecb1a04c2167bef3b058e608a07dcaca0",
+  "edits": [
+    {
+      "start": 13,
+      "end": 13,
+      "replacement": "/* A cartridge-authored FONT.S string carries a historical RDB.DTA address.\n * Alignment after a $FF coordinate escape is based on that 68000 address,\n * not on the pointer to the host decompression buffer. */\nvoid pr_string_retail(const char *encoded,u32 source_address);\n"
+    }
+  ]
+}

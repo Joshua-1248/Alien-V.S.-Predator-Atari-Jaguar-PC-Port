@@ -1,0 +1,32 @@
+{
+  "path": "include/music.h",
+  "base_sha256": "dc76d3b23f90771b88eed4884258b58de5c6688e6708e03e2bdfaf052357e289",
+  "output_sha256": "94351479baafd903d0ca652819329eb0947bf91f95a7ad2a3a1131d7bb560a96",
+  "edits": [
+    {
+      "start": 20,
+      "end": 20,
+      "replacement": "/* Bind the retail RDB.DTA module controls for AVPSOUND priority arbitration.\n * Synthetic callers using avp_music_bind_sfx_meta keep their explicit table. */\nvoid avp_music_bind_retail_sfx_descriptors(const u8 *rdb,size_t size);\n"
+    },
+    {
+      "start": 27,
+      "end": 27,
+      "replacement": "/* Retail RDB music descriptors used directly by MAIN.S.  These are addresses\n * of descriptor records reconstructed from the user's AVP.jag/RDB data, not\n * embedded music payloads. */\n#define AVP_MUSIC_PREDATOR_ENDING 0x00020610u\n#define AVP_MUSIC_TITLE3          0x00020918u\n/* Retail RDB.DTA FullSynth record: character-selection/heartbeat score. */\n#define AVP_MUSIC_CHARACTER_SELECT 0x0002046Cu\n\n"
+    },
+    {
+      "start": 29,
+      "end": 29,
+      "replacement": "#include \"../new/pc_host/integration/music_intro_declarations.inc\"\n\n"
+    },
+    {
+      "start": 39,
+      "end": 39,
+      "replacement": "/* Preserve original TFX/D1 explicit volume/priority word (>=0) when supplied\n * by source MJP $01DC28...; negative selects the module's own control. */\nu32 avp_music_tfx_d1(unsigned id,s32 d1);\n/* Retail PlacedEf ($9C3A): effect into reserved voice v (wep_sfx=1, pause_sfx=0). */\nu32 avp_music_placed_voice(unsigned id,unsigned v);\n"
+    },
+    {
+      "start": 47,
+      "end": 47,
+      "replacement": "#include \"../new/pc_host/integration/music_multiplayer_declarations.inc\"\n\n"
+    }
+  ]
+}

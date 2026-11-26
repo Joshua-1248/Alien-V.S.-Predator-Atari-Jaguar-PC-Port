@@ -15,12 +15,38 @@
  * other invalid target results are errors and must not be replayed.
  */
 typedef int (*AvpMpAmpChooseTarget)(void *user, const AvpAmp *creature,
-                unsigned amp_index, unsigned member_mask,
+                unsigned amp_index, AvpMpActorMask member_mask,
                 const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS]);
 /* The exact hosted PC simulation-beam cadence, scoped per active world.
  * Never substitute this for the Jaguar's actual beam register in ROM mode. */
 uint32_t avp_mp_amp_host_beam_value(uint32_t world_frame);
 int avp_mp_amp_step_targets(AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS],
-                            unsigned member_mask,
+                            AvpMpActorMask member_mask,
                             AvpMpAmpChooseTarget choose, void *user);
+/* Opt-in PC multiplayer per-actor ACIDX cue: original AMP contact, 3 HP
+ * damage, and global ALTFRAME remain source-owned. Each newly contacting
+ * actor instead receives one private sound event at their own position.
+ * No audible cue is sent for non-contacting/immune/dead actors. */
+typedef void (*AvpMpAmpPlayerAcidCue)(void *user,unsigned player,
+                                      unsigned level,int32_t x,int32_t y);
+/* Scope all native enemy animation, attack, pain and death effect calls
+ * to the actual AMP's authored coordinates while its mode executes. */
+typedef void (*AvpMpAmpEnemySoundScope)(void *user,const AvpAmp *amp,
+                                       unsigned level,int entering);
+int avp_mp_amp_step_targets_local_acid(
+    AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS],
+    AvpMpActorMask member_mask,AvpMpAmpChooseTarget choose,void *user,
+    AvpMpActorMask acid_contact_masks[AVP_NUM_AMPS],AvpMpAmpPlayerAcidCue cue);
+int avp_mp_amp_step_targets_spatial(
+    AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS],
+    AvpMpActorMask member_mask,AvpMpAmpChooseTarget choose,void *user,
+    AvpMpActorMask acid_contact_masks[AVP_NUM_AMPS],AvpMpAmpPlayerAcidCue acid_cue,
+    AvpMpAmpEnemySoundScope enemy_sound);
+/* Host-only damage scope callback: entering=1 before native damage, 0 after. */
+typedef void (*AvpMpAmpActorDamage)(void *user,unsigned player,int entering);
+int avp_mp_amp_step_targets_with_health(
+    AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS],
+    AvpMpActorMask member_mask,AvpMpAmpChooseTarget choose,void *user,
+    AvpMpActorMask acid_contact_masks[AVP_NUM_AMPS],AvpMpAmpPlayerAcidCue acid_cue,
+    AvpMpAmpEnemySoundScope enemy_sound,AvpMpAmpActorDamage on_damage);
 #endif

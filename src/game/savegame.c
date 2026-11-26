@@ -5,7 +5,6 @@
  * 68000 game-state packing that the pause menu uses before Write_EE.
  */
 #include "savegame.h"
-#include "avp_sfx_ids.h"
 #include "eeprom.h"
 #include "maze.h"
 #include "player.h"
@@ -14,7 +13,6 @@
 #include "levels.h"
 #include "hud.h"
 #include "avp_runtime.h"
-#include "music.h"
 
 #include <stdint.h>
 
@@ -88,29 +86,13 @@ void MakeSave(s32 slot)
     put_be32(out,d0);
 }
 
-/* Pause-list object event: selected saved-game art briefly hidden/shown.
- * The Jaguar MAZESCRN.S::SaveGame flashes GAME[n] and NO[n] for 21 cycles,
- * independently of the MJP title save-selection frontend. */
-enum { PAUSE_EV_SAVE_FLASH=0x5053464cu }; /* PSFL */
-
 void SaveGame(s32 slot)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
-    unsigned i;
-    /* MAZESCRN.S SaveGame calls wep_sfx (PlacedEf voice 1), not generic TFX. */
-    (void)avp_music_placed_voice(AVP_FX_SHOTG,1u);
+    /* Retail plays the shotgun save-confirm effect, then writes EEPROM and
+     * flashes the slot graphics. Audio/pixel flashing are presentation seams. */
+    if(o->play_sfx)o->play_sfx(o->user,1u);
     MakeSave(slot);
     Write_EE();
-
-    /* Retail DBRA #20 executes 21 times.  The first two VBLs precede
-     * hiding the selected game number, the third precedes showing it.
-     * These events belong to the in-game pause Object Processor, not to
-     * the title screen's SAVE frontend event (which has different meaning).
-     * A non-graphical backend can omit either callback safely. */
-    for(i=0;i<21u;i++){
-        if(o->wait_vblank){o->wait_vblank(o->user);o->wait_vblank(o->user);}
-        if(o->object_event)o->object_event(o->user,PAUSE_EV_SAVE_FLASH,(u32)slot,1u,0u);
-        if(o->wait_vblank)o->wait_vblank(o->user);
-        if(o->object_event)o->object_event(o->user,PAUSE_EV_SAVE_FLASH,(u32)slot,0u,0u);
-    }
+    if(o->frontend_event)o->frontend_event(o->user,0x53415645u,slot,20); /* SAVE */
 }

@@ -82,6 +82,7 @@ int main(void)
         CHECK(avp_mp_amp_native_capture(&worlds[i]));
         /* Author a valid original allocator free-list, then exercise amp_req. */
         worlds[i].free_count=AVP_NUM_AMPS;
+        worlds[i].host_amp_capacity=AVP_NUM_AMPS;
         for (unsigned n=0;n<AVP_NUM_AMPS;n++)
             worlds[i].free_list[n]=(u16)(AVP_NUM_AMPS-1u-n);
     }

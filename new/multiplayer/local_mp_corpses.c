@@ -45,7 +45,7 @@ int avp_mp_corpse_claim_at(AvpMpCorpses *store,unsigned level,
     if(!store||level<1u||level>15u||player>=AVP_LOCAL_MP_MAX_ACTORS)return 0;
     for(unsigned i=0u;i<AVP_MP_CORPSE_LIMIT;i++){
         AvpMpCorpse *c=&store->records[i];
-        const uint16_t bit=(uint16_t)(1u<<player);
+        const AvpMpActorMask bit=AVP_MP_ACTOR_BIT(player);
         /* Only a fallen Marine PLAYER carries scavengable weapons/ammo.
          * Alien/Predator corpses remain visible but never yield Marine gear. */
         if(!c->occupied ||c->creature!=AC_HUMAN ||c->level!=level ||

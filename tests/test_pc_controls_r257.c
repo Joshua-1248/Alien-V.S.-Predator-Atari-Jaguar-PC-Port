@@ -3,10 +3,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_pain_sounds(int enabled){(void)enabled;}
+/* Current menu TU has external branches for Map Maker, audio, host
+ * textures and micro-opts.  This R257 test drives only Controls, so these
+ * outside-system hooks are inert link stubs; no behavior is substituted in
+ * any path being asserted here. */
+s16 cur_level=1;
+void avp_mm_init(AvpMapMaker *m){(void)m;}
+void avp_mm_destroy(AvpMapMaker *m){(void)m;}
+int avp_mm_bind(AvpMapMaker *m,unsigned level,const u8 *data,size_t len)
+{(void)m;(void)level;(void)data;(void)len;return 0;}
+int avp_mm_load(AvpMapMaker *m,const char *path)
+{(void)m;(void)path;return 0;}
+int avp_mm_select(AvpMapMaker *m,unsigned level)
+{(void)m;(void)level;return 0;}
+int avp_mm_blank(AvpMapMaker *m){(void)m;return 0;}
+int avp_jaguar_framebuffer_init(AvpJaguarFramebuffer *fb,unsigned w,unsigned h)
+{(void)fb;(void)w;(void)h;return 0;}
+void avp_jaguar_framebuffer_destroy(AvpJaguarFramebuffer *fb){(void)fb;}
+void avp_pc_audio_set_mix(unsigned music,unsigned sfx,unsigned ambience,
+    unsigned voice,unsigned hissing,int music_on,int ambience_on,int hiss_on)
+{(void)music;(void)sfx;(void)ambience;(void)voice;(void)hissing;
+ (void)music_on;(void)ambience_on;(void)hiss_on;}
+void avp_pc_audio_set_speaker_mode(unsigned mode,unsigned subwoofers)
+{(void)mode;(void)subwoofers;}
+int avp_game_micro_opt_available(void){return 0;}
+void avp_game_micro_opt_set(int enabled){(void)enabled;}
+unsigned avp_pc_prototype_textures_apply_search(AvpPcPrototypeTextures *s,
+    AvpAvpGpuState *g,const char *a,const char *b,const char *c,int d,
+    char *e,size_t f)
+{(void)s;(void)g;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;return 0;}
 static int contains(AvpPcVideo *v,int page,int id){
     v->menu_page=page;
     for(int i=0;i<menu_count(v);i++)if(menu_id(v,i)==id)return 1;
@@ -53,3 +82,5 @@ int main(void){
     unlink(v->settings_path);free(w);free(v);
     return 0;
 }
+
+#include "../new/audio/tests/sound_channels_menu_stub.inc"

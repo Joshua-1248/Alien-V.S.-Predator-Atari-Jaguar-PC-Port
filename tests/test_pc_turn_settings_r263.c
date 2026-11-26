@@ -19,7 +19,7 @@ static ssize_t avp_test_readlink(const char *path,char *target,size_t count)
     return (ssize_t)n;
 }
 #define readlink avp_test_readlink
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 #undef readlink
 
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}

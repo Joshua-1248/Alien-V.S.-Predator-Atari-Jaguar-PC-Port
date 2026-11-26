@@ -8,21 +8,9 @@
  * validation never pretends these are normal C objects. */
 void avp_jaguar_write_lowmem32(uintptr_t address, u32 value);
 
-#ifdef AVP_PC_HOST
-/* Native-host builds preserve the MMIO address semantics behind a platform
- * read boundary.  The PC game core only performs ordinary CPU reads through
- * these macros; Jaguar hardware builds retain direct volatile MMIO. */
-u8  avp_host_mmio_read8(uintptr_t address);
-u16 avp_host_mmio_read16(uintptr_t address);
-u32 avp_host_mmio_read32(uintptr_t address);
-#define AVP_MMIO8(a)  avp_host_mmio_read8((uintptr_t)(a))
-#define AVP_MMIO16(a) avp_host_mmio_read16((uintptr_t)(a))
-#define AVP_MMIO32(a) avp_host_mmio_read32((uintptr_t)(a))
-#else
 #define AVP_MMIO8(a)  (*(volatile u8  *)(uintptr_t)(a))
 #define AVP_MMIO16(a) (*(volatile u16 *)(uintptr_t)(a))
 #define AVP_MMIO32(a) (*(volatile u32 *)(uintptr_t)(a))
-#endif
 
 enum {
     JAG_BASE      = 0x00F00000u,

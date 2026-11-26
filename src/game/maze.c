@@ -1,8 +1,6 @@
 /* Readable C translation of active 68000 logic from MAZE/MAZE.S.
  * GPU rasterization itself remains a Jaguar/host-backend responsibility. */
 #include "maze.h"
-#include "music.h"
-#include "avp_sfx_ids.h"
 #include "avp_runtime.h"
 #include "player.h"
 #include "amp.h"
@@ -68,29 +66,6 @@ static void display_wait_tick(void)
     MazeList();
 }
 
-/* MAIN/MAZE campaign lifecycle is shared with the PC frame loop.  The
- * Jaguar normally advances this in PlayAvP; the PC host runs NextFrame's
- * constituent functions itself, so it must not skip the ending countdown.
- * Return 1 only when the campaign/death sequence has actually completed. */
-int avp_campaign_advance_end_count(void)
-{
-    const AvpRuntimeOps *o=avp_runtime_ops();
-    if(!end_count)return 0;
-    if(end_count==22 && destruct_flag && !launch_flag)ExplodeFade();
-    if((end_count==12 || end_count==11) && destruct_flag && !launch_flag){
-        if(o->play_sfx)o->play_sfx(o->user,AVP_FX_BSXP1);
-    }
-    if(end_count==10 && (!destruct_flag || launch_flag))FadeDown();
-    if(--end_count!=0)return 0;
-    if(use_cocoon){
-        /* UseCocoon requests a level transfer, possibly back to the SAME
-         * level. It is a respawn, not the completion of the campaign. */
-        UseCocoon();
-        return 0;
-    }
-    return 1;
-}
-
 void PlayAvP(void)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
@@ -110,25 +85,31 @@ load_complete:
     }
 
     for(;;){
-        if(avp_campaign_advance_end_count())break;
+        if(end_count){
+            if(end_count==22 && destruct_flag && !launch_flag)ExplodeFade();
+            if((end_count==12 || end_count==11) && destruct_flag && !launch_flag){if(o->play_sfx)o->play_sfx(o->user,0); /* bsxp1 */}
+            if(end_count==10 && (!destruct_flag || launch_flag))FadeDown();
+            if(--end_count==0){
+                if(use_cocoon){UseCocoon();}
+                else break;
+            }
+        }
         NextFrame();
         if(comp_panel){
-            /* MAZE.S::no_end calls unloop_all, not KillSounds: leave the
-               ambient and any protected alarm uninterrupted. */
-            UnLoopAl();
-            if(o->play_sfx)o->play_sfx(o->user,AVP_FX_COMPE); /* compenga */
+            if(o->kill_sounds)o->kill_sounds(o->user);
+            if(o->play_sfx)o->play_sfx(o->user,0); /* compenga */
             FadeDown();
             while(!faded)display_wait_tick();
             Computer();
-            if(o->play_sfx)o->play_sfx(o->user,AVP_FX_COMPD); /* compdis */
+            if(o->play_sfx)o->play_sfx(o->user,0); /* compdis */
             if(launch_flag)break;
             fade_level=0x80;fade_lim=0;fade_rate=-2;
         }
         if(new_level){
             int newduct=(new_level>=AVP_FIRST_DUCT&&new_level<=AVP_LAST_DUCT);
             int oldduct=(cur_level>=AVP_FIRST_DUCT&&cur_level<=AVP_LAST_DUCT);
-            if(newduct||oldduct){if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DUCT1);FadeDown();}
-            else if(!levfx_ID&&!use_cocoon && o->play_sfx)o->play_sfx(o->user,AVP_FX_DDOOR); /* ddoors */
+            if(newduct||oldduct){if(o->play_sfx)o->play_sfx(o->user,0);FadeDown();}
+            else if(!levfx_ID&&!use_cocoon && o->play_sfx)o->play_sfx(o->user,0); /* ddoors */
             if(cur_level<=AVP_LAST_DUCT && new_level<=AVP_LAST_DUCT && o->set_message)
                 o->set_message(o->user,(unsigned)(new_level>=AVP_FIRST_DUCT?4:3));
             LeaveLevel();
@@ -201,8 +182,7 @@ void Process_EndGame(void)
             player_dead=-1; key_lock=-1; wep_fire=0; end_count=10;
             const AvpRuntimeOps *o=avp_runtime_ops();
             if(o->set_message)o->set_message(o->user,1); /* msg_dead */
-            if(o->play_sfx)o->play_sfx(o->user,(player_type==PT_HUMAN)?AVP_FX_DEATH:
-                                               (player_type==PT_ALIEN)?AVP_FX_AHIT:AVP_FX_PD2);
+            if(o->play_sfx)o->play_sfx(o->user,(unsigned)(player_type==PT_HUMAN?1:player_type==PT_ALIEN?2:3));
             use_cocoon=0;
             if(player_type==PT_ALIEN && CheckCocoon()){
                 player_dead=0; key_lock=0; use_cocoon=-1; end_count=40;
@@ -241,12 +221,7 @@ void NextFrame(void)
     /* Alien bite is a view-only push.  The source arithmetic-shifts the view
      * cos/sin by alien_bite and adjusts only the GPU snapshot, never x_pos/y_pos. */
     view_sin=sin_ang;view_cos=cos_ang;
-    if(alien_bite){
-        /* MAZE.S ADD.L/SUB.L wrap modulo 2^32. The bite adjusts only the
-         * GPU view snapshot, never the physical player coordinates. */
-        gpu_xpos += (u32)(view_cos >> alien_bite);
-        gpu_ypos -= (u32)(view_sin >> alien_bite);
-    }
+    if(alien_bite){gpu_xpos=(u32)((s32)gpu_xpos+(view_cos>>alien_bite));gpu_ypos=(u32)((s32)gpu_ypos-(view_sin>>alien_bite));}
 
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(o->gpu_draw_screen)o->gpu_draw_screen(o->user);

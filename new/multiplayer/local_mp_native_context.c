@@ -1,6 +1,7 @@
 #include "local_mp_native_context.h"
 #include "collision.h"
 #include "maze.h"
+#include "hud.h"
 #include "joypad.h"
 #include <stddef.h>
 #include <string.h>
@@ -152,21 +153,24 @@ int avp_mp_native_world_leave(AvpMpNativeScope *s, AvpMpNativeWorld *w)
 }
 
 int avp_mp_native_run_world(AvpMpNativeWorld *w,
-                            AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS], unsigned mask,
+                            AvpMpActorNativeState *actors[AVP_LOCAL_MP_MAX_ACTORS], AvpMpActorMask mask,
                             AvpMpNativeActorStep actor_step,
                             AvpMpNativeWorldStep world_step, void *user)
 {
     AvpMpNativeScope scope={0};
     unsigned p;
     int ok=1;
-    if (!actors || !actor_step || !world_step || !mask || (mask&~((1u<<AVP_LOCAL_MP_MAX_ACTORS)-1u))) return 0;
+    if (!actors || !actor_step || !world_step || !mask || (mask&~(AVP_MP_ACTOR_VALID_MASK))) return 0;
     for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++)
-        if ((mask&(1u<<p)) && !actors[p]) return 0;
+        if ((mask&(AVP_MP_ACTOR_BIT(p))) && !actors[p]) return 0;
     if (!avp_mp_native_world_enter(&scope,w)) return 0;
     /* A retail game tick calls readpad once before UpdatePlayer. Multiple
      * actors must not increment that global clock more than once per world. */
     ++frame_counter;
-    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++) if(mask&(1u<<p)) {
+    /* Clock HUD.S in the same original 10-Hz tick domain as PLAYER.S.
+     * Prior F2 co-op did not advance HUD's frames_now at all. */
+    avp_hud_set_clock(frame_counter,10u);
+    for(p=0;p<AVP_LOCAL_MP_MAX_ACTORS;p++) if(mask&(AVP_MP_ACTOR_BIT(p))) {
         int step_ok,leave_ok;
         if (!avp_mp_native_actor_enter(&scope,actors[p])) {ok=0;break;}
         step_ok=actor_step(user,p);

@@ -4,6 +4,7 @@
 #include "local_mp_native_backend.h"
 #include "local_mp_amp_targets.h"
 #include "local_mp_commands.h"
+#include "local_mp_life.h"
 #include "collision.h"
 #include "doors.h"
 #include "maze.h"
@@ -30,6 +31,17 @@ s16 alien_bite,medpak,show_mt;
 uintptr_t savegame;
 AvpAmmoInfo ammo_info[6];
 static unsigned acid_sound_events;
+static unsigned private_acid_events;
+static unsigned private_acid_by_player[AVP_LOCAL_MP_MAX_ACTORS];
+static void private_acid_observer(void *user,unsigned player,unsigned level,
+                                  int32_t x,int32_t y)
+{
+    (void)user;
+    if(player>=AVP_LOCAL_MP_MAX_ACTORS || level!=3u ||
+       x!=0x000a8000 || y!=0x000b8000)return;
+    ++private_acid_events;
+    ++private_acid_by_player[player];
+}
 static void acid_sound_observer(void *user,unsigned id)
 {
     (void)user;
@@ -57,11 +69,21 @@ typedef struct Fixture {
     unsigned post_actors[4], post_observed_world[4];
     unsigned drawn_world;
     unsigned dying_mask;
+    unsigned vent_mask; /* test-only world presence during an original duct fade */
     unsigned death_view_snapshots[4];
     unsigned snapshot_pre_update_ok;
 } Fixture;
 static uint32_t frames[4][320u*228u];
 static unsigned targeted_mode_visits;
+static unsigned enemy_source_begins,enemy_source_ends,enemy_source_invalid;
+static void enemy_source_observer(void *u,const AvpAmp *a,unsigned level,int entering)
+{
+    (void)u;
+    if(!a || level!=3u || a->xpos!=0x000a8000 || a->ypos!=0x000b8000)
+        ++enemy_source_invalid;
+    if(entering)++enemy_source_begins;
+    else ++enemy_source_ends;
+}
 /* Test ONLY: observable original AMP mode-callback ABI, not replacement AI. */
 static void targeted_mode(AvpAmp *a)
 {
@@ -70,17 +92,17 @@ static void targeted_mode(AvpAmp *a)
     player_energy=(s16)(player_energy-13);
 }
 static int choose_second(void *user,const AvpAmp *a,unsigned index,
-                         unsigned mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
+                         AvpMpActorMask mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
 {
     (void)user;(void)a;(void)index;
     return (mask&2u)&&actors[1] ? 1 : -1;
 }
 
 static int choose_invalid(void *user,const AvpAmp *a,unsigned index,
-                          unsigned mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
+                          AvpMpActorMask mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
 {(void)user;(void)a;(void)index;(void)mask;(void)actors;return -2;}
 static int choose_living(void *user,const AvpAmp *a,unsigned index,
-                         unsigned mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
+                         AvpMpActorMask mask,const AvpMpActorNativeState *const actors[AVP_LOCAL_MP_MAX_ACTORS])
 {
     (void)user;(void)a;(void)index;
     for(unsigned p=0;p<4;p++)if((mask&(1u<<p))&&actors[p]&&
@@ -113,17 +135,23 @@ static int prepare_p1(void *u,AvpMpActorNativeState *a,const AvpMpPlayerCommand 
      * here. This test deliberately leaves the original P1 bindings intact. */
     return avp_mp_player_native_valid(&a->player);
 }
+static int actor_world_present(void *u,unsigned p)
+{
+    Fixture *f=(Fixture *)u;
+    return p<4u && !(f->vent_mask&(1u<<p));
+}
 static int step_actor(void *u,unsigned p)
 {
     Fixture *f=(Fixture *)u;
     f->tick_actors[p]++;
+    if(f->vent_mask&(1u<<p))return 1;
     player_energy=(s16)(player_energy+2);
     update_wep(); /* original nonfiring MAZESCRN.S command */
     return 1;
 }
 /* Test the original world's presentation prepass even when the player
  * has no movement step. No replacement AMP simulation is used. */
-static int snapshot_dying_views(void *u,unsigned mask)
+static int snapshot_dying_views(void *u,AvpMpActorMask mask)
 {
     Fixture *f=(Fixture *)u;
     unsigned w=(unsigned)(cur_level-3);
@@ -156,6 +184,7 @@ static int step_post_actor(void *u,unsigned p)
     if(p>=4u||w>=2u)return 0;
     f->post_actors[p]++;
     f->post_observed_world[p]=f->tick_levels[w];
+    if(f->vent_mask&(1u<<p))return 1;
     /* Confirm the REAL player/weapon source globals belong to this actor,
      * with the post-world phase running after its world tick. */
     player_energy=(s16)(player_energy+3);
@@ -223,6 +252,7 @@ int main(void)
               levelbytes[i]+8,5,5,3+i));
         f.worlds[i].amp=host_amp;
         f.worlds[i].amp.free_count=AVP_NUM_AMPS;
+        f.worlds[i].amp.host_amp_capacity=AVP_NUM_AMPS;
         for(n=0;n<AVP_NUM_AMPS;n++)
             f.worlds[i].amp.free_list[n]=(u16)(AVP_NUM_AMPS-1u-n);
     }
@@ -336,6 +366,7 @@ int main(void)
         CHECK(enemy!=NULL);
         enemy->mode=targeted_mode;enemy->host_static=0;
         enemy->timer=0;enemy->creature=AC_HUMAN;
+        enemy->xpos=0x000a8000;enemy->ypos=0x000b8000;
         CHECK(avp_mp_native_world_leave(&scope,w));
         amp_before=w->amp;
         actor_before=*second;
@@ -357,9 +388,12 @@ int main(void)
         CHECK(targeted_mode_visits==0u);
         w->amp=amp_before;
         CHECK(avp_mp_native_world_enter(&scope,w));
-        CHECK(avp_mp_amp_step_targets(roster,3u,choose_second,NULL));
+        CHECK(avp_mp_amp_step_targets_spatial(roster,3u,choose_second,
+             NULL,NULL,NULL,enemy_source_observer));
         CHECK(avp_mp_native_world_leave(&scope,w));
         CHECK(targeted_mode_visits==1u);
+        CHECK(enemy_source_begins==1u && enemy_source_ends==1u);
+        CHECK(enemy_source_invalid==0u);
         CHECK(first->player.player_energy==before0);
         CHECK(second->player.player_energy==(s16)(before1-13));
         CHECK(w->amp.actors[2].timer==1u);
@@ -571,8 +605,107 @@ int main(void)
         CHECK(avp_mp_native_world_leave(&scope,w));
         CHECK((w->amp.actors[2].flags&(1u<<AMP_ALTFRAME))==0u);
         CHECK(acid_sound_events==sfx_before);
+        /* R126: local multiplayer footsteps MUST be attributed to each
+         * contacting actor, rather than playing one global ACIDX whenever
+         * any actor touches the same puddle. Restore two living Marines
+         * on the same acid contact square and bind the true level scope. */
+        roster[0]->player.player_energy=200;
+        roster[3]->player.player_energy=200;
+        roster[0]->player.game_over=0;
+        roster[3]->player.game_over=0;
+        roster[0]->player.x_pos=roster[3]->player.x_pos=0x000a8000u;
+        roster[0]->player.y_pos=roster[3]->player.y_pos=0x000b8000u;
+        memset(w->acid_contact_masks,0,sizeof w->acid_contact_masks);
+        private_acid_events=0u;
+        memset(private_acid_by_player,0,sizeof private_acid_by_player);
+        CHECK(avp_mp_native_world_enter(&scope,w));
+        CHECK(avp_mp_amp_step_targets_local_acid(roster,9u,choose_living,NULL,
+                  w->acid_contact_masks,private_acid_observer));
+        CHECK(avp_mp_native_world_leave(&scope,w));
+        CHECK(private_acid_events==2u);
+        CHECK(private_acid_by_player[0]==1u && private_acid_by_player[3]==1u);
+        CHECK(acid_sound_events==sfx_before); /* NO shared global sound */
+        CHECK(w->acid_contact_masks[2]==9u);
+        CHECK(roster[0]->player.player_energy==197);
+        CHECK(roster[3]->player.player_energy==197);
+        /* Standing in acid keeps hurting, but does not replay the sound. */
+        CHECK(avp_mp_native_world_enter(&scope,w));
+        CHECK(avp_mp_amp_step_targets_local_acid(roster,9u,choose_living,NULL,
+                  w->acid_contact_masks,private_acid_observer));
+        CHECK(avp_mp_native_world_leave(&scope,w));
+        CHECK(private_acid_events==2u);
+        CHECK(roster[0]->player.player_energy==194);
+        CHECK(roster[3]->player.player_energy==194);
+        /* One person leaves and returns while the other still stands on
+         * acid: the returning person receives their own fresh footstep,
+         * even though the original puddle's shared ALTFRAME stays set. */
+        roster[0]->player.x_pos=0x000c8000u;
+        CHECK(avp_mp_native_world_enter(&scope,w));
+        CHECK(avp_mp_amp_step_targets_local_acid(roster,9u,choose_living,NULL,
+                  w->acid_contact_masks,private_acid_observer));
+        CHECK(avp_mp_native_world_leave(&scope,w));
+        CHECK(w->acid_contact_masks[2]==8u && private_acid_events==2u);
+        roster[0]->player.x_pos=0x000a8000u;
+        CHECK(avp_mp_native_world_enter(&scope,w));
+        CHECK(avp_mp_amp_step_targets_local_acid(roster,9u,choose_living,NULL,
+                  w->acid_contact_masks,private_acid_observer));
+        CHECK(avp_mp_native_world_leave(&scope,w));
+        CHECK(private_acid_events==3u && private_acid_by_player[0]==2u);
+        CHECK(private_acid_by_player[3]==1u);
+        /* Immune and dead actors get neither contact damage nor a cue. */
+        roster[0]->player.player_energy=0;
+        CHECK(avp_mp_native_world_enter(&scope,w));
+        CHECK(avp_mp_amp_step_targets_local_acid(roster,11u,choose_living,NULL,
+                  w->acid_contact_masks,private_acid_observer));
+        CHECK(avp_mp_native_world_leave(&scope,w));
+        CHECK(private_acid_events==3u);
+        CHECK(private_acid_by_player[1]==0u); /* Alien is immune */
+        CHECK(private_acid_by_player[2]==0u); /* another level */
         CHECK(avp_mp_actor_native_capture(&after_actor));
         CHECK(memcmp(&host_actor,&after_actor,sizeof(host_actor))==0);
+    }
+    /* R272: a duct passenger is not in this level for collision, targeting,
+     * death-spray or acid contact from fade-out through the LAST fade-in
+     * field. Other actors and the authentic AMP/world tick continue. */
+    {
+        AvpMpActorNativeState *passenger=(AvpMpActorNativeState *)session.player[3];
+        AvpMpLife transit={0};
+        s16 before;
+        unsigned acid_before,visits_before,world_before;
+        CHECK(passenger!=NULL);
+        passenger->player.player_energy=200;
+        passenger->player.x_pos=0x000a8000u;
+        passenger->player.y_pos=0x000b8000u;
+        host.actor_world_present=actor_world_present;
+        avp_mp_life_begin(&transit);
+        f.vent_mask=1u<<3;
+        before=passenger->player.player_energy;
+        acid_before=private_acid_events;
+        visits_before=targeted_mode_visits;
+        world_before=f.tick_levels[0];
+        CHECK(avp_mp_session_tick(&session,commands));
+        CHECK(passenger->player.player_energy==before);
+        CHECK(private_acid_events==acid_before);
+        CHECK(f.tick_levels[0]==world_before+1u);
+        CHECK(targeted_mode_visits>=visits_before);
+        for(unsigned i=0;i<64u;i++)(void)avp_mp_life_display_step(&transit);
+        CHECK(transit.phase==AVP_MP_LIFE_WAIT_LEVEL);
+        avp_mp_life_resumed(&transit);
+        CHECK(transit.phase==AVP_MP_LIFE_FADE_IN);
+        for(unsigned i=0;i<63u;i++)(void)avp_mp_life_display_step(&transit);
+        CHECK(avp_mp_life_busy(&transit));
+        CHECK(avp_mp_session_tick(&session,commands));
+        CHECK(passenger->player.player_energy==before);
+        CHECK(private_acid_events==acid_before);
+        CHECK(!avp_mp_life_display_step(&transit));
+        CHECK(!avp_mp_life_busy(&transit));
+        f.vent_mask=0u;
+        CHECK(avp_mp_session_tick(&session,commands));
+        CHECK(passenger->player.player_energy<before+5);
+        /* On re-entry the normal world step resumes; a cue is not
+         * guaranteed if this original puddle has already aged out. */
+        CHECK(passenger->player.player_energy!=before);
+        CHECK(f.vent_mask==0u);
     }
     avp_mp_session_stop(&session);
     puts("PASS: native multiworld session, Alien player acid immunity, other species acid contact, death isolation, source AMP parity and host restoration");

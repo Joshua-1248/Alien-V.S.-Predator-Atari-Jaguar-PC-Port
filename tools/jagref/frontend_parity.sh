@@ -11,7 +11,7 @@ rom=${1:?AVP.jag}; root="$(cd "$(dirname "$0")/../.." && pwd)"; build=${2:-$root
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 "$build/jagref" "$rom" 1000 200 "$tmp" >/dev/null
 cc -std=c99 -O2 -I"$root/include" -c "$root/tools/jagref/frontend_parity_probe.c" -o "$tmp/probe.o"
-link=$(sed "s# CMakeFiles/avp_pc.dir/src/platform/pc/pc_main.c.o# $tmp/probe.o#; s#-o avp_pc#-o $tmp/probe#" "$build/CMakeFiles/avp_pc.dir/link.txt")
+link=$(sed "s# CMakeFiles/avp_pc.dir/new/pc_host/src/pc_main.c.o# $tmp/probe.o#; s#-o avp_pc#-o $tmp/probe#" "$build/CMakeFiles/avp_pc.dir/link.txt")
 (cd "$build" && eval "$link")
 (cd "$tmp" && ./probe "$rom")
 python3 - "$tmp/frame_00600.ppm" "$tmp/m_title.ppm" "$tmp/frame_01000.ppm" "$tmp/m_menu.ppm" <<'PY'

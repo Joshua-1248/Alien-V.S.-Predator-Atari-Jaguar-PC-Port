@@ -1,5 +1,5 @@
 /* Actual hosted Jaguar renderer distance handoff, not a simulated scanner. */
-#include "../../../src/jaguar/avp_gpu/software_renderer.c"
+#include "../../../new/jaguar/avp_gpu/software_renderer.c"
 #include <stdio.h>
 /* The unmodified source AMP allocator's live array; all-zero means no
  * active native enemies in these independently constructed view tests. */

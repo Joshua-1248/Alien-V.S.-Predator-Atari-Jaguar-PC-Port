@@ -69,46 +69,63 @@ int main(void)
       CHECK(avp_mp_sprite_attack_pose_view(0,3,4,0,1).frame==0);
       CHECK(!avp_mp_sprite_attack_pose_view(0,3,4,0,0).active);
     }
-    /* R62: the retail AAF 18 frontal crouch sheet is staged once per hold:
-     * lower [0,1,1], sustained [2,1] without frame 3, rise [1,0]. Do not
-     * loop the standing pose while holding, or skip the release animation. */
+    /* R269: The original retail AAF 18 and AMP.S show exactly TWO
+     * pre-fire poses [0,1] followed by the exclusively crouched [2,3]
+     * flash/no-flash loop. The old [2,1] repeated the LOWERING pose and
+     * made the Marine crouch twice. Frontal fall-through to the generic
+     * attack pose is prohibited, as it pre-displays an extra crouched pose. */
     for(unsigned weapon=2u;weapon<=4u;weapon+=2u){
         AvpMpMarineCrouchAnim crouch={0,0};
+        CHECK(avp_mp_sprite_marine_front_owns_attack(0u,weapon,1u));
+        CHECK(!avp_mp_sprite_marine_front_owns_attack(0u,weapon,0u));
+        CHECK(!avp_mp_sprite_marine_front_owns_attack(1u,weapon,1u));
+        CHECK(!avp_mp_sprite_marine_front_owns_attack(0u,1u,1u));
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,100);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_LOWER);
         p=avp_mp_sprite_marine_crouch_pose_present(&crouch,100,0.0,weapon);
         CHECK(p.active && p.sequence==AS_FIGHT1 && p.frame==0);
+        /* Actual multiplayer world steps the weapon callback at tick N,
+         * increments session.tick to N+1, THEN renders. The first visible
+         * tick must show the upright frame, exactly the reverse of the
+         * unmodified release sequence. Never start on a crouch or leave a
+         * standing-frame gap immediately before the fire loop. */
+        p=avp_mp_sprite_marine_crouch_pose_present(&crouch,101,0.0,weapon);
+        CHECK(p.active && p.sequence==AS_FIGHT1 && p.frame==0);
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,101);
-        CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,101,0.0,weapon).frame==1);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,102);
-        /* Entry must visibly reach and HOLD the crouch before looping. */
+        p=avp_mp_sprite_marine_crouch_pose_present(&crouch,101,0.90,weapon);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_LOWER);
-        CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,102,0.0,weapon).frame==1);
-        CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,102,0.95,weapon).frame==1);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,103);
+        CHECK(p.active && p.frame==0);
+        p=avp_mp_sprite_marine_crouch_pose_present(&crouch,102,0.90,weapon);
+        CHECK(p.active && p.frame==1);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,102);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_FIRE);
-        for(unsigned tick=103;tick<130;tick++){
+        p=avp_mp_sprite_marine_crouch_pose_present(&crouch,102,0.0,weapon);
+        CHECK(p.active && p.frame==2);
+        /* The loop must NEVER show 0 (standing) or 1 (lowering). */
+        for(unsigned tick=102;tick<130;tick++){
             avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,tick);
-            p=avp_mp_sprite_marine_crouch_pose_present(&crouch,tick,0.0,weapon);
-            CHECK(p.active && p.sequence==AS_FIGHT1);
-            CHECK(p.frame==2u); /* 2x / 4x: sampled at whole ticks, both begin at 2. */
-            CHECK(p.frame!=0u && p.frame!=3u); /* no mid-burst stand-up */
+            for(unsigned k=0;k<4;k++){
+                p=avp_mp_sprite_marine_crouch_pose_present(
+                        &crouch,tick,(double)k/4.0,weapon);
+                CHECK(p.active && p.sequence==AS_FIGHT1);
+                CHECK(p.frame==2u || p.frame==3u);
+            }
         }
-        /* Exact 20/40 Hz presentation phase samples within a single
-         * unchanged 10 Hz simulation tick. Crouch entry/exit stays 10 Hz. */
+        /* Original game still ticks at 10 Hz; the fractional renderer
+         * samples 20 Hz Pulse or 40 Hz Smart without extra game ticks. */
         { static const double fractions[]={0.05,0.30,0.55,0.80,0.999};
-          static const unsigned pulse[]={2,2,1,1,1};
-          static const unsigned smart[]={2,1,2,1,1};
+          static const unsigned pulse[]={2,2,3,3,3};
+          static const unsigned smart[]={2,3,2,3,3};
           const unsigned *expect=weapon==2u?pulse:smart;
           for(unsigned k=0;k<5;k++){
               p=avp_mp_sprite_marine_crouch_pose_present(&crouch,129,
                   fractions[k],weapon);
-              CHECK(p.active && p.sequence==AS_FIGHT1 && p.frame==expect[k]);
+              CHECK(p.active && p.frame==expect[k]);
           }
           p=avp_mp_sprite_marine_crouch_pose_present(&crouch,129,-1.0,weapon);
           CHECK(p.active && p.frame==2);
           p=avp_mp_sprite_marine_crouch_pose_present(&crouch,129,1.0,weapon);
-          CHECK(p.active && p.frame==1);
+          CHECK(p.active && p.frame==3);
         }
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,0,0,130);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_RAISE);
@@ -118,24 +135,24 @@ int main(void)
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,0,0,132);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_IDLE);
         CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,132,0.0,weapon).active);
-        /* Re-press after the release started immediately enters lower. */
+        /* A re-press while raising must restart with the STANDING pose,
+         * not an immediately crouched firing frame. */
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,140);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,142);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,0,0,143);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,141);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,0,0,142);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_RAISE);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,144);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,143);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_LOWER);
-        CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,144,0.0,weapon).frame==0);
-        /* Pain, death and weapon changes cancel visual transition. */
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,1,145);
-        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,145,0.0,weapon).active);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,146);
-        avp_mp_sprite_marine_crouch_update(&crouch,1u,1,0,147);
-        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,147,0.0,weapon).active);
-        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,148);
-        avp_mp_sprite_marine_crouch_update(&crouch,3u,1,0,149);
-        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,149,0.0,weapon).active);
-        /* A tap shorter than one native frame must not crouch on release. */
+        CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,143,0.0,weapon).frame==0);
+        /* Damage/death and weapon switching still cancel the cosmetic pose. */
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,1,144);
+        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,144,0.0,weapon).active);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,145);
+        avp_mp_sprite_marine_crouch_update(&crouch,1u,1,0,146);
+        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,146,0.0,weapon).active);
+        avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,147);
+        avp_mp_sprite_marine_crouch_update(&crouch,3u,1,0,148);
+        CHECK(!avp_mp_sprite_marine_crouch_pose_present(&crouch,148,0.0,weapon).active);
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,1,0,150);
         avp_mp_sprite_marine_crouch_update(&crouch,weapon,0,0,150);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_IDLE);
@@ -175,9 +192,9 @@ int main(void)
         avp_mp_sprite_marine_crouch_update(&crouch,2,1,0,12);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_LOWER);
         CHECK(avp_mp_sprite_marine_crouch_pose_present(&crouch,12,0.5,2).frame==0);
-        avp_mp_sprite_marine_crouch_update(&crouch,2,1,0,14);
+        avp_mp_sprite_marine_crouch_update(&crouch,2,1,0,13);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_LOWER);
-        avp_mp_sprite_marine_crouch_update(&crouch,2,1,0,15);
+        avp_mp_sprite_marine_crouch_update(&crouch,2,1,0,14);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_FIRE);
         avp_mp_sprite_marine_crouch_update(&crouch,2,1,1,16);
         CHECK(crouch.phase==AVP_MP_MARINE_CROUCH_IDLE);

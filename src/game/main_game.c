@@ -15,9 +15,6 @@
 #include "joypad.h"
 #include "avp_runtime.h"
 #include <stdint.h>
-#ifdef AVP_PC_HOST
-#include "pc/pc_title_reference.h"
-#endif
 
 u8 in_title,in_select,allow_reset;
 static u8 stopped;
@@ -51,22 +48,6 @@ void Title(void)
     fevent(0x5449544cu,0,0);
 }
 
-#ifdef AVP_PC_HOST
-/* One-shot exception for the PC's emulated cold-black fields. On the retail
- * 68000 the title score is started in cartridge boot before $01F118 Title;
- * the hosted entry calls NewTitle only AFTER its black startup interval.
- * Restarting there would discard notes already advanced in the preroll. */
-static unsigned pc_title_music_prestarted;
-/* INTRO returns to the title animation with its score still running.
- * It is not a fresh music selection: do not rewind the live score stream. */
-static unsigned pc_title_music_continues_after_attract;
-void avp_pc_title_music_prestart(void)
-{
-    StartMus(AVP_MUSIC_TITLE3);
-    pc_title_music_prestarted=1u;
-}
-#endif
-
 void NewTitle(void)
 {
     in_title=0xffu;
@@ -90,42 +71,10 @@ restart_title:
     }
     allow_reset=0xffu;
 
-    /* MAIN.S passes #title3_music through ram_music here.  Keep that
-     * CPU-owned descriptor selection in the translated game layer; the
-     * Jaguar/host audio backend owns score/patch synthesis. */
-#ifdef AVP_PC_HOST
-    if(pc_title_music_prestarted)pc_title_music_prestarted=0u;
-    else if(pc_title_music_continues_after_attract)
-        pc_title_music_continues_after_attract=0u;
-    else
-#endif
-        StartMus(AVP_MUSIC_TITLE3);
-    /* The original port's 141-VBL placeholder omitted the retail title GPU
-     * jobs and its two interruptible Pause() waits (30 and 260 VBLs).  The
-     * standalone original-C library preserves that historical contract.
-     * Only the PC host uses the ROM/reference-machine-derived presentation
-     * sequence; no other gameplay or MJP menu logic is changed. */
-    avp_mjp_prepare_title();
-    Title();
-#ifdef AVP_PC_HOST
-    for(unsigned i=0u;i<AVP_PC_TITLE_SEQUENCE_FIELDS;i++){
-        /* Retail $01FC08 and $01FC98 call Pause() with 30 and 260 ticks.
-         * A/B/C input can interrupt EACH wait; it does not interrupt the
-         * GPU logo animations. Forward only a presentation clock jump, not
-         * thousands of game/sound ticks or a synthetic menu Fire press. */
-        if(i>=AVP_PC_TITLE_WAIT30_START && i<AVP_PC_TITLE_WAIT_END){
-            readpad();
-            if((~joy_cur&0x22002000u)!=0u){
-                i=i<AVP_PC_TITLE_WAIT260_START?
-                    AVP_PC_TITLE_WAIT260_START:AVP_PC_TITLE_WAIT_END;
-                fevent(AVP_PC_TITLE_SKIP_EVENT,(s32)i,0);
-            }
-        }
-        VSync();fevent(0x5449434bu,0,0);
-    }
-#else
-    for(unsigned i=0;i<141u;i++){VSync();fevent(0x5449434bu,0,0);}
-#endif
+    /* Retail starts title music then waits 141 VBLs before entering the MJP
+     * main menu.  Asset identity is backend/resource-owned. */
+    fevent(0x544d5553u,1,0);
+    for(unsigned i=0;i<141u;i++)VSync();
 
 main_menu:
     /* 50 Hz video uses the authored 320x280 menu framing; 60 Hz remains at
@@ -135,14 +84,6 @@ main_menu:
     Choice=0;
     MTEST(AVP_MJP_TITLE);
     SetScreen(320,240);
-#ifdef AVP_LOCAL_MULTIPLAYER_FRONTEND_LAUNCH_BRIDGE
-    if(Choice==6){
-        /* New host F2 Start Game request. Do not enter the original species
-         * selector or interpret 6 as a Jaguar menu option. The PC main loop
-         * consumes the requested setup and enters the native MP experiment. */
-        WaitFXFa();StopMusi();VSync();InitFile();return;
-    }
-#endif
     if(Choice<0){
         s32 slot=-Choice-1;
         if(slot<0||slot>2)slot=0;
@@ -164,7 +105,6 @@ main_menu:
     }
     if(Choice==0){
         Choice=0;MTEST(AVP_MJP_SELECT);
-        End_Sele(); /* original character-detail prompt and confirmation */
         s32 p=Choice&0x0c;
         if(p==0x0c)p=0;
         player_type=(s16)p;
@@ -180,25 +120,11 @@ main_menu:
         grunke=0;Choice=0;MTEST(AVP_MJP_FAME);
         goto main_menu;
     }
-    if(Choice==4){
-        /* Retail MAIN.S restarts the title presentation after Do_Intro,
-         * including the logo GPU jobs and the two Pause() intervals.
-         * Returning straight to main_menu skipped all of that on PC.
-         * On the next title resource load, the host also resets the separate
-         * Jaguar ROM reference renderer, without a second cold boot delay. */
-        MTEST(AVP_MJP_INTRO);
-#ifdef AVP_PC_HOST
-        /* R92: the Jaguar title-music score continues through the attract
-         * and its following native title-logo replay. Replaying the title
-         * animation must not stop/restart the ongoing FullSynth sequence. */
-        pc_title_music_continues_after_attract=1u;
-#endif
-        goto restart_title;
-    }
+    if(Choice==4){MTEST(AVP_MJP_INTRO);goto main_menu;}
     goto main_menu;
 }
 
-static void avp_post_game_frontend_impl(int allow_high_scores)
+static void post_game_frontend(void)
 {
     /* MAIN.S ProtectVoices(7), then exact InitMJP video/front-end setup. */
     ProtectV(7);
@@ -209,8 +135,9 @@ static void avp_post_game_frontend_impl(int allow_high_scores)
         MTEST(AVP_MJP_SIM_TERMINATED);
         grunke=2;
     }else{
-        /* MAIN.S starts pred_music for this block regardless of species. */
-        StartMus(AVP_MUSIC_PREDATOR_ENDING);
+        /* The retail source starts pred_music for the ending block regardless
+         * of species before dispatching the species-specific sequence. */
+        fevent(0x454d5553u,1,0);
         if(player_type==PT_HUMAN){
             if(launch_flag)MTEST(AVP_MJP_ESCAPE);
             else MTEST(AVP_MJP_BASE_EXPLODES);
@@ -219,22 +146,10 @@ static void avp_post_game_frontend_impl(int allow_high_scores)
         if(player_type==PT_PREDATOR)MTEST(AVP_MJP_PRED_WIN);
         grunke=1;
     }
-    /* Multiplayer scores are ineligible for the retail Hall of Fame.
-     * Preserve this original path unchanged for single-player. */
-    if(allow_high_scores)MTEST(AVP_MJP_FAME);
+    MTEST(AVP_MJP_FAME);
     WaitFXFa();
     StopMusi();
     fevent(0x5545564fu,0x7fff,0); /* UEBERVOLUME restore */
-}
-
-void avp_post_game_frontend(void)
-{
-    avp_post_game_frontend_impl(1);
-}
-
-void avp_post_game_frontend_multiplayer(void)
-{
-    avp_post_game_frontend_impl(0);
 }
 
 static void back_in_runtime(void)
@@ -255,7 +170,7 @@ static void back_in_runtime(void)
         in_title=0;in_select=0;savegame=0;
         NewTitle();
         PlayAvP();
-        avp_post_game_frontend();
+        post_game_frontend();
     }
 }
 

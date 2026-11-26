@@ -18,6 +18,7 @@ local_multiplayer.show_other_players_on_automap=false
 local_multiplayer.three_layout=1
 local_multiplayer.bot_count=5
 local_multiplayer.dm_cloak_damage=true
+local_multiplayer.dm_predator_uncloaked_damage=true
 local_multiplayer.input.p2.cheat_no_facehug=1
 local_multiplayer.input.p3.cheat_no_enemy_attack=1
 local_multiplayer.input.p4.cheat_reveal_map=1
@@ -30,6 +31,7 @@ for line in \
  'local_multiplayer.three_layout=1' \
  'local_multiplayer.bot_count=5' \
  'local_multiplayer.dm_cloak_damage=true' \
+ 'local_multiplayer.dm_predator_uncloaked_damage=true' \
  'local_multiplayer.input.p2.cheat_no_facehug=1' \
  'local_multiplayer.input.p3.cheat_no_enemy_attack=1' \
  'local_multiplayer.input.p4.cheat_reveal_map=0'; do

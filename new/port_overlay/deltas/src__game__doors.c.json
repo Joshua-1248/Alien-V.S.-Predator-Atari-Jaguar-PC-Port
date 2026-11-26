@@ -1,0 +1,192 @@
+{
+  "path": "src/game/doors.c",
+  "base_sha256": "832029be1025d63f30d091fffcb9db4b92cda51fa66534886c9a332a31e30bbb",
+  "output_sha256": "3e547160bf2ad4e7e456aa92becd34b1b006a1b83bc4faccf022ebf3c32bbed4",
+  "edits": [
+    {
+      "start": 16,
+      "end": 16,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 40,
+      "end": 42,
+      "replacement": "    DSFX_RISE2=AVP_FX_RISE2, DSFX_DDOORS=AVP_FX_DDOOR, DSFX_FLUP1=AVP_FX_FLUP1, DSFX_EL10X=AVP_FX_EL10X,\n    DSFX_AIRLOCK=AVP_FX_AIRLO, DSFX_ACCD=AVP_FX_ACCD, DSFX_ACCG=AVP_FX_ACCG\n"
+    },
+    {
+      "start": 48,
+      "end": 49,
+      "replacement": "#include \"../../new/multiplayer/local_mp_door_options.inc\"\n"
+    },
+    {
+      "start": 54,
+      "end": 54,
+      "replacement": "/* Reserve a small bookkeeping trailer INSIDE the existing Jaguar door-state\n * arena. No new BSS or quicksave fields are introduced by this host safety\n * guard, so pre-existing quickstate core sizes remain unchanged. */\n#define L2L_META_BYTES (AVP_MAX_LEVEL*2u)\n#define L2L_DOOR_BYTES (AVP_L2L_SIZE-L2L_META_BYTES)\nstatic unsigned l2l_span_length(unsigned level)\n{\n    unsigned offset=L2L_DOOR_BYTES+level*2u;\n    return ((unsigned)l2l_area[offset]<<8)|l2l_area[offset+1u];\n}\nstatic void l2l_store_length(unsigned level,unsigned length)\n{\n    unsigned offset=L2L_DOOR_BYTES+level*2u;\n    l2l_area[offset]=(u8)(length>>8);\n    l2l_area[offset+1u]=(u8)length;\n}\n"
+    },
+    {
+      "start": 74,
+      "end": 74,
+      "replacement": "#include \"../../new/multiplayer/door_exit_kind.inc\"\n"
+    },
+    {
+      "start": 130,
+      "end": 131,
+      "replacement": "    for(n=0;n<AVP_MAX_LEVEL;++n){l2l_off[n]=-1;l2l_store_length(n,0);}\n"
+    },
+    {
+      "start": 151,
+      "end": 152,
+      "replacement": "    /* Each level owns exactly the number of door bytes originally saved.\n     * If a rebound map has a different layout, writing into the old slot\n     * would overwrite the next level's saved doors. Allocate a new span;\n     * previously saved spans remain untouched until InitDoors resets them. */\n    if(l2l_off[cur_level-1]<0 || l2l_span_length((unsigned)cur_level-1u)!=need){\n        if(need>L2L_DOOR_BYTES-(unsigned)l2l_used)return;\n        l2l_off[cur_level-1]=(s16)l2l_used;\n        l2l_store_length((unsigned)cur_level-1u,need);\n        l2l_used=(u16)(l2l_used+need);\n    }\n"
+    },
+    {
+      "start": 179,
+      "end": 180,
+      "replacement": "    /* Never apply saved bytes to a map with a different number of doors.\n     * Otherwise ResetDoors reads into another level's stored state. */\n    if(maze_data&&cur_level>=1&&cur_level<=AVP_MAX_LEVEL&&\n       l2l_off[cur_level-1]>=0 && l2l_span_length((unsigned)cur_level-1u)==door_byte_count())\n        in=l2l_area+(unsigned)l2l_off[cur_level-1];\n"
+    },
+    {
+      "start": 194,
+      "end": 194,
+      "replacement": "#include \"../../new/multiplayer/door_lift_input_query.inc\"\n\n"
+    },
+    {
+      "start": 230,
+      "end": 230,
+      "replacement": "    /* R467 PC bot-only: the planner's observation can be stale because\n     * a preceding actor may have used either door in this same tick.\n     * Even a zero opening byte is unsafe while a slot is active. */\n    if(mp_bot_airlock_interlock){\n        const size_t count=(size_t)maze_w*maze_h*CELL;\n        if(!maze_data || door_off>=count || maze_data[door_off] ||\n           door1.ptr==maze_data+door_off || door2.ptr==maze_data+door_off ||\n           !ie || !ie->required_count)return 0;\n        for(i=0;i<ie->required_count;i++){\n            const size_t off=ie->required_offsets[i];\n            if(off>=count || maze_data[off] ||\n               door1.ptr==maze_data+off || door2.ptr==maze_data+off)return 0;\n        }\n    }\n"
+    },
+    {
+      "start": 238,
+      "end": 238,
+      "replacement": "    if(new_level)host_exit_kind=AVP_DOORS_EXIT_AIRLOCK;\n"
+    },
+    {
+      "start": 239,
+      "end": 239,
+      "replacement": "}\nstatic int jammed_door(const u8 *door)\n{\n    const AvpDoorAccessEntry *ae;\n    if(!maze_data||!door)return 0;\n    ae=find_access((u16)(door-maze_data));\n    return ae && ae->code==AVP_ACC_JAMMED;\n"
+    },
+    {
+      "start": 247,
+      "end": 248,
+      "replacement": "    if(code==AVP_ACC_EXIT){\n        if(mp_dm_no_travel){avp_hudmsg_queue(avp_msg_airlocked);return 0;}\n        (void)airlock_exit((u16)(door-maze_data),panel_off);return 0;\n    }\n"
+    },
+    {
+      "start": 249,
+      "end": 250,
+      "replacement": "    /* Numeric security cards gate Marines only. The retail species profiles\n     * start Alien/Predator at access 10; use the species rule here as well so\n     * host save/MP state cannot manufacture a security-denied non-Marine.\n     * Authored JAMMED/UNUSED/EXIT interlocks above remain unchanged. */\n    if(code>0 && player_type==PT_HUMAN && (u16)code>acs_level){avp_hudmsg_set_access_code((unsigned)code);avp_hudmsg_queue(avp_msg_access_denied);play(DSFX_ACCD);return 0;}\n"
+    },
+    {
+      "start": 260,
+      "end": 261,
+      "replacement": "    /* A signed 16-bit room coordinate scaled by 65536 always fits s32.\n     * Unlike a signed left shift, multiplication also defines negative\n     * door-edge positions while preserving the original 16.16 word. */\n    d->xpos=(s32)x*65536;d->ypos=(s32)y*65536;d->index=(u16)(((side&1u)!=0u)?4u:0u);\n"
+    },
+    {
+      "start": 271,
+      "end": 272,
+      "replacement": "    {\n        const AvpAmp *a=&amp_data[n-1u];\n        unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;\n        u16 frac;\n        /* Stale grid entries must not bounce a closing door. This follows\n         * the same live-owner checks already used by projectile hits. */\n        if((!a->mode&&!a->host_static) || x>=AVP_AMP_GRID_W ||\n           y>=AVP_AMP_GRID_H || y*AVP_AMP_GRID_W+x!=grid)return 0;\n        frac=(u16)((axis==0u?a->xpos:a->ypos)&0xffffu);\n        return second?(frac>=(u16)(0u-DC_SIZE)):(frac<=DC_SIZE);\n    }\n"
+    },
+    {
+      "start": 273,
+      "end": 273,
+      "replacement": "/* 68000 SUB/NEG are modulo-2^32.  Interpret the wrapped sign bit\n * without a C signed subtraction/negation overflow at INT32_MIN. */\n"
+    },
+    {
+      "start": 277,
+      "end": 278,
+      "replacement": "        if((u16)(y_pos>>16)==(u16)(d->ypos>>16)){u32 delta=x_pos-(u32)d->xpos;if(delta&0x80000000u)delta=0u-delta;if(delta<=DC_SIZE)return 1;}\n"
+    },
+    {
+      "start": 280,
+      "end": 281,
+      "replacement": "        if((u16)(x_pos>>16)==(u16)(d->xpos>>16)){u32 delta=y_pos-(u32)d->ypos;if(delta&0x80000000u)delta=0u-delta;if(delta<=DC_SIZE)return 1;}\n"
+    },
+    {
+      "start": 294,
+      "end": 295,
+      "replacement": "    lift_ptr=NULL;new_level=(s16)(cur_level+lift_dir);new_x=(s32)x_pos;new_y=(s32)y_pos;levfx_ID=DoEffect(DSFX_EL10X);host_exit_kind=AVP_DOORS_EXIT_LIFT;\n"
+    },
+    {
+      "start": 306,
+      "end": 307,
+      "replacement": "static int start_normal_or_double(u8 *cell,u8 *panelp,u8 panel,unsigned side,int from_lift,int force_jammed)\n"
+    },
+    {
+      "start": 310,
+      "end": 310,
+      "replacement": "#include \"../../new/cheats/doors_jammed_open_guard.inc\"\n\n"
+    },
+    {
+      "start": 312,
+      "end": 313,
+      "replacement": "        if(door1.ptr==door||door2.ptr==door){if(force_jammed)return 0;door1.dir=(s8)-door1.dir;door2.dir=(s8)-door2.dir;play(DSFX_DDOORS);return 1;}\n"
+    },
+    {
+      "start": 314,
+      "end": 315,
+      "replacement": "        if(!force_jammed && !access_ok(door,panel_off))return 0;\n"
+    },
+    {
+      "start": 320,
+      "end": 320,
+      "replacement": "            if(force_jammed && *other)return 0;\n"
+    },
+    {
+      "start": 325,
+      "end": 326,
+      "replacement": "            door1.dir=door2.dir=force_jammed?DOOR_STEP:dir;\n"
+    },
+    {
+      "start": 329,
+      "end": 332,
+      "replacement": "    if(door2.ptr==door){if(force_jammed)return 0;door2.dir=(s8)-door2.dir;play(DSFX_RISE2);return 1;}\n    if(door1.ptr==door){if(force_jammed)return 0;door1.dir=(s8)-door1.dir;play(DSFX_RISE2);return 1;}\n    {DoorState *slot=!door1.ptr?&door1:(!door2.ptr?&door2:NULL);if(!slot)return 0;if(!force_jammed && !access_ok(door,panel_off))return 0;install_door(slot,door,clean,side,0,0);if(force_jammed)slot->dir=DOOR_STEP;play(DSFX_RISE2);}\n"
+    },
+    {
+      "start": 334,
+      "end": 334,
+      "replacement": "\n#include \"../../new/cheats/predator_jammed_melee.inc\"\n"
+    },
+    {
+      "start": 356,
+      "end": 357,
+      "replacement": "    (void)start_normal_or_double(cell,cell+door_side,cell[door_side],door_side,1,0);\n"
+    },
+    {
+      "start": 368,
+      "end": 368,
+      "replacement": "#include \"../../new/multiplayer/alien_use_input.inc\"\n\n"
+    },
+    {
+      "start": 371,
+      "end": 371,
+      "replacement": "#include \"../../new/multiplayer/doors_alien_use_query.inc\"\n\n"
+    },
+    {
+      "start": 372,
+      "end": 374,
+      "replacement": "    /* In Jaguar mode keep retail B. In Alien PC-action mode, host Use is\n       independent of B so biting cannot operate a door or terminal. */\n    if(!do_use){if(lift_key)lift_key=0;return;}\n"
+    },
+    {
+      "start": 379,
+      "end": 380,
+      "replacement": "    if(panel_id_is(file_id,panel_ids.lift_back)||panel_id_is(file_id,panel_ids.lift_side)){\n        if(mp_dm_no_travel){avp_hudmsg_queue(avp_msg_jlift);lift_key=0;return;}\n        (void)do_lifts(cell,side);return;\n    }\n"
+    },
+    {
+      "start": 381,
+      "end": 382,
+      "replacement": "    if(player_type!=PT_PREDATOR&&(panel_id_is(file_id,panel_ids.wall2)||panel_id_is(file_id,panel_ids.airduct1))){\n        if(!mp_dm_no_travel)(void)do_duct(side,(u16)(panelp-maze_data));\n        lift_key=0;return;\n    }\n"
+    },
+    {
+      "start": 383,
+      "end": 383,
+      "replacement": "        if(mp_dm_no_terminal){lift_key=0;return;}\n"
+    },
+    {
+      "start": 385,
+      "end": 386,
+      "replacement": "    if(!start_normal_or_double(cell,panelp,panel,side,0,0)&&player_type!=PT_ALIEN)play(DSFX_FLUP1);\n"
+    },
+    {
+      "start": 397,
+      "end": 397,
+      "replacement": "\n/* Optional PC-only state bridge: all implementation stays in new/.\n * No effect on the original Jaguar/single-player build when compiled out. */\n#ifdef AVP_LOCAL_MULTIPLAYER_DOOR_BRIDGE\n#include \"../../new/multiplayer/local_mp_doors_native.inc\"\n#endif\n"
+    }
+  ]
+}

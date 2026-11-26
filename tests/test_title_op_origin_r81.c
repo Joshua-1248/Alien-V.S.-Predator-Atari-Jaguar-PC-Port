@@ -4,7 +4,7 @@
  *   PREDATOR phase31 YPOS=$69. No ROM bytes/assets in this test. */
 #define _DEFAULT_SOURCE 1
 #define AVP_PC_REFERENCE_TITLE_TIMING 1
-#include "../src/jaguar/avp_gpu/frontend_renderer.c"
+#include "../new/jaguar/avp_gpu/frontend_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

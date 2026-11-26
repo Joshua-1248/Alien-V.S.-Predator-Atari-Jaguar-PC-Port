@@ -1,0 +1,17 @@
+{
+  "path": "include/collectables.h",
+  "base_sha256": "5e208a90ead86ec0d85be43c5228d6458331166fef0930347baef240c3140591",
+  "output_sha256": "f92eb007c9d5d103581e6b683c8d4acd83c7035e073fd54b23688cc0d271d61c",
+  "edits": [
+    {
+      "start": 30,
+      "end": 30,
+      "replacement": "/* Read-only original item/corpse lookup; does not collect or mutate. */\nint avp_collect_peek(unsigned level,unsigned x,unsigned y,s16 def,\n                     s16 *type,s16 *amount);\n"
+    },
+    {
+      "start": 36,
+      "end": 36,
+      "replacement": "#include \"../new/pc_host/integration/collectables_multiplayer_declarations.inc\"\n"
+    }
+  ]
+}

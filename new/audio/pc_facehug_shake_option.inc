@@ -1,0 +1,2 @@
+static int pc_facehug_shake_pain_sounds_enabled=1;
+void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){pc_facehug_shake_pain_sounds_enabled=enabled!=0;}

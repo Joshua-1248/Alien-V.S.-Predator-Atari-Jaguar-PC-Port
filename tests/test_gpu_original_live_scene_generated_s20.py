@@ -47,8 +47,8 @@ with tempfile.TemporaryDirectory(prefix='re24s20-scene-') as tmp:
          '-ffunction-sections','-fdata-sections','-Wl,--gc-sections',
          '-I'+str(ROOT/'include'),'-DGEN_C="'+str(gen)+'"',
          str(ROOT/'tests'/'test_gpu_original_live_scene_generated_s20.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_scene.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_native.c'),
+         str(ROOT/'new/jaguar/avp_gpu/original_view_scene.c'),
+         str(ROOT/'new/jaguar/avp_gpu/original_view_native.c'),
          str(ROOT/'src/game/collision.c'),'-o',str(exe)]
     subprocess.run(cmd,check=True)
     subprocess.run([str(exe),str(tmp/'overlay.bin'),str(tmp/'resident.bin')],check=True)

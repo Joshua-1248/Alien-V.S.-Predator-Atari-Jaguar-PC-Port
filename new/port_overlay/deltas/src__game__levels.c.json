@@ -1,0 +1,22 @@
+{
+  "path": "src/game/levels.c",
+  "base_sha256": "64c81a3244d1a8bb4279da36e9603d57e160f8269a0ef3266cc27315d23668cc",
+  "output_sha256": "e699d9ffef815936fe7359a6369c9bf2e960c477145ecef56ac070fc15d15152",
+  "edits": [
+    {
+      "start": 64,
+      "end": 64,
+      "replacement": "\n#include \"../../new/multiplayer/level_start_pose.inc\"\n"
+    },
+    {
+      "start": 151,
+      "end": 151,
+      "replacement": "/* Original LEVELS.S::KillBastards, with an explicit arrival coordinate for\n * independent co-op passengers. The retail routine matches the occupied\n * MAP CELL, not a distance/radius search; it disables only the matching\n * non-protected AMP mode, without recycling its slot or editing grids. */\nvoid avp_levels_kill_bastards_at(u32 arrival_x,u32 arrival_y)\n{\n    u16 gx=(u16)(arrival_x>>16),gy=(u16)(arrival_y>>16);\n    for(unsigned i=0;i<AVP_NUM_AMPS;i++){\n        AvpAmp *a=&amps_at[i];\n        if(!a->mode)continue;\n        if((u16)(a->xpos>>16)!=gx||(u16)(a->ypos>>16)!=gy)continue;\n        if(a->creature==AC_COCOON||a->creature==AC_AQUEEN||\n           a->creature==AC_AQSHIELD||a->creature==AC_GEN)continue;\n        /* LEVELS.S::KillBastards clears amp_mode only.  Do not release\n         * the AMP slot or change the object/collision grids: either would\n         * alter later AMP numbering or the original collision semantics.\n         * host_static is a PC-only field; clear it so an eliminated live\n         * actor cannot be mistaken for a saved stationary corpse. */\n        a->mode=NULL;\n        a->host_static=0;\n    }\n}\n\n"
+    },
+    {
+      "start": 153,
+      "end": 155,
+      "replacement": "    avp_levels_kill_bastards_at(x_pos,y_pos);\n"
+    }
+  ]
+}

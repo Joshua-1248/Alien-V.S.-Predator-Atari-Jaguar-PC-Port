@@ -24,6 +24,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-zlib
             mingw-w64-ucrt-x86_64-winpthreads
       - name: Configure the original Jaguar reference backend
@@ -75,7 +76,7 @@ jobs:
         run: |
           cmake --build build --parallel 4 --target \
             avp_pc test_local_mp_bot test_local_mp_cheat_targets_r114 \
-            test_local_mp_session_options_r114 test_jerry_alarm_volume_r114
+            test_local_mp_session_options_r114 test_jerry_alarm_volume_r114 test_pc_hybrid_foreground_reuse_r367 test_pc_hybrid_shader_paths_r368 test_pc_hybrid_frame_gate_r372 test_pc_vulkan_frame_policy_r322
       - name: Verify native title, Musashi and regression tests
         run: |
           set -euo pipefail
@@ -87,6 +88,10 @@ jobs:
           ./build/test_local_mp_cheat_targets_r114
           ./build/test_local_mp_session_options_r114
           ./build/test_jerry_alarm_volume_r114
+          ./build/test_pc_hybrid_foreground_reuse_r367
+          ./build/test_pc_hybrid_shader_paths_r368
+          ./build/test_pc_hybrid_frame_gate_r372
+          ./build/test_pc_vulkan_frame_policy_r322
       - name: Stage binary
         run: |
           mkdir -p dist/linux
@@ -95,6 +100,141 @@ jobs:
         with:
           name: avp-linux-${{ matrix.compiler }}
           path: dist/linux/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 30
+
+  # R366: Compile the actual optional Vulkan gameplay code with official
+  # development headers and glslang, NOT just the Software-only avp_pc target.
+  # No retail ROM, X server, or GPU is required for this *compile-only* gate.
+  # Keep experimental Vulkan outputs separate from the production Linux ZIP.
+  linux-vulkan-sdk-compile:
+    name: Vulkan SDK / Hybrid gameplay compile (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+            vulkan_binary: avp_pc_vulkan
+            smoke_binary: avp_vulkan_wsi_smoke
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+            vulkan_binary: avp_pc_vulkan_clang
+            smoke_binary: avp_vulkan_wsi_smoke_clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official distribution Vulkan headers and shader compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc g++ clang cmake ninja-build \
+            libvulkan-dev glslang-tools spirv-tools libx11-dev libxext-dev \
+            libxrandr-dev libssl-dev zlib1g-dev
+      - name: Configure real Vulkan and native Jaguar reference game
+        run: |
+          CC=${{ matrix.cc }} CXX=${{ matrix.cxx }} cmake -S . -B build-vulkan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DAVP_STRICT=ON \
+            -DAVP_BUILD_LOCAL_MULTIPLAYER=ON -DAVP_BUILD_JAG_REFERENCE=ON \
+            -DAVP_BUILD_VULKAN_WSI_DIAGNOSTIC=ON \
+            -DAVP_BUILD_VULKAN_SHADER_DIAGNOSTIC=ON \
+            -DAVP_BUILD_VULKAN_GAME_PROBE=ON
+      - name: Compile real game, Xlib WSI backend, and all Hybrid SPIR-V
+        run: |
+          cmake --build build-vulkan --parallel 4 --target \
+            avp_pc avp_vulkan_wsi_smoke avp_vk_hybrid_present_shader_r361 \
+            test_pc_hybrid_foreground_reuse_r367 test_pc_hybrid_shader_paths_r368 test_pc_hybrid_frame_gate_r372 test_pc_vulkan_frame_policy_r322
+      - name: Confirm original Jaguar title and Musashi remain linked
+        run: |
+          set -euo pipefail
+          nm build-vulkan/avp_pc > build-vulkan/avp_symbols.txt
+          grep -q ' m68k_execute$' build-vulkan/avp_symbols.txt
+          grep -q ' avp_pc_title_native_create$' build-vulkan/avp_symbols.txt
+          test -s build-vulkan/avp_vk_shader_r327/avp_hybrid_world.frag.spv
+          test -s build-vulkan/avp_vk_shader_r327/avp_hybrid_present_overlay.frag.spv
+          ./build-vulkan/avp_pc --help > /dev/null
+          ./build-vulkan/test_pc_hybrid_foreground_reuse_r367
+          ./build-vulkan/test_pc_hybrid_shader_paths_r368
+          ./build-vulkan/test_pc_hybrid_frame_gate_r372
+          ./build-vulkan/test_pc_vulkan_frame_policy_r322
+          # No developer-machine absolute SDK library search paths in the ZIP.
+          if readelf -d build-vulkan/avp_pc | grep -Eq '(RPATH|RUNPATH)'; then
+            echo 'Vulkan game binary contains a build-machine RUNPATH' >&2
+            exit 1
+          fi
+          for shader in build-vulkan/avp_vk_shader_r327/*.spv; do
+            spirv-val --target-env vulkan1.0 "$shader"
+          done
+      - name: Stage separately labeled Vulkan-enabled executable and SPIR-V
+        run: |
+          set -euo pipefail
+          mkdir -p dist/vulkan/shaders
+          install -m 755 build-vulkan/avp_pc dist/vulkan/${{ matrix.vulkan_binary }}
+          install -m 755 build-vulkan/avp_vulkan_wsi_smoke dist/vulkan/${{ matrix.smoke_binary }}
+          install -m 755 scripts/verify_vulkan_gpu_r371.sh dist/vulkan/verify_vulkan_gpu_r371.sh
+          install -m 644 build-vulkan/avp_vk_shader_r327/*.spv dist/vulkan/shaders/
+          (cd dist/vulkan/shaders && sha256sum *.spv > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avp-vulkan-experimental-${{ matrix.compiler }}
+          path: dist/vulkan/
+          if-no-files-found: error
+          retention-days: 30
+      # ROM/GPU/X11 game-frame testing remains unverified in headless CI.
+
+  # R368: a distinct artifact. Never replace the two stable Software builds.
+  linux-vulkan-experimental-package:
+    name: Separate relocatable experimental Vulkan Linux build
+    needs: linux-vulkan-sdk-compile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: avp-vulkan-experimental-gcc
+          path: stage/gcc
+      - uses: actions/download-artifact@v4
+        with:
+          name: avp-vulkan-experimental-clang
+          path: stage/clang
+      - name: Verify both compilers and package matching shader payloads
+        run: |
+          set -euo pipefail
+          test -s stage/gcc/avp_pc_vulkan
+          test -s stage/clang/avp_pc_vulkan_clang
+          test -s stage/gcc/avp_vulkan_wsi_smoke
+          test -s stage/clang/avp_vulkan_wsi_smoke_clang
+          cmp stage/gcc/verify_vulkan_gpu_r371.sh stage/clang/verify_vulkan_gpu_r371.sh
+          for shader in stage/gcc/shaders/*.spv; do
+            test -s "$shader"
+            cmp "$shader" "stage/clang/shaders/$(basename "$shader")"
+          done
+          (cd stage/gcc/shaders && sha256sum -c SHA256SUMS)
+          (cd stage/clang/shaders && sha256sum -c SHA256SUMS)
+          mkdir -p dist/LINUX/shaders
+          install -m755 stage/gcc/avp_pc_vulkan dist/LINUX/avp_pc_vulkan
+          install -m755 stage/clang/avp_pc_vulkan_clang dist/LINUX/avp_pc_vulkan_clang
+          install -m755 stage/gcc/avp_vulkan_wsi_smoke dist/LINUX/avp_vulkan_wsi_smoke
+          install -m755 stage/clang/avp_vulkan_wsi_smoke_clang dist/LINUX/avp_vulkan_wsi_smoke_clang
+          install -m755 stage/gcc/verify_vulkan_gpu_r371.sh dist/LINUX/verify_vulkan_gpu_r371.sh
+          cp stage/gcc/shaders/*.spv stage/gcc/shaders/SHA256SUMS dist/LINUX/shaders/
+          cat > dist/README_VULKAN_EXPERIMENTAL.txt <<'TXT'
+          Alien vs Predator (Atari Jaguar) -- EXPERIMENTAL Vulkan-enabled Linux
+          Place your own AVP.jag with the executable, or pass --rom.
+          Run: AVP_VULKAN_HYBRID_PRESENT=1 ./LINUX/avp_pc_vulkan
+          In F12 Video choose Hardware; unsupported scenes fall back to Software.
+          Keep the adjacent LINUX/shaders directory; it contains required SPIR-V.
+          This is a compile-verified experiment, NOT a GPU-tested playable release.
+          Vulkan driver/loader is required; no commercial ROM or SDK is included.
+          The regular GCC and Clang Software builds remain unchanged.
+          TXT
+          (cd dist && zip -qr ../AVP-Linux-Vulkan-EXPERIMENTAL.zip .)
+          unzip -t AVP-Linux-Vulkan-EXPERIMENTAL.zip > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AVP-Linux-Vulkan-EXPERIMENTAL
+          path: AVP-Linux-Vulkan-EXPERIMENTAL.zip
           if-no-files-found: error
           retention-days: 30
 

@@ -1,6 +1,6 @@
 /* R134: compare actual host HUD sampler against the shipped R133
  * per-native-pixel sampling loop. Uses synthetic host pixels, no ROM. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

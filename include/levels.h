@@ -33,8 +33,6 @@ void LoadLevel(void);
 void LeaveLevel(void);
 void SetStart(void);
 void FirstPos(void);
-/* Non-mutating read of the original ROM-backed LEVELS.S start record. */
-int avp_levels_start_pose(unsigned level,u32 *x,u32 *y,u32 *angle);
 void KillBastards(void);
 void place_grid(void);
 void xMap(void);

@@ -1,0 +1,17 @@
+{
+  "path": "include/levels.h",
+  "base_sha256": "6590fbb4a925dd8f0698d57038256709c722d794e2b35c98a8ddd36ed2bda574",
+  "output_sha256": "a449e21740d1eeac432d94124360c948d4ce6bcc06d5d7591e0a79ea5ecfd80c",
+  "edits": [
+    {
+      "start": 35,
+      "end": 35,
+      "replacement": "/* Non-mutating read of the original ROM-backed LEVELS.S start record. */\nint avp_levels_start_pose(unsigned level,u32 *x,u32 *y,u32 *angle);\n"
+    },
+    {
+      "start": 36,
+      "end": 36,
+      "replacement": "void avp_levels_kill_bastards_at(u32 arrival_x,u32 arrival_y);\n"
+    }
+  ]
+}

@@ -87,7 +87,7 @@ def audit(rom_path:pathlib.Path,source:pathlib.Path,cc:str)->None:
     assert direction==1
     # Verify actual game caller/event and original host static position.
     mjp=(source/'src/game/mjp.c').read_text()
-    frontend=(source/'src/jaguar/avp_gpu/frontend_renderer.c').read_text()
+    frontend=(source/'new/jaguar/avp_gpu/frontend_renderer.c').read_text()
     assert 'evt(0x4d4a5050u' in mjp and 'evt(0x4d4a5053u' in mjp
     # R280: CPU publishes X ($12+4*D1) and the $7FB4 stage per VBL (MJPX).
     assert 'evt(0x4d4a5058u,mjp_slide_x(d5),0);' in mjp
@@ -100,10 +100,10 @@ def audit(rom_path:pathlib.Path,source:pathlib.Path,cc:str)->None:
         path=pathlib.Path(tmp)/'scene_probe'
         args=[cc,'-O2','-std=c99','-Wall','-Wextra','-Werror',f'-I{source/"include"}',
               str(source/'tools/retail_cross_live_host_probe_r235.c'),
-              str(source/'src/jaguar/avp_gpu/frontend_renderer.c'),
-              str(source/'src/jaguar/avp_gpu/frontend_fade.c'),
-              str(source/'src/jaguar/hw/cry.c'),
-              str(source/'src/jaguar/hw/framebuffer.c'),
+              str(source/'new/jaguar/avp_gpu/frontend_renderer.c'),
+              str(source/'new/jaguar/avp_gpu/frontend_fade.c'),
+              str(source/'new/jaguar/hw/cry.c'),
+              str(source/'new/jaguar/hw/framebuffer.c'),
               str(source/'tools/retail_cross_rgb16_reference_r234.c'),'-o',str(path),'-lm']
         subprocess.run(args,check=True,capture_output=True,text=True)
         result=subprocess.run([str(path)],check=True,capture_output=True,text=True)

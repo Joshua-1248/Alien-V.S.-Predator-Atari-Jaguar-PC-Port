@@ -49,7 +49,12 @@ int avp_mp_actor_native_restore(const AvpMpActorNativeState *in)
     if(!avp_mp_weapon_native_restore(&in->weapon) ||
        !avp_mp_hudmsg_native_restore(&in->hudmsg) ||
        !avp_mp_hudview_native_restore(&in->hudview))return 0;
-    acs_level=in->access_level;
+    /* InitAccess() grants Aliens and Predators level 10 in original Jaguar
+     * gameplay. Preserve that default during PC actor restoration as well;
+     * door authorization separately enforces Marine-only card restrictions
+     * even if an external save/MP path reintroduces stale credentials.
+     * Marine levels, including PC Deathmatch level 99, are unchanged. */
+    acs_level=in->player.player_type==PT_HUMAN ? in->access_level : 10u;
     return 1;
 }
 

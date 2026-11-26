@@ -1,0 +1,742 @@
+{
+  "path": "src/game/amp.c",
+  "base_sha256": "3c1787ceef98493fc78f72e6a2147700928ae1a609bb43105fb27377417c7bbf",
+  "output_sha256": "6d8a871a0e8e4319d5404a2ca01017e006cb3a70aa141cf958bf38dfb554cf3e",
+  "edits": [
+    {
+      "start": 10,
+      "end": 10,
+      "replacement": "#include \"avp_sfx_ids.h\"\n#include \"music.h\"\n"
+    },
+    {
+      "start": 28,
+      "end": 28,
+      "replacement": "#include \"../../new/cheats/amp_host_options_state.inc\"\n\n/* AMP.S keeps the enemy Marine pulse/flame loop identifiers globally,\n * not per actor.  Their expiration is advanced once per UpdateAMPs tick. */\nstatic u32 marine_pulse_id,marine_flame_id;\nstatic u16 marine_pulse_time,marine_flame_time;\nstatic u32 slot_generation[AVP_NUM_AMPS];\n/* Independent second TOM beam read used by enemy Marine weapon selection. */\nstatic u32 beam_weapon_reads;\nstatic u32 next_slot_generation=1;\nu32 avp_amp_slot_generation(unsigned slot){return slot<AVP_NUM_AMPS?slot_generation[slot]:0;}\nstatic void mark_amp_slot(unsigned slot){if(slot<AVP_NUM_AMPS){if(++next_slot_generation==0)++next_slot_generation;slot_generation[slot]=next_slot_generation;}}\n"
+    },
+    {
+      "start": 35,
+      "end": 35,
+      "replacement": "/* 68000 MOVE.W / EXT.L signed-word interpretation. Converting a 16-bit\n * pattern above $7fff straight to a C signed-short type is implementation-\n * defined; decode the exact register bits arithmetically instead. */\nstatic s16 amp_word_signed(u16 bits)\n{\n    return bits<=INT16_MAX?(s16)bits:(s16)((int)bits-65536);\n}\n\n"
+    },
+    {
+      "start": 41,
+      "end": 44,
+      "replacement": "    /* Preserve the original active-mode reset while also clearing host-only\n     * presentation fields that did not exist in the Jaguar AMP records. */\n    for(i=0;i<AVP_NUM_AMPS;++i){\n        level1amps[i].mode=NULL;\n        /* host_static represents the Jaguar's -1 mode in the PC renderer.\n         * A new level must not display a dead/static object left in an\n         * unallocated slot by the previous level.  Authored static objects\n         * are reinstated by build_level/rebuild_level after this reset. */\n        level1amps[i].host_static=0;\n        level1amps[i].aux_ptr=NULL;\n        mark_amp_slot(i);\n    }\n"
+    },
+    {
+      "start": 87,
+      "end": 87,
+      "replacement": "#include \"../../new/multiplayer/amp_reuse_host_fields.inc\"\n\n"
+    },
+    {
+      "start": 98,
+      "end": 99,
+      "replacement": "    if(index>=AVP_NUM_AMPS || free_count>=AVP_NUM_AMPS)return;\n    /* An invalid/double release must not push the same slot twice: doing so\n     * lets two live enemies or projectiles share one AMP record on the next\n     * two allocations.  A slot still on the free list is not allocated. */\n    for(unsigned i=0;i<free_count;i++)if(free_list[i]==index)return;\n"
+    },
+    {
+      "start": 115,
+      "end": 115,
+      "replacement": "        /* The original AMP.S save records every allocated AMP with a valid\n         * template, including AMP_DEAD actors: their astype has already been\n         * switched to DEADALIEN/DEADHUMAN/DPRED/DEADHUG.  A stationary corpse\n         * is mode == -1 on Jaguar (host_static here), not an empty slot.\n         * Do not discard dead bodies on a level transition. */\n"
+    },
+    {
+      "start": 117,
+      "end": 119,
+      "replacement": "        /* AMP.S saves the low word after shifting 16.16 coordinates by\n         * eight; decode that word as a signed 68000 value explicitly. */\n        out[n].x=amp_word_signed((u16)((u32)a->xpos>>8));\n        out[n].y=amp_word_signed((u16)((u32)a->ypos>>8));\n"
+    },
+    {
+      "start": 128,
+      "end": 130,
+      "replacement": "    /* AMP.S::save_level releases both Marine sound loops before ram_save. */\n    if(marine_pulse_id)StopLoop(marine_pulse_id);\n    if(marine_flame_id)StopLoop(marine_flame_id);\n"
+    },
+    {
+      "start": 134,
+      "end": 139,
+      "replacement": "#include \"../../new/multiplayer/amp_campaign_policy.inc\"\n\n#include \"../../new/cheats/amp_freshen_level.inc\"\n"
+    },
+    {
+      "start": 145,
+      "end": 145,
+      "replacement": "    /* AMP.S::restore_level clears both handles; the timers no longer run. */\n    marine_pulse_id=marine_flame_id=0;\n    marine_pulse_time=marine_flame_time=0;\n    /* initialise() already clears stale per-level collision and object\n     * owners.  place_grid() then marks excluded cells, and level population\n     * registers its AMP owners.  Do not erase those new registrations after\n     * build_level() or rebuild_level(): projectile hits depend on them. */\n"
+    },
+    {
+      "start": 154,
+      "end": 155,
+      "replacement": ""
+    },
+    {
+      "start": 157,
+      "end": 158,
+      "replacement": "        if(cur_level==15&&player_type==PT_ALIEN && !mp_defer_end_queen)\n            make_end_queen();\n"
+    },
+    {
+      "start": 160,
+      "end": 161,
+      "replacement": ""
+    },
+    {
+      "start": 174,
+      "end": 174,
+      "replacement": "static u32 (*beam_weapon_sample)(void);\nstatic u32 amp_weapon_beam(void)\n{\n    /* The second $F00004 read follows LineOfSight. Reusing the exact\n     * initial beam phase forces an even parity whenever the firing gate\n     * (beam & 7)==2 is met, permanently suppressing Marine flamethrowers.\n     * Without a Jaguar raster, alternate the low bit on successive second\n     * reads; preserve an explicitly bound hardware sample in tests/ports. */\n    return beam_weapon_sample ? beam_weapon_sample()\n                              : (beam_counter + (++beam_weapon_reads & 1u));\n}\n"
+    },
+    {
+      "start": 183,
+      "end": 185,
+      "replacement": "    s16 h=amp_word_signed((u16)heading);\n    s16 mul=amp_word_signed((u16)(velocity<<8));\n"
+    },
+    {
+      "start": 187,
+      "end": 188,
+      "replacement": "    s16 w=amp_word_signed((u16)(q>>16));\n"
+    },
+    {
+      "start": 189,
+      "end": 189,
+      "replacement": "}\n\n/* AMP.S projectile origins use 68000 32-bit ADD.L/SUB.L registers.\n * Decode the wrapped word without implementation-defined u32 -> s32\n * conversion or undefined signed C overflow. */\nstatic s32 amp_projectile_word(u32 bits)\n{\n    return bits<=INT32_MAX ? (s32)bits : (s32)((s64)bits-INT64_C(4294967296));\n}\nstatic s32 amp_projectile_add(s32 a,s32 b)\n{\n    return amp_projectile_word((u32)a+(u32)b);\n}\nstatic s32 amp_projectile_sub(s32 a,s32 b)\n{\n    return amp_projectile_word((u32)a-(u32)b);\n}\n\n/* R191 original AMP word ALU: Jaguar ADD/SUB.W wraps modulo 65536.\n * Narrowing an out-of-range signed int to s16 is implementation-defined in C,\n * even though host GCC/Clang presently choose the correct two's-complement\n * value. Decode the wrapped word in range on every supported compiler. */\nstatic s16 amp_word_add(s16 value,int delta)\n{\n    const u16 bits=(u16)((u32)(u16)value+(u32)delta);\n    return amp_word_signed(bits);\n"
+    },
+    {
+      "start": 205,
+      "end": 206,
+      "replacement": "    if(kind==2){px=amp_projectile_sub(px,sin_angle>>2);py=amp_projectile_sub(py,cos_angle>>2);}\n"
+    },
+    {
+      "start": 217,
+      "end": 218,
+      "replacement": "    a->xpos=amp_projectile_add(a->xpos,vx);a->ypos=amp_projectile_add(a->ypos,vy);\n"
+    },
+    {
+      "start": 219,
+      "end": 219,
+      "replacement": "    if(mp_projectile_spawn)mp_projectile_spawn(mp_projectile_user,a);\n"
+    },
+    {
+      "start": 223,
+      "end": 224,
+      "replacement": "static s16 fseq_count(const AvpAmp *a){return amp_word_signed((u16)a->xvector);}\n"
+    },
+    {
+      "start": 225,
+      "end": 226,
+      "replacement": "{a->xvector=amp_projectile_word(((u32)dir<<16)|(u16)count);}\n"
+    },
+    {
+      "start": 238,
+      "end": 239,
+      "replacement": "    /* AMP.S SUBQ.W #1: decrement only the signed 16-bit search counter,\n     * retaining the upper-word heading and wrapping at $8000. */\n    dir=fseq_dir(a);count=amp_word_add(fseq_count(a),-1);\n"
+    },
+    {
+      "start": 250,
+      "end": 251,
+      "replacement": "    /* This is the source's cloaked-player search movement, not a second\n     * combat-acquisition pass. Re-entering the combat gate here calls\n     * lostplayer() recursively while AMP_PHIT is clear, instead of walking\n     * the original chosen search heading. It also resets amp_fseq every\n     * time, making the search-direction countdown ineffective. */\n    amp_chase_target(a,tx,ty,0);\n"
+    },
+    {
+      "start": 258,
+      "end": 258,
+      "replacement": "/* Only the UpdateAMPs actor loop owns CURAMPNO. Other host entry points\n * construct templates outside that loop and must register their own slot. */\nstatic int amp_update_active;\n"
+    },
+    {
+      "start": 267,
+      "end": 269,
+      "replacement": "    /* Callers may also pass a temporary AMP in tests or host-side effect\n     * handling.  Subtracting pointers outside the same array is undefined;\n     * validate integer address/range and alignment before finding a slot. */\n    uintptr_t base=(uintptr_t)(const void*)amp_data;\n    uintptr_t addr=(uintptr_t)(const void*)a;\n    if(addr<base || addr-base>=sizeof(level1amps))return 0;\n    uintptr_t off=addr-base;\n    if(off%sizeof(AvpAmp))return 0;\n    return (unsigned)(off/sizeof(AvpAmp))+1u;\n"
+    },
+    {
+      "start": 270,
+      "end": 270,
+      "replacement": "static void amp_cleargrid_c(AvpAmp *a);\n"
+    },
+    {
+      "start": 273,
+      "end": 273,
+      "replacement": "    /* A pooled effect or actor must relinquish only its own collision\n     * registration before its slot can be reused.  Other occupants sharing\n     * the square must keep their registrations (R51). */\n    if(n){\n        /* Impacting flame/smart/bolt projectiles may share the same square\n         * as a live enemy or explosive drum. Their pool release must not\n         * erase that other AMP's collmap entry, or subsequent projectiles\n         * will miss it. Preserve the original amp_cleargrid_c() behavior\n         * for explicit actor-grid removal: this guard is only for release. */\n        unsigned gx=(unsigned)((u32)a->xpos>>16);\n        unsigned gy=(unsigned)((u32)a->ypos>>16);\n        if(gx<AVP_AMP_GRID_W && gy<AVP_AMP_GRID_H &&\n           collmap[gy*AVP_AMP_GRID_W+gx]==(u16)n)\n            amp_cleargrid_c(a);\n    }\n"
+    },
+    {
+      "start": 276,
+      "end": 276,
+      "replacement": "#include \"../../new/cheats/amp_distance_options_state.inc\"\n\n"
+    },
+    {
+      "start": 280,
+      "end": 281,
+      "replacement": "    u32 dx=abs32diff(a->xpos,(s32)x_pos),dy=abs32diff(a->ypos,(s32)y_pos);\n    if(dx>lim||dy>lim)return 0;\n    if(host_normalize_diagonal_contact_range)\n        return (u64)dx*dx+(u64)dy*dy<=(u64)lim*lim;\n    return 1;\n"
+    },
+    {
+      "start": 297,
+      "end": 298,
+      "replacement": "    /* The grid can retain a former slot number even after that slot is\n     * recycled. Never target a new actor in another cell through a stale\n     * registration left at the projectile's position. */\n    AvpAmp *victim=&amp_data[no-1u];\n    if(((u32)victim->xpos>>16)!=gx || ((u32)victim->ypos>>16)!=gy)\n        return NULL;\n    return (victim->mode || victim->host_static)?victim:NULL;\n"
+    },
+    {
+      "start": 314,
+      "end": 317,
+      "replacement": "    if(p->creature==AC_BOLT) e=amp_word_add(e,-100);\n    else if(p->creature==AC_SMART) e=amp_word_add(e,-50);\n    else if(p->creature==AC_FIRE) e=amp_word_add(e,-10); /* deliberately less than player damage */\n"
+    },
+    {
+      "start": 320,
+      "end": 320,
+      "replacement": "    /* Original AMP.S weapon-hit path ORs transferred PHIT/INVHIT flags and\n     * clears CLOSEHIT; it never clears a preexisting INVHIT on a later\n     * visible shot. PLAYER.S TestSpark likewise preserves the accumulated\n     * INVHIT word. Keep the original persistent hit classification. */\n"
+    },
+    {
+      "start": 325,
+      "end": 326,
+      "replacement": "static void disc_kill2(AvpAmp *a){release_amp(a);discflag=0;} /* AMP.S:3984-3986 */\n"
+    },
+    {
+      "start": 336,
+      "end": 341,
+      "replacement": "    /* A zero-vector projectile can never reach a wall or target. Retire it\n     * through the normal impact lifecycle instead of leaving a suspended\n     * actor and permanently tying up its AMP slot. Moving shots are unchanged. */\n    if((!a->xvector && !a->yvector) || safe_projectile(a,40)){\n        const AvpRuntimeOps*o=avp_runtime_ops();\n        if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DSK1A);\n        disc_kill1(a);return;\n"
+    },
+    {
+      "start": 342,
+      "end": 344,
+      "replacement": "    if(!host_attacks_disabled && !(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){\n        player_energy=amp_word_add(player_energy,-50);\n        const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DISK1);\n        release_amp(a);discflag=0;return; /* AMP.S:4016-4020 */\n    }\n    if(weapon_hit(a)){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_QHIT);disc_kill1(a);return;}\n#include \"../../new/multiplayer/amp_disc_player_hit.inc\"\n\n    /* AMP.S projectile travel uses 68000 ADD.L on fixed-point positions.\n     * Preserve modulo-2^32 carry/wrap for every in-flight tick just as the\n     * launch path does; signed C addition has undefined edge behavior. */\n    a->xpos=amp_projectile_add(a->xpos,a->xvector);\n    a->ypos=amp_projectile_add(a->ypos,a->yvector);\n"
+    },
+    {
+      "start": 346,
+      "end": 347,
+      "replacement": "static void flame_kill2(AvpAmp *a){release_amp(a);discflag=0;} /* AMP.S:4276-4278 */\n/* A Marine flamethrower burst creates four independently timed flames.  The\n * global ranged-combat gate must remain set until the last live projectile\n * has left play, not merely until the first of the four is released.  Keep\n * impact-delay modes counted until their normal one-tick release. */\n"
+    },
+    {
+      "start": 354,
+      "end": 355,
+      "replacement": "    if(!explo1){\n        /* AMP.S::explosion changes FX_xp1b15 word 3 (PCM rate), not\n         * its volume.  Distances too great for a rate >= 40 leave the\n         * last value in that retail descriptor untouched. */\n        const AvpRuntimeOps*o=avp_runtime_ops();\n        u32 dx=abs32diff(x,(s32)x_pos),dy=abs32diff(y,(s32)y_pos);\n        u32 big=dx>dy?dx:dy,small=dx>dy?dy:dx;\n        u32 dist=big+(small>>2);\n        s32 rate=(s32)(192u-((dist<<4)>>16));\n        if(o->play_sfx_params)\n            o->play_sfx_params(o->user,AVP_FX_XP1B1,rate>=40?rate:-1,0);\n        else if(o->play_sfx)o->play_sfx(o->user,AVP_FX_XP1B1);\n        explo1=-1;\n    }\n"
+    },
+    {
+      "start": 365,
+      "end": 366,
+      "replacement": "        /* An already-flying enemy bolt may explode after the player toggles\n         * No Enemy Attacks. Continue its authored actor-area explosion, but\n         * do not apply that hostile explosion to the player. Normal effects\n         * and all non-cheat gameplay still use the unchanged AreaDamage. */\n        if(mp_explosion_damage &&\n           mp_explosion_damage(mp_projectile_user,a))\n            /* All player hits were routed to their individual snapshots.\n             * Preserve the original explosion effect and enemy damage,\n             * without also damaging whichever actor is scoped here. */\n            AreaAmpDamage(a->xpos,a->ypos,(s32)(u32)a->timer,a->energy,k);\n        else if(host_attacks_disabled && a->aux_ptr==&host_enemy_bolt_explosion_tag)\n            AreaAmpDamage(a->xpos,a->ypos,(s32)(u32)a->timer,a->energy,k);\n        else if(o->area_damage)o->area_damage(o->user,a->xpos,a->ypos,(u32)a->timer,a->energy,k);\n"
+    },
+    {
+      "start": 381,
+      "end": 383,
+      "replacement": "    /* Once the authored launch delay has elapsed, a projectile with no\n     * horizontal velocity has no route to any collision. Treat the invalid\n     * motion like the existing world impact (including bolt explosions). */\n    if((!a->xvector && !a->yvector) || safe_projectile(a,40)){\n        if(a->creature==AC_BOLT){AvpAmp *e=explosion_ex(a->xpos,a->ypos,-38,200,0x10000u);\n            e->flags=(u16)(a->flags&((1u<<AMP_PHIT)|(1u<<AMP_INVHIT)));\n            if(!(a->flags&(1u<<AMP_PLAYER)))e->aux_ptr=&host_enemy_bolt_explosion_tag;\n            else if(mp_explosion_spawn)mp_explosion_spawn(mp_projectile_user,a,e);\n            flame_kill2(a);}\n"
+    },
+    {
+      "start": 386,
+      "end": 388,
+      "replacement": "    if(!host_attacks_disabled && !(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){\n        player_energy=amp_word_add(player_energy,-(a->creature==AC_BOLT?100:25));release_amp(a);discflag=0;return; /* AMP.S:4313 */\n"
+    },
+    {
+      "start": 390,
+      "end": 391,
+      "replacement": "    if(mp_projectile_hit && (a->flags&(1u<<AMP_PLAYER)) &&\n       mp_projectile_hit(mp_projectile_user,a)){\n        flame_kill1(a);return;\n    }\n    /* AMP.S projectile travel uses 68000 ADD.L on fixed-point positions.\n     * Preserve modulo-2^32 carry/wrap for every in-flight tick just as the\n     * launch path does; signed C addition has undefined edge behavior. */\n    a->xpos=amp_projectile_add(a->xpos,a->xvector);\n    a->ypos=amp_projectile_add(a->ypos,a->yvector);\n"
+    },
+    {
+      "start": 415,
+      "end": 416,
+      "replacement": "static void spark(AvpAmp *a){++a->animframe;a->energy=amp_word_add(a->energy,-1);if(a->energy==0)release_amp(a);}\n"
+    },
+    {
+      "start": 424,
+      "end": 425,
+      "replacement": "    /* AMP.S::dead_gen writes #170 to FX_xp1b15 word 3 before SFX. */\n    const AvpRuntimeOps*o=avp_runtime_ops();\n    if(o->play_sfx_params)o->play_sfx_params(o->user,AVP_FX_XP1B1,170,0);\n    else if(o->play_sfx)o->play_sfx(o->user,AVP_FX_XP1B1);\n"
+    },
+    {
+      "start": 430,
+      "end": 431,
+      "replacement": "        /* AMP.S dead_gen2 .kill_gen: CLR.L amp_mode + amp_cleargrid only\n         * (\"really kill, no restore\") -- no amp_release of the slot. */\n"
+    },
+    {
+      "start": 432,
+      "end": 433,
+      "replacement": "        a->mode=NULL;a->host_static=0;a->aux_ptr=NULL;\n        player_energy=amp_word_add(player_energy,-50);\n"
+    },
+    {
+      "start": 437,
+      "end": 438,
+      "replacement": "    /* The original Queen shield spawn offsets use 68000 ADD.L.\n     * Signed host addition overflows at longword boundaries; reuse the\n     * 32-bit wrapping arithmetic already used for AMP projectiles. */\n    AvpAmp *s=amp_req();\n    s->xpos=amp_projectile_add(owner->xpos,dx);\n    s->ypos=amp_projectile_add(owner->ypos,dy);\n    s->xvel=-2;\n"
+    },
+    {
+      "start": 443,
+      "end": 446,
+      "replacement": "    if(!host_attacks_disabled && within_player(a,70)){player_energy=amp_word_add(player_energy,-10);snd=AVP_FX_MEL1;}\n    else if(!host_attacks_disabled && within_player(a,100)){player_energy=amp_word_add(player_energy,-5);snd=AVP_FX_MEL2;}\n    if(snd){s16 c=amp_word_add(a->xvel,1);if(c>=7){c=0;if(o->play_sfx)o->play_sfx(o->user,snd);}a->xvel=c;}\n"
+    },
+    {
+      "start": 449,
+      "end": 450,
+      "replacement": "    if(!ngens){\n        /* Retail AMP.S::shield2 shuts down a Queen shield by clearing its\n         * mode and collision-grid registration.  It does NOT push the AMP\n         * record onto the free list.  Releasing the slot changes subsequent\n         * actor/effect allocation order after the generators are destroyed. */\n        a->mode=NULL;\n        a->host_static=0;\n        amp_cleargrid_c(a);\n    }\n"
+    },
+    {
+      "start": 470,
+      "end": 472,
+      "replacement": "        /* AMP.S::generate .xgen2 ends the FX_force ALARM, not the\n         * level ambient loop.  Ambient continues independently. */\n        KillAlar();\n        /* AMP.S .xgen2 clears amp_mode only.  It does not clear the\n         * generator's collision-grid entry or return the AMP slot. */\n        a->mode=NULL;a->host_static=0;a->aux_ptr=NULL;\n"
+    },
+    {
+      "start": 478,
+      "end": 480,
+      "replacement": "        s32 vol=(s32)0x1a00-(s32)(d>>7)-(missing*256);\n        s32 pitch=(s32)0xe0-(s32)(d>>16)-(missing*8);\n"
+    },
+    {
+      "start": 481,
+      "end": 483,
+      "replacement": "        /* Retail writes the alarm voice's p[1] (looping volume) and\n         * p[3] (rate) in-place.  The unusual decimal 80 minimum in\n         * AMP.S is retained as written, after comparing to hex $80. */\n        if(pitch<0x80)pitch=80;\n        o->play_sfx_params(o->user,AVP_FX_FORCE,vol,pitch);\n"
+    },
+    {
+      "start": 489,
+      "end": 492,
+      "replacement": "    /* AMP.S::generate explicitly invokes StartAlarm with FX_force's\n     * volume loop flag set.  FX_force already has that flag in the\n     * original RDB descriptor; use voice 2 and preserve its handle. */\n    StartAla(AVP_FX_FORCE);\n"
+    },
+    {
+      "start": 494,
+      "end": 498,
+      "replacement": "static void amp_side_n(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,0,(0x1a800-(0xf0<<8))/2);}\nstatic void amp_side_s(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,0,-((0x1a800-(0xf0<<8))/2));}\nstatic void amp_side_e(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,-((0x1a800-(0xf0<<8))/2),0);}\nstatic void amp_side_w(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,(0x1a800-(0xf0<<8))/2,0);}\n"
+    },
+    {
+      "start": 500,
+      "end": 501,
+      "replacement": "    if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */\n"
+    },
+    {
+      "start": 504,
+      "end": 505,
+      "replacement": "    /* AMP.S constructs four side generators with signed 16.16 offsets,\n     * combined in the 68000's modular 32-bit registers (ADD.L). */\n    for(unsigned i=0;i<4;i++){\n        AvpAmp *g=amp_req();\n        g->xpos=amp_projectile_add(a->xpos,dxy[i][0]);\n        g->ypos=amp_projectile_add(a->ypos,dxy[i][1]);\n        g->creature=AC_GEN;g->animseq=AS_STAND;g->energy=200;\n        g->flags=(1u<<AMP_KILLABLE);g->astype=(s16)(44u+i);\n        g->mode=sides[i];\n    }\n"
+    },
+    {
+      "start": 509,
+      "end": 509,
+      "replacement": "#include \"../../new/cheats/amp_host_options_api.inc\"\n\n#include \"../../new/cheats/amp_hostile_type.inc\"\n\n"
+    },
+    {
+      "start": 511,
+      "end": 511,
+      "replacement": "    /* AMP.S decrements the two original loop countdowns before traversing\n     * actors.  Releasing one loop must not silence any other voice. */\n    if(marine_pulse_id && --marine_pulse_time==0){\n        StopLoop(marine_pulse_id);marine_pulse_id=0;\n    }\n    if(marine_flame_id && --marine_flame_time==0){\n        StopLoop(marine_flame_id);marine_flame_id=0;\n    }\n"
+    },
+    {
+      "start": 512,
+      "end": 512,
+      "replacement": "    amp_update_active=1;\n"
+    },
+    {
+      "start": 515,
+      "end": 516,
+      "replacement": "        if(host_enemies_frozen && hostile_amp_type(a))continue;\n        /* Retail AMP.S $15524-$15534: BEQ skips the copy at phase zero. */\n        if(entime!=0)a->oldenergy=a->energy;\n"
+    },
+    {
+      "start": 518,
+      "end": 519,
+      "replacement": "    amp_update_active=0;\n"
+    },
+    {
+      "start": 525,
+      "end": 525,
+      "replacement": "static int amp_contact_in_range(const AvpAmp *a,u16 pixels);\n#include \"../../new/cheats/amp_death_spray_range.inc\"\n\n"
+    },
+    {
+      "start": 531,
+      "end": 531,
+      "replacement": "}\n\nstatic void amp_marine_loop_sfx(int flame)\n{\n    u32 *handle=flame?&marine_flame_id:&marine_pulse_id;\n    u16 *time=flame?&marine_flame_time:&marine_pulse_time;\n    if(*handle)return;\n    /* The two timers use independent handles but the same Jaguar random\n     * source: pulse lasts 2..9 ticks and flame lasts 7..14 ticks. */\n    *handle=DoEffect(flame?AVP_FX_FLAMX:AVP_FX_PLSX1);\n    *time=(u16)((avp_random()&7u)+(flame?7u:2u));\n"
+    },
+    {
+      "start": 578,
+      "end": 585,
+      "replacement": "typedef struct AvpFightFrame { s16 frame,damage; u32 sound; } AvpFightFrame;\n/* AMP.S playlists carry the SFX pointer in the same $fe event record as the\n * damage.  Keep the exact retail descriptor with that event; crawl damage is\n * intentionally silent because crawllist has no SFX pointer. */\nstatic const AvpFightFrame fight_bite[]={ {0,0,0},{1,0,0},{2,0,0},{2,100,AVP_FX_NALN1},{1,0,0},{0,0,0},{-1,0,0} };\nstatic const AvpFightFrame fight_tail[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,20,AVP_FX_NALN2},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };\nstatic const AvpFightFrame fight_pred_combi[]={ {0,0,0},{0,0,0},{0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,0,0},{3,0,0},{4,100,AVP_FX_MELEE},{1,0,0},{-1,0,0} };\nstatic const AvpFightFrame fight_pred_knife[]={ {0,0,0},{1,0,0},{2,0,AVP_FX_WRBLA},{3,0,0},{4,0,0},{5,50,AVP_FX_CLAW2},{-1,0,0} };\nstatic const AvpFightFrame fight_swipe[]={ {1,0,0},{2,30,AVP_FX_CLAW2},{3,0,0},{3,0,0},{2,0,0},{1,0,0},{-1,0,0} };\nstatic const AvpFightFrame fight_crawl[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,100,0},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };\n"
+    },
+    {
+      "start": 598,
+      "end": 599,
+      "replacement": "    case AC_PREDATOR: seq=death_pred; a->astype=54; amp_sfx(AVP_FX_PREDE); break; /* DEF_DPRED */\n"
+    },
+    {
+      "start": 600,
+      "end": 602,
+      "replacement": "    case AC_ACRAWL: a->creature=AC_ALIEN; seq=death_crawl; a->astype=52; amp_sfx(AVP_FX_AHIT); break;\n    case AC_ALIEN: seq=death_alien; a->astype=52; amp_sfx(AVP_FX_AHIT); break;\n"
+    },
+    {
+      "start": 608,
+      "end": 609,
+      "replacement": "    /* Alien players resist both the death-splash and the lingering acid.\n     Leave the original non-Alien range, damage and death cadence intact. */\n    if(!host_dev_death && player_type!=PT_ALIEN &&\n       a->creature==AC_ALIEN && amp_alien_death_spray_in_range(a))\n        player_energy=amp_word_add(player_energy,-50);\n"
+    },
+    {
+      "start": 645,
+      "end": 645,
+      "replacement": "#include \"../../new/multiplayer/amp_acid_contact.inc\"\n\n"
+    },
+    {
+      "start": 647,
+      "end": 649,
+      "replacement": "    if(player_type!=PT_ALIEN && amp_contact_in_range(a,30)){\n        if(!(a->flags&(1u<<AMP_ALTFRAME)))amp_sfx(AVP_FX_ACIDX);\n"
+    },
+    {
+      "start": 650,
+      "end": 651,
+      "replacement": "        player_energy=amp_word_add(player_energy,-3);\n"
+    },
+    {
+      "start": 657,
+      "end": 659,
+      "replacement": "    else if(a->creature==AC_PREDATOR)amp_sfx(AVP_FX_PREDH);\n    else amp_sfx(AVP_FX_NALN1);\n"
+    },
+    {
+      "start": 663,
+      "end": 664,
+      "replacement": "    /* AMP.S advances the recovery countdown with a 32-bit SUBQ.L.\n     * Signed C decrement is undefined at $80000000; keep the complete\n     * original longword state, not just ordinary positive frame counts. */\n    a->timer=amp_projectile_add(a->timer,-1);\n    if(a->timer!=0)return;\n"
+    },
+    {
+      "start": 669,
+      "end": 669,
+      "replacement": "    u16 owner;\n    const AvpAmp *a;\n"
+    },
+    {
+      "start": 670,
+      "end": 671,
+      "replacement": "    owner=collmap[(unsigned)y*AVP_AMP_GRID_W+(unsigned)x];\n    if(owner==0)return 0;\n    /* A recycled slot or an entity removed from play must not become an\n     * invisible navigation obstacle.  Combat already validates that grid\n     * ownership refers to an active AMP at this exact square. */\n    /* place_grid uses $ffff for random-placement exclusions, including the\n     * player's initial cell and entire otherwise walkable floor regions.\n     * These are NOT live AMP occupants.  When an excluded cell has an\n     * authored floor, let the original SafePos wall/door test determine\n     * whether the actor can enter it.  Floorless/exterior cells must remain\n     * blocked: SafePos checks wall faces, not floor eligibility. */\n    if(owner==0xffffu){\n        u8 *maze=avp_collision_maze_data();\n        unsigned width=avp_collision_maze_width();\n        unsigned height=avp_collision_maze_height();\n        return !maze || (unsigned)x>=width || (unsigned)y>=height ||\n               !maze[((size_t)(unsigned)y*width+(unsigned)x)*8u+5u];\n    }\n    if(owner>AVP_NUM_AMPS)return 1;\n    a=&amp_data[owner-1u];\n    if(!a->mode && !a->host_static)return 0;\n    return ((u32)a->xpos>>16)==(unsigned)x &&\n           ((u32)a->ypos>>16)==(unsigned)y;\n"
+    },
+    {
+      "start": 715,
+      "end": 715,
+      "replacement": "\n#include \"../../new/cheats/amp_diagonal_chase_component.inc\"\n\n"
+    },
+    {
+      "start": 717,
+      "end": 718,
+      "replacement": ""
+    },
+    {
+      "start": 732,
+      "end": 733,
+      "replacement": "            amp_sfx(r==2u?AVP_FX_ANYTI:(r==3u?AVP_FX_CMON2:AVP_FX_CHATC));\n"
+    },
+    {
+      "start": 752,
+      "end": 753,
+      "replacement": "                /* AMP.S chase movement adds signed step words with 68000\n                 * ADD.L. Preserve longword wrapping even if a signed speed\n                 * and a boundary position cross the register limit. */\n                if(host_normalize_diagonal_enemy_movement_speed){\n                    nx=amp_projectile_add(ox,(s32)dx*amp_diagonal_chase_component(a->xvel));\n                    ny=amp_projectile_add(oy,(s32)dy*amp_diagonal_chase_component(a->yvel));\n                }else{\n                    nx=amp_projectile_add(ox,(s32)dx*(s32)a->xvel);\n                    ny=amp_projectile_add(oy,(s32)dy*(s32)a->yvel);\n                }\n"
+    },
+    {
+      "start": 762,
+      "end": 763,
+      "replacement": "                nx=amp_projectile_add(ox,(s32)dx*(s32)a->xvel);ny=oy;\n"
+    },
+    {
+      "start": 772,
+      "end": 773,
+      "replacement": "            nx=ox;ny=amp_projectile_add(oy,(s32)dy*(s32)a->yvel);\n"
+    },
+    {
+      "start": 780,
+      "end": 781,
+      "replacement": "        ny=amp_projectile_add(oy,(s32)dy*(s32)a->yvel);\n"
+    },
+    {
+      "start": 787,
+      "end": 787,
+      "replacement": "    /* R272: the R058 PC-only open-door realignment (\"not original Jaguar\n     * navigation\") is no longer applied; AMP.S has no such fallback. */\n"
+    },
+    {
+      "start": 800,
+      "end": 801,
+      "replacement": "    a->yvector=amp_projectile_add(a->yvector,-1);\n    if(a->yvector==0){a->mode=chase_player;}\n"
+    },
+    {
+      "start": 803,
+      "end": 805,
+      "replacement": "        /* AMP.S fake-direction detours offset the target by one 16.16\n         * maze square with 68000 ADD.L/SUB.L. Signed C overflow is undefined\n         * at either end of the original 32-bit register range. Use the same\n         * exact longword wrapping already verified for AMP projectiles. */\n        if(dx<0)tx=amp_projectile_sub(tx,0x10000);\n        else if(dx>0)tx=amp_projectile_add(tx,0x10000);\n        if(dy<0)ty=amp_projectile_sub(ty,0x10000);\n        else if(dy>0)ty=amp_projectile_add(ty,0x10000);\n"
+    },
+    {
+      "start": 821,
+      "end": 822,
+      "replacement": "    s32 p=(s32)amp_word_signed((u16)v)*(s32)amp_word_signed((u16)(speed<<8));\n    u32 q=(u32)p<<3;\n    return (s32)amp_word_signed((u16)(q>>16));\n"
+    },
+    {
+      "start": 825,
+      "end": 826,
+      "replacement": "    AvpXY from={owner->xpos,owner->ypos},to={(s32)x_pos,(s32)y_pos};s32 vx,vy;AvpAmp *p;\n    if(host_attacks_disabled)return NULL;\n    p=amp_req();\n"
+    },
+    {
+      "start": 830,
+      "end": 831,
+      "replacement": "    /* AMP.S launch offset: ADD.L wraps at 32 bits, as in player_weapon.\n     * Avoid signed-C overflow at the m68k register edges. */\n    p->xpos=amp_projectile_add(p->xpos,eighth_step?(vx>>3):vx);\n    p->ypos=amp_projectile_add(p->ypos,eighth_step?(vy>>3):vy);\n    discflag=1;return p;\n"
+    },
+    {
+      "start": 838,
+      "end": 839,
+      "replacement": "    /* RE40 R201: preserve the original frame-3 Smart Disc launch and\n     * projectile state, but do not play DISK1 twice. The attack-selection\n     * branch already plays DISK1. The readable Jaguar C reconstruction\n     * includes both events; this is a requested host audio correction,\n     * not a claim of proven hardware audio parity. */\n    if(a->animframe==3){(void)amp_spawn_npc_projectile(a,AC_SMART,30,0,0,1);return;}\n"
+    },
+    {
+      "start": 846,
+      "end": 847,
+      "replacement": "    while(f==-2){amp_sfx(AVP_FX_ROCKE);(void)amp_spawn_npc_projectile(a,AC_BOLT,24,-38,1,1);f=p[++i];}\n"
+    },
+    {
+      "start": 862,
+      "end": 863,
+      "replacement": "    amp_marine_loop_sfx(1);\n"
+    },
+    {
+      "start": 864,
+      "end": 865,
+      "replacement": "        AvpAmp *p=amp_req();\n        p->xpos=amp_projectile_add(a->xpos,vx);\n        p->ypos=amp_projectile_add(a->ypos,vy);\n        p->creature=AC_FIRE;p->animseq=AS_STAND;p->animframe=0;p->yoffset=0;\n"
+    },
+    {
+      "start": 871,
+      "end": 871,
+      "replacement": "#include \"../../new/cheats/amp_marine_fire_interrupt.inc\"\n\n"
+    },
+    {
+      "start": 872,
+      "end": 873,
+      "replacement": "    if(crouch_frames[(unsigned)a->timer]<0){\n        /* Retail AMP.S applies 100 damage here without a second sight test.\n         * Optional host enhancement: at the authored damage frame, require\n         * clear original LineOfSight for enemy Marine pulse bursts against\n         * Alien/Predator players. The attack animation and sound complete\n         * normally, with no damage when the player has reached cover. */\n        int can_hit=!host_attacks_disabled &&\n            (!host_marine_pulse_los_hits ||\n             (!host_marine_multiplayer_target &&\n              player_type!=PT_ALIEN && player_type!=PT_PREDATOR) ||\n             amp_los_clear(a));\n        a->mode=chase_player;a->animframe=0;a->animseq=AS_STAND;\n        if(can_hit)player_energy=amp_word_add(player_energy,-100);\n        a->timer=0;return;\n    }\n"
+    },
+    {
+      "start": 890,
+      "end": 891,
+      "replacement": "    while(f==-2){amp_sfx(AVP_FX_IN2);f=invis_frames[(unsigned)a->timer++];}\n"
+    },
+    {
+      "start": 896,
+      "end": 897,
+      "replacement": "    a->yvector=amp_projectile_add(a->yvector,-1);\n    if(a->yvector==0){a->mode=chase_player;return;}\n"
+    },
+    {
+      "start": 901,
+      "end": 902,
+      "replacement": "    amp_sfx(AVP_FX_OUT2);a->timer=0;a->mode=amp_appear_frames;amp_appear_frames(a);\n"
+    },
+    {
+      "start": 913,
+      "end": 914,
+      "replacement": "    a->animframe=(u16)f->frame;\n    if(!host_attacks_disabled && (f->damage || f->sound) && amp_contact_in_range(a,range)){\n        player_energy=amp_word_add(player_energy,-f->damage);\n        if(f->sound)amp_sfx(f->sound);\n    }\n    ++a->ldir;\n"
+    },
+    {
+      "start": 919,
+      "end": 920,
+      "replacement": "    a->timer=amp_projectile_add(a->timer,1);\n    if(a->timer!=5){if(a->energy<=0){a->energy=0;amp_begin_death(a);return;}if(a->energy<a->oldenergy){amp_recoil(a);return;}if(!amp_in_range(a,65)){a->mode=chase_player;a->animseq=AS_RUN;}return;}\n"
+    },
+    {
+      "start": 940,
+      "end": 941,
+      "replacement": "    a->timer=amp_projectile_add(a->timer,1);\n    if(a->timer!=5){if(a->energy<=0){a->energy=0;amp_begin_death(a);return;}if(a->energy<a->oldenergy){amp_recoil(a);return;}if(!amp_in_range(a,77)){a->mode=chase_player;a->animseq=AS_RUN;a->animframe=0;}return;}\n"
+    },
+    {
+      "start": 949,
+      "end": 949,
+      "replacement": "    if(host_attacks_disabled||host_facehug_attach_disabled){a->mode=chase_player;a->animseq=AS_RUN;a->animframe=0;return;}\n"
+    },
+    {
+      "start": 960,
+      "end": 961,
+      "replacement": "    a->yoffset=amp_word_add(a->yoffset,10);if(a->yoffset==0){a->mode=chase_player;return;}chase_player(a);\n"
+    },
+    {
+      "start": 973,
+      "end": 974,
+      "replacement": "        a->mode=amp_roar;a->animseq=AS_FIGHT2;a->timer=0;amp_sfx(AVP_FX_EDITR);amp_roar(a);return 1;\n"
+    },
+    {
+      "start": 978,
+      "end": 979,
+      "replacement": "    if(r==0){amp_sfx(AVP_FX_MOTOR);a->timer=0;amp_laser(a);}\n"
+    },
+    {
+      "start": 980,
+      "end": 981,
+      "replacement": "    else {amp_sfx(AVP_FX_DISK1);a->mode=amp_disc_prepare;a->animseq=AS_FIGHT4;a->animframe=0;}\n"
+    },
+    {
+      "start": 992,
+      "end": 994,
+      "replacement": "    /* AMP.S reads TOM $F00004 once more after LineOfSight.  Reusing\n       the first sample made this branch impossible (the gate equals 2). */\n    if(amp_weapon_beam()&1u){a->animseq=AS_FIGHT2;amp_launchfire(a);}\n    else{a->animseq=AS_FIGHT1;a->timer=0;a->mode=amp_crouch_fire;amp_marine_loop_sfx(0);amp_crouch_fire(a);}\n"
+    },
+    {
+      "start": 1005,
+      "end": 1006,
+      "replacement": "    /* Retail pursuit waits beyond 1152 units. Extend only that wake gate;\n     * attack proximity, optical contact and creature tactics remain retail.\n     * The square X/Y test is deliberate, matching amp_in_range. */\n    if(host_enemy_activation_distance!=4u &&\n       !amp_in_range(a,(u16)(1152u*(host_enemy_activation_distance+1u))))return;\n"
+    },
+    {
+      "start": 1008,
+      "end": 1008,
+      "replacement": "    if(host_attacks_disabled)allow_combat=0;\n"
+    },
+    {
+      "start": 1010,
+      "end": 1013,
+      "replacement": "    if(allow_combat && amp_contact_in_range(a,close) && amp_los_clear(a)){\n        if(a->creature==AC_ACRAWL){if((u16)a->timer){--a->timer;if((u16)a->timer)return;}a->ldir=0;a->animseq=AS_FIGHT1;amp_sfx(AVP_FX_ASHRI);amp_crawlfight(a);return;}\n        if(a->creature==AC_ALIEN){a->timer=4;a->angle=0;amp_sfx(AVP_FX_ASHRI);amp_handalien(a);return;}\n"
+    },
+    {
+      "start": 1014,
+      "end": 1015,
+      "replacement": "        if(a->creature==AC_FACEHUG && !host_facehug_attach_disabled){a->animseq=AS_FIGHT1;a->animframe=0;amp_sfx(AVP_FX_FACEH);amp_closehug(a);return;}\n"
+    },
+    {
+      "start": 1060,
+      "end": 1062,
+      "replacement": "            /* Original AMP_INVHIT records a cloaked hit and persists until\n             * this AMP is scored; querying current invisflag would be wrong\n             * for projectiles that kill after the player decloaks.\n             * Apply the opt-ins in Predator campaign only (SP or co-op),\n             * never in Deathmatch scoring. */\n            if((mp_campaign_type<0 || host_predator_honor_mp_coop) &&\n               host_predator_cloak_half_honor){\n                /* R177: half of the equivalent UNcloaked kill award. A\n                 * ranged kill already gets half retail honor, so cloaked\n                 * ranged kills with this option receive one quarter. */\n                if(!(flags&(1u<<AMP_CLOSEHIT)))add >>= 1;\n                add >>= 1;\n            }else if((mp_campaign_type<0 || host_predator_honor_mp_coop) &&\n                     host_predator_cloak_no_honor_loss){\n                /* R177: neither subtract nor add honor. No threshold change. */\n                return;\n            }else{\n                /* Original Jaguar cloaked-kill penalty, untouched. */\n                add=-add;\n                if(!(flags&(1u<<AMP_CLOSEHIT)))add=(s32)((u32)add<<1);\n            }\n"
+    },
+    {
+      "start": 1068,
+      "end": 1070,
+      "replacement": "    /* The retail 68000 performs a 32-bit ADD.L, then clamps a negative\n     * result. Signed C overflow is undefined; use the actual wrapped word\n     * and its sign bit so edge states do not depend on host optimization. */\n    {\n        const u32 wrapped=(u32)score+(u32)add;\n        score=(wrapped&0x80000000u)?0:(s32)wrapped;\n    }\n"
+    },
+    {
+      "start": 1084,
+      "end": 1086,
+      "replacement": "    /* Retail AMP.S:5250 writes CURAMPNO, i.e. the currently executing\n     * actor, even when its mode supplies a different AMP record. The\n     * standalone host template/placement path has no active CURAMPNO. */\n    n=amp_update_active?(unsigned)cur_amp_no:amp_number(a);\n    if(n==0 || n>AVP_NUM_AMPS)return;\n"
+    },
+    {
+      "start": 1098,
+      "end": 1098,
+      "replacement": "    /* Original AMP.S start_hug Alien branch clears the mode only. It does\n     * not call amp_release or clear the collision grid. Releasing here used\n     * to recycle this slot and shift subsequent actor allocation order. */\n"
+    },
+    {
+      "start": 1176,
+      "end": 1176,
+      "replacement": "\n\n/* Retail-authored AMP template definitions lifted directly from the original\n * Rebellion AMP.S primary/secondary template tables.  These are gameplay\n * constants, not distributed artwork/audio/map assets.  The original `pat1`\n * values in amp_timer were 68000 pointers to movement-pattern data; the native\n * C AI represents that state directly, so those pointer-valued timer presets\n * are normalized to 0. Literal numeric timers (for example the Queen's 5-tick\n * opening delay) are preserved. */\n#define AMP_MOT_KILL ((u16)((1u<<AMP_MOTION)|(1u<<AMP_KILLABLE)))\n#define AMP_KILL     ((u16)(1u<<AMP_KILLABLE))\n#define HV           ((s16)((0x1a00*85)/100))\n#define PV           ((s16)((0x2200*85)/100))\n#define TPL(creature_,or_,seq_,frame_,timer_,xv_,yv_,ld_,vx_,vy_,en_,old_,fl_,ys_,stat_) \\\n    {NULL,(creature_),(or_),(seq_),(frame_),0,(timer_),(xv_),(yv_),(ld_),(vx_),(vy_),(en_),(old_),(fl_),(ys_),(stat_)}\n\nstatic const AvpAmpTemplate retail_source_templates[60]={\n    /*  0 ALIEN */          TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),\n    /*  1 PREDATOR */       TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),\n    /*  2 HUMAN */          TPL(AC_HUMAN,0,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),\n    /*  3 EGG */            TPL(AC_EGG,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),\n    /*  4 FACEHUG */        TPL(AC_FACEHUG,0,AS_RUN,0,0,HV,HV,0,0,0,20,20,AMP_MOT_KILL,0,0),\n    /*  5 ACRAWL */         TPL(AC_ACRAWL,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),\n    /*  6 SMART */          TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),\n    /*  7 BOLT */           TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),\n    /*  8 FIRE */           TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),\n    /*  9 SPARK1 */         TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),\n    /* 10 SPARK2 */         TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),\n    /* 11 AID */            TPL(AC_AID,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 12 AMMO1 */          TPL(AC_AMMO1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 13 AMMO2 */          TPL(AC_AMMO2,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 14 BAG */            TPL(AC_BAG,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 15 CAN */            TPL(AC_CAN,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 16 CART */           TPL(AC_CART,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 17 CHAIN */          TPL(AC_CHAIN,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,1),\n    /* 18 COCOON */         TPL(AC_COCOON,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 19 DISK */           TPL(AC_DISK,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 20 DRUM */           TPL(AC_DRUM,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),\n    /* 21 FOOD */           TPL(AC_FOOD,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 22 GAS (aliases drum_def in retail source) */\n                             TPL(AC_DRUM,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),\n    /* 23 GREN (retail creature AC_AMMO1) */\n                             TPL(AC_AMMO1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 24 GROUP (retail creature AC_CART) */\n                             TPL(AC_CART,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 25 SHELLS */         TPL(AC_SHELLS,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 26 TABLE1 */         TPL(AC_TABLE1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 27 TABLE2 */         TPL(AC_TABLE2,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 28 TABLE3 */         TPL(AC_TABLE3,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 29 HIDE_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),\n    /* 30 HIDE_PREDATOR */  TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),\n    /* 31 HIDE_HUMAN */     TPL(AC_HUMAN,0,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),\n    /* 32 STATIC_ALIEN */   TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),\n    /* 33 STATIC_PRED */    TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),\n    /* 34 STATIC_HUMAN */   TPL(AC_HUMAN,2,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),\n    /* 35 BITE_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,1,0,30,30,AMP_MOT_KILL,0,0),\n    /* 36 TAIL_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,3,0,30,30,AMP_MOT_KILL,0,0),\n    /* 37 SWIPE_ALIEN */    TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,2,0,30,30,AMP_MOT_KILL,0,0),\n    /* 38 DEAD_OFF */       TPL(AC_DEADOFF,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 39 DEAD_S */         TPL(AC_HUMAN,0,AS_DEATH,2,0,0,0,0,0,0,100,100,0,0,0),\n    /* 40 DEAD_MED */       TPL(AC_DEADMED,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 41 BED */            TPL(AC_BED,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 42 CRYO */           TPL(AC_CRYO,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 43 XGEN */           TPL(AC_GEN,0,AS_HIDDEN,0,0,0,0,0,0,0,0,0,0,0,0),\n    /* 44 NGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),\n    /* 45 SGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),\n    /* 46 EGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),\n    /* 47 WGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),\n    /* 48 CGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),\n    /* 49 AQSHIELD */       TPL(AC_AQSHIELD,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),\n    /* 50 QUEEN */          TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0),\n    /* 51 SMARTPRED */      TPL(AC_PREDATOR,0,AS_HIDDEN,0,0,0,0,0,0,0,300,300,AMP_KILL,0,0),\n    /* 52 DEADALIEN */      TPL(AC_ALIEN,0,AS_DEATH,3,0,HV,HV,0,0,0,0,0,0,0,0),\n    /* 53 DEADHUMAN */      TPL(AC_HUMAN,0,AS_DEATH,2,0,HV,HV,0,0,0,0,0,0,0,1),\n    /* 54 DPRED */          TPL(AC_PREDATOR,0,AS_DEATH,4,0,PV,PV,0,0,0,0,0,0,0,1),\n    /* 55 DEADHUG */        TPL(AC_FACEHUG,0,AS_DEATH,3,0,HV,HV,0,0,0,0,0,0,0,1),\n    /* 56 DEADEGG */        TPL(AC_EGG,0,AS_STAND,5,0,0,0,0,0,0,0,0,0,0,1),\n    /* 57 DQUEEN */         TPL(AC_AQUEEN,0,AS_DEATH,2,0,HV,HV,0,0,0,0,0,0,0,1),\n    /* 58 EQUEEN */         TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0),\n    /* 59 RQUEEN */         TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0)\n};\n#undef TPL\n#undef HV\n#undef PV\n#undef AMP_KILL\n#undef AMP_MOT_KILL\n\n#define REND {-1,0}\nstatic const AvpAmpRandomEntry rr_none[]={{-1,0}};\nstatic const AvpAmpRandomEntry rr_h1[]={{0,80},REND};\nstatic const AvpAmpRandomEntry rr_h2[]={{0,60},{15,2},REND};\nstatic const AvpAmpRandomEntry rr_h3[]={{0,40},{11,6},{25,6},REND};\nstatic const AvpAmpRandomEntry rr_h4[]={{0,50},{3,20},{11,6},{25,6},REND};\nstatic const AvpAmpRandomEntry rr_h5[]={{0,50},{3,20},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_h_pship[]={{1,3},REND};\nstatic const AvpAmpRandomEntry rr_h_aship[]={{0,50},{11,15},{3,20},{4,5},REND};\nstatic const AvpAmpRandomEntry rr_h_d[]={{5,10},REND};\nstatic const AvpAmpRandomEntry rr_h_sd[]={{5,5},{16,2},REND};\nstatic const AvpAmpRandomEntry rr_p1[]={{2,60},{11,6},REND};\nstatic const AvpAmpRandomEntry rr_p2[]={{2,60},{11,6},REND};\nstatic const AvpAmpRandomEntry rr_p3[]={{2,45},{3,15},{11,6},{25,6},REND};\nstatic const AvpAmpRandomEntry rr_p4[]={{0,17},{2,40},{3,15},{11,6},{25,6},REND};\nstatic const AvpAmpRandomEntry rr_p5[]={{0,50},{3,30},{4,5},REND};\nstatic const AvpAmpRandomEntry rr_pship[]={{2,10},REND};\nstatic const AvpAmpRandomEntry rr_aship[]={{3,30},{0,60},{4,6},REND};\nstatic const AvpAmpRandomEntry rr_a1[]={{2,45},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_a2[]={{2,50},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_a3[]={{2,75},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_a4[]={{2,75},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_a5[]={{2,25},REND};\nstatic const AvpAmpRandomEntry rr_alship[]={{2,40},{1,3},REND};\nstatic const AvpAmpRandomEntry rr_apship[]={{1,5},REND};\n#undef REND\n\nvoid avp_amp_bind_retail_source_templates_and_random(void)\n{\n    static const AvpAmpRandomEntry *human[AVP_MAX_LEVEL]={\n        rr_h1,rr_h2,rr_h3,rr_h4,rr_h5,rr_h_d,rr_h_d,rr_h_sd,rr_h_sd,rr_h_d,rr_h_d,rr_h_d,rr_h_d,rr_h_aship,rr_h_pship};\n    static const AvpAmpRandomEntry *alien[AVP_MAX_LEVEL]={\n        rr_a1,rr_a2,rr_a3,rr_a4,rr_a5,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_alship,rr_apship};\n    static const AvpAmpRandomEntry *pred[AVP_MAX_LEVEL]={\n        rr_p1,rr_p2,rr_p3,rr_p4,rr_p5,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_aship,rr_pship};\n    unsigned i;\n    avp_amp_bind_templates(retail_source_templates,60);\n    for(i=0;i<AVP_MAX_LEVEL;i++){\n        avp_amp_bind_random_list(0,i+1,human[i]);\n        avp_amp_bind_random_list(1,i+1,alien[i]);\n        avp_amp_bind_random_list(2,i+1,pred[i]);\n    }\n}\nunsigned avp_amp_bound_template_count(void){return bound_template_count;}\nunsigned avp_amp_bound_level_list_count(void){unsigned n=0;for(unsigned k=0;k<4;k++)for(unsigned l=0;l<AVP_MAX_LEVEL;l++)if(level_lists[k][l])++n;return n;}\n"
+    },
+    {
+      "start": 1177,
+      "end": 1177,
+      "replacement": "void avp_amp_set_beam_weapon_sample(u32 (*sample)(void)){beam_weapon_sample=sample;}\n"
+    },
+    {
+      "start": 1181,
+      "end": 1182,
+      "replacement": "static void amp_cleargrid_c(AvpAmp *a)\n{\n    unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;\n    /* Original AMP.S amp_cleargrid (line 5324 in the R278 source audit)\n     * writes zero to this cell without checking its present owner.\n     * Keep the host bounds guard; do not add a non-retail owner check. */\n    if(x<AVP_AMP_GRID_W && y<AVP_AMP_GRID_H)\n        collmap[y*AVP_AMP_GRID_W+x]=0;\n}\n/* Unmodified Jaguar square range. Used by pursuit, AI and detection. */\n"
+    },
+    {
+      "start": 1183,
+      "end": 1183,
+      "replacement": "#include \"../../new/cheats/amp_contact_range.inc\"\n\n"
+    },
+    {
+      "start": 1192,
+      "end": 1193,
+      "replacement": "    /* The retail collectable mode registers itself in objmap, not collmap.\n     * Keep R50's one-based combat ownership for actors and solid props,\n     * but do not turn medkits/ammo into blockers or projectile victims. */\n    /* Dead templates 52..57 are visible/acid-active but not solid: dying\n     * already cleared the original AMP collision owner.  A level revisit\n     * must not recreate that owner or turn a corpse into a projectile hit. */\n    if(a->mode!=amp_collectable_mode && p->def!=18u &&\n       (p->def<52u || p->def>57u))amp_setgrid(a);\n"
+    },
+    {
+      "start": 1198,
+      "end": 1199,
+      "replacement": "    AvpAmpPlacement p={amp_word_signed((u16)((u32)xpos>>8)),\n                       amp_word_signed((u16)((u32)ypos>>8)),def};\n"
+    },
+    {
+      "start": 1201,
+      "end": 1202,
+      "replacement": "    /* Spawning a collectable reserves its location during rand_set but it\n     * becomes an object-grid entry, never a solid actor-grid occupant. */\n    if(occupy && a->mode!=amp_collectable_mode && def!=18u && def!=56u)amp_setgrid(a);\n"
+    },
+    {
+      "start": 1210,
+      "end": 1210,
+      "replacement": "    /* Placement lists may be recovered before the 48-byte retail template\n     * definitions are bound. Do not instantiate partially initialized actors. */\n    if(!bound_templates||!bound_template_count)return;\n"
+    },
+    {
+      "start": 1269,
+      "end": 1269,
+      "replacement": "    /* Occupancy while choosing random positions must include collectables,\n     * even though their final home is objmap rather than collmap. */\n    u8 reserved[AVP_AMP_GRID_W*AVP_AMP_GRID_H]={0};\n"
+    },
+    {
+      "start": 1273,
+      "end": 1273,
+      "replacement": "    /* Authored collectables are in AMP slots before they first update\n     * objmap.  Reserve their squares before choosing random locations;\n     * collmap deliberately does not contain these non-solid objects.  A\n     * collected pickup has neither a live mode nor host_static, so it must\n     * not block a future spawn. */\n    for(unsigned i=0;i<AVP_NUM_AMPS;i++){\n        const AvpAmp *a=&amp_data[i];\n        unsigned x,y;\n        if(a->astype<0 ||\n           avp_amp_builtin_mode_for_def((unsigned)a->astype)!=amp_collectable_mode ||\n           (a->mode!=amp_collectable_mode && !a->host_static) ||\n           (a->flags&(1u<<AMP_COLLECT)))continue;\n        x=(u32)a->xpos>>16;\n        y=(u32)a->ypos>>16;\n        if(x<AVP_AMP_GRID_W && y<AVP_AMP_GRID_H)\n            reserved[y*AVP_AMP_GRID_W+x]=1u;\n    }\n"
+    },
+    {
+      "start": 1276,
+      "end": 1277,
+      "replacement": "            do{x=avp_random()&63u;y=avp_random()&63u;if(++tries>65536u)return;}\n            /* Movement may enter a walkable $ffff cell, but the original\n             * placement grid explicitly FORBIDS spawning there.  Keep the\n             * two occupancy meanings separate (no gameplay AI changes). */\n            while(collmap[y*AVP_AMP_GRID_W+x]==0xffffu ||\n                  amp_grid_nonzero((int)x,(int)y) || reserved[y*64u+x]);\n            reserved[y*64u+x]=1u;\n"
+    },
+    {
+      "start": 1330,
+      "end": 1331,
+      "replacement": "    if(amp_weapon_beam()&1u){\n"
+    },
+    {
+      "start": 1337,
+      "end": 1338,
+      "replacement": "        amp_marine_loop_sfx(0);amp_crouch_fire(a);\n"
+    },
+    {
+      "start": 1348,
+      "end": 1349,
+      "replacement": "    /* Preserve the original 68000 32-bit countdown wrap at $80000000. */\n    a->timer=amp_projectile_add(a->timer,-1);\n"
+    },
+    {
+      "start": 1358,
+      "end": 1358,
+      "replacement": "    /* HUD_MSG.S::msg_stun: the Marine has fallen but is not cocooned\n     * until the Alien physically reaches the body. The original message is\n     * already present in the retail message tables and PC host dispatcher. */\n    {const AvpRuntimeOps *o=avp_runtime_ops();\n     if(o->set_message)o->set_message(o->user,7u);}\n"
+    },
+    {
+      "start": 1364,
+      "end": 1366,
+      "replacement": "    /* This dying/stunned Marine timer also counts down as a longword. */\n    a->timer=amp_projectile_add(a->timer,-1);\n    if(a->timer==0){set_static(a);return;}\n    if(!amp_contact_in_range(a,20))return;\n"
+    },
+    {
+      "start": 1367,
+      "end": 1368,
+      "replacement": "        set_static(a);a->flags=(1u<<AMP_DEAD);\n        {const AvpRuntimeOps *o=avp_runtime_ops();\n         if(o->set_message)o->set_message(o->user,9u);}\n        return;\n"
+    },
+    {
+      "start": 1370,
+      "end": 1371,
+      "replacement": "    a->astype=18;a->flags=0;MakeCocoon((u32)a->xpos,(u32)a->ypos);amp_sfx(AVP_FX_COCOX);\n    {const AvpRuntimeOps *o=avp_runtime_ops();\n     if(o->set_message)o->set_message(o->user,8u);}\n"
+    },
+    {
+      "start": 1377,
+      "end": 1379,
+      "replacement": "static void egg_open_mode(AvpAmp *a){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_EGGX1);a->mode=egg_open2_mode;egg_open2_mode(a);}\nstatic void fire_hug_mode(AvpAmp *a){AvpAmp*h;if(!bound_templates||4u>=bound_template_count){set_static(a);return;}amp_sfx(AVP_FX_FACEH);h=amp_req();*h=(AvpAmp){0};h->xpos=a->xpos;h->ypos=a->ypos;{AvpAmpPlacement p={amp_word_signed((u16)((u32)a->xpos>>8)),\n                            amp_word_signed((u16)((u32)a->ypos>>8)),4};apply_template(h,&p);h->xpos=a->xpos;h->ypos=a->ypos;}h->yoffset=-30;h->mode=amp_fallhug;a->mode=amp_used_egg;}\n"
+    },
+    {
+      "start": 1411,
+      "end": 1412,
+      "replacement": "    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_ASHRI);\n"
+    },
+    {
+      "start": 1425,
+      "end": 1426,
+      "replacement": "    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_ASHRI);\n"
+    },
+    {
+      "start": 1433,
+      "end": 1434,
+      "replacement": "    a->timer=amp_projectile_add(a->timer,-1);\n"
+    },
+    {
+      "start": 1487,
+      "end": 1488,
+      "replacement": "static void queen_delay_mode(AvpAmp *a)\n{\n    a->timer=amp_projectile_add(a->timer,-1);\n    if(a->timer==0)lockxxx(a);\n}\n"
+    },
+    {
+      "start": 1498,
+      "end": 1499,
+      "replacement": "    /* Queen death advances the selected CAMPAIGN's authored ending path,\n     * not the species of the last player targeted by its enemy AI. This\n     * extra override is unset in the original single-player game. */\n    if(avp_amp_mp_queen_predator_ending(player_type)){\n"
+    },
+    {
+      "start": 1508,
+      "end": 1509,
+      "replacement": "    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_AHIT);\n"
+    },
+    {
+      "start": 1511,
+      "end": 1511,
+      "replacement": "#include \"../../new/cheats/amp_enemy_cheats.inc\"\n\n"
+    },
+    {
+      "start": 1545,
+      "end": 1546,
+      "replacement": "            if(amp_contact_in_range(a,90)){\n"
+    },
+    {
+      "start": 1547,
+      "end": 1547,
+      "replacement": "                u32 sound=(a->animseq==AS_FIGHT1)?AVP_FX_NALN1:\n                          (a->animseq==AS_FIGHT3)?AVP_FX_NALN2:AVP_FX_CLAW2;\n"
+    },
+    {
+      "start": 1548,
+      "end": 1549,
+      "replacement": "                if(!host_attacks_disabled){player_energy=amp_word_add(player_energy,-scaled);amp_sfx(sound);}\n"
+    },
+    {
+      "start": 1562,
+      "end": 1563,
+      "replacement": "    a->timer=amp_projectile_add(a->timer,-1);\n    if(a->timer>=0)return;\n    if(host_attacks_disabled){a->timer=5;return;}\n"
+    },
+    {
+      "start": 1568,
+      "end": 1568,
+      "replacement": "    /* AMP.S::qfight plays ashriek when the Queen commits to an attack,\n     * not when the melee damage record is consumed.  The end-game\n     * Queen uses a different entry sequence and does not do this. */\n    amp_sfx(AVP_FX_ASHRI);\n"
+    },
+    {
+      "start": 1585,
+      "end": 1586,
+      "replacement": "    if(amp_contact_in_range(a,90)){queen_choose_fight(a);return;}\n"
+    },
+    {
+      "start": 1589,
+      "end": 1589,
+      "replacement": "\n#ifdef AVP_LOCAL_MULTIPLAYER_AMP_BRIDGE\n#include \"../../new/multiplayer/local_mp_amp_native.inc\"\n#include \"../../new/multiplayer/local_mp_amp_targets.inc\"\n#endif\n"
+    }
+  ]
+}

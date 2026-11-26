@@ -1,0 +1,47 @@
+{
+  "path": "src/game/maze.c",
+  "base_sha256": "2b21866efd12e7a826a00ad000b0368e1124f594dc643252cfa600c45a558352",
+  "output_sha256": "3f9eec3475849fae49f3b5450f78db20e4191c1c384a5f89fbc4d75d2010423d",
+  "edits": [
+    {
+      "start": 3,
+      "end": 3,
+      "replacement": "#include \"music.h\"\n#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 68,
+      "end": 68,
+      "replacement": "/* MAIN/MAZE campaign lifecycle is shared with the PC frame loop.  The\n * Jaguar normally advances this in PlayAvP; the PC host runs NextFrame's\n * constituent functions itself, so it must not skip the ending countdown.\n * Return 1 only when the campaign/death sequence has actually completed. */\nint avp_campaign_advance_end_count(void)\n{\n    const AvpRuntimeOps *o=avp_runtime_ops();\n    if(!end_count)return 0;\n    if(end_count==22 && destruct_flag && !launch_flag)ExplodeFade();\n    if((end_count==12 || end_count==11) && destruct_flag && !launch_flag){\n        if(o->play_sfx)o->play_sfx(o->user,AVP_FX_BSXP1);\n    }\n    if(end_count==10 && (!destruct_flag || launch_flag))FadeDown();\n    if(--end_count!=0)return 0;\n    if(use_cocoon){\n        /* UseCocoon requests a level transfer, possibly back to the SAME\n         * level. It is a respawn, not the completion of the campaign. */\n        UseCocoon();\n        return 0;\n    }\n    return 1;\n}\n\n"
+    },
+    {
+      "start": 87,
+      "end": 96,
+      "replacement": "        if(avp_campaign_advance_end_count())break;\n"
+    },
+    {
+      "start": 98,
+      "end": 100,
+      "replacement": "            /* MAZE.S::no_end calls unloop_all, not KillSounds: leave the\n               ambient and any protected alarm uninterrupted. */\n            UnLoopAl();\n            if(o->play_sfx)o->play_sfx(o->user,AVP_FX_COMPE); /* compenga */\n"
+    },
+    {
+      "start": 103,
+      "end": 104,
+      "replacement": "            if(o->play_sfx)o->play_sfx(o->user,AVP_FX_COMPD); /* compdis */\n"
+    },
+    {
+      "start": 110,
+      "end": 112,
+      "replacement": "            if(newduct||oldduct){if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DUCT1);FadeDown();}\n            else if(!levfx_ID&&!use_cocoon && o->play_sfx)o->play_sfx(o->user,AVP_FX_DDOOR); /* ddoors */\n"
+    },
+    {
+      "start": 184,
+      "end": 185,
+      "replacement": "            if(o->play_sfx)o->play_sfx(o->user,(player_type==PT_HUMAN)?AVP_FX_DEATH:\n                                               (player_type==PT_ALIEN)?AVP_FX_AHIT:AVP_FX_PD2);\n"
+    },
+    {
+      "start": 223,
+      "end": 224,
+      "replacement": "    if(alien_bite){\n        /* MAZE.S ADD.L/SUB.L wrap modulo 2^32. The bite adjusts only the\n         * GPU view snapshot, never the physical player coordinates. */\n        gpu_xpos += (u32)(view_cos >> alien_bite);\n        gpu_ypos -= (u32)(view_sin >> alien_bite);\n    }\n"
+    }
+  ]
+}

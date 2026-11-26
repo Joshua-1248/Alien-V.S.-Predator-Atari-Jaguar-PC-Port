@@ -53,6 +53,10 @@
     X(const AvpWepCmd *, wep_animptr) \
     X(const AvpWepCmd *, wait_ptr) \
     X(u8, cur_action) \
+    X(AvpAmp *, host_cocoon_target) \
+    X(u8, host_cocoon_stage) \
+    X(u32, host_cocoon_tick) \
+    X(u32, host_cocoon_last_hit_tick) \
     X(s16, over_id) \
     X(s16, use1_id) \
     X(s16, use2_id) \

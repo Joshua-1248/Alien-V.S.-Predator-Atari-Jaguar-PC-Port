@@ -14,7 +14,7 @@ INPUT="950:6:20000,1150:6:20000,1400:6:20000,1700:6:20000,2000:6:20000" DUMP=7fb
   "$build/jagref" "$rom" 2200 2200 "$tmp" >/dev/null
 read -r x y a < <(python3 -c "import struct,sys;print(*['%x'%v for v in struct.unpack('>III',open(sys.argv[1],'rb').read())])" "$tmp/pose.bin")
 cc -std=c99 -O2 -I"$root/include" -c "$root/tools/jagref/maze_parity_probe.c" -o "$tmp/probe.o"
-link=$(sed "s# CMakeFiles/avp_pc.dir/src/platform/pc/pc_main.c.o# $tmp/probe.o#; s#-o avp_pc#-o $tmp/probe#" "$build/CMakeFiles/avp_pc.dir/link.txt")
+link=$(sed "s# CMakeFiles/avp_pc.dir/new/pc_host/src/pc_main.c.o# $tmp/probe.o#; s#-o avp_pc#-o $tmp/probe#" "$build/CMakeFiles/avp_pc.dir/link.txt")
 (cd "$build" && eval "$link")
 (cd "$tmp" && ./probe "$rom" 100 "$x" "$y" "$a")
 python3 - "$tmp/frame_02200.ppm" "$tmp/maze_port.ppm" "$x" "$y" "$a" <<'PY'

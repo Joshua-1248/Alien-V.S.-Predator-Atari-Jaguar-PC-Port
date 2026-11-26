@@ -1,0 +1,12 @@
+{
+  "path": "src/game/objects.c",
+  "base_sha256": "67c3f1c9ce22306b1dd5b4baed98829a2b5daf37458fe94f9e22ec6231b1a1a4",
+  "output_sha256": "dad47331b245f62fd122783acc20d7ea09ed910bbca2d4f23cad90c01ebe878e",
+  "edits": [
+    {
+      "start": 9,
+      "end": 10,
+      "replacement": "void InitPal(void){const AvpRuntimeOps*o=avp_runtime_ops();if(o->object_event)o->object_event(o->user,1,0x00ff,0x0100,256);}void InitInts(void){const AvpRuntimeOps*o=avp_runtime_ops();if(o->object_event)o->object_event(o->user,2,0,0,0);}void VSync(void){const AvpRuntimeOps*o=avp_runtime_ops();if(o->wait_vblank)o->wait_vblank(o->user);avp_runtime_fx_vblank();}void BuildPre(void){const AvpRuntimeOps*o=avp_runtime_ops();if(o->object_event)o->object_event(o->user,3,0,0,0);}\n"
+    }
+  ]
+}

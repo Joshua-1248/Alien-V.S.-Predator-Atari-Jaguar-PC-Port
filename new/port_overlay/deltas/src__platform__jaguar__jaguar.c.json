@@ -1,0 +1,12 @@
+{
+  "path": "src/platform/jaguar/jaguar.c",
+  "base_sha256": "2da0d79cedfade26c2a0b066ae90d542217f25368330288abcfef285cf03ae63",
+  "output_sha256": "983c9c112bf57635b47e44fc9527cf4d34aefab87c1b14e957e825df98ce445a",
+  "edits": [
+    {
+      "start": 15,
+      "end": 16,
+      "replacement": "/* Keep the Jaguar low-memory store out of host constant propagation.\n * GCC can otherwise specialize the address-zero call and reject it under\n * -Werror=array-bounds, although this is reference Jaguar MMIO code. */\n#if defined(__GNUC__) && !defined(__clang__)\n__attribute__((noipa))\n#elif defined(__clang__)\n"
+    }
+  ]
+}

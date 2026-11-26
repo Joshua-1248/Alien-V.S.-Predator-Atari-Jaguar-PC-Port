@@ -1,0 +1,37 @@
+{
+  "path": "src/game/weapons.c",
+  "base_sha256": "9902cf42864b18f10386e728b09fd075a7e0c90e3460837e64c01061d75bcf0d",
+  "output_sha256": "f760ba7e49a8ff8be449bdadbc0457c43d09bc02dc3f0bae7b8cd64b26240cf6",
+  "edits": [
+    {
+      "start": 26,
+      "end": 26,
+      "replacement": "#include \"../../new/multiplayer/local_mp_predator_dm_state.inc\"\n"
+    },
+    {
+      "start": 34,
+      "end": 34,
+      "replacement": "#include \"../../new/pc_video/weapon_cycle.inc\"\n\n"
+    },
+    {
+      "start": 38,
+      "end": 39,
+      "replacement": "#include \"../../new/multiplayer/predator_dm_availability.inc\"\n\n    /* MAZESCRN.S:1437-1486.  Thresholds compare UNSIGNED (BHS/BLO) against\n     * the 32-bit score.  On the way down only cur_wepno is compared with the\n     * revoked weapon; new_wepno may legitimately name a weapon revoked by a\n     * later step of the same loop -- there is no fallback in the original. */\n    u32 sc=(u32)score;\n"
+    },
+    {
+      "start": 41,
+      "end": 44,
+      "replacement": "    while (pred_index>0 && sc<(u32)awards[pred_index].score) {\n"
+    },
+    {
+      "start": 59,
+      "end": 60,
+      "replacement": "           sc>=(u32)awards[pred_index+1].score) {\n"
+    },
+    {
+      "start": 68,
+      "end": 68,
+      "replacement": "\n#include \"../../new/multiplayer/local_mp_predator_award_state.inc\"\n"
+    }
+  ]
+}

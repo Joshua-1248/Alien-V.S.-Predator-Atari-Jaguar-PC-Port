@@ -72,6 +72,13 @@ int avp_mp_doors_scope_leave(AvpMpDoorScope *scope,
  * actor used the lift. Available only in the bound original world scope. */
 int avp_mp_doors_native_pending_lift(uint16_t *x,uint16_t *y);
 
+/* One native door tick with every physically present living actor in the
+ * bound level. The caller's XY remains the lift passenger context when
+ * lift_passenger is true; otherwise it is not a collision participant. */
+typedef struct AvpMpDoorOccupant { uint32_t x, y; } AvpMpDoorOccupant;
+unsigned avp_mp_doors_native_step_occupied(const AvpMpDoorOccupant *actors,
+                                           unsigned count, int lift_passenger);
+
 int avp_mp_doors_world_init(AvpMpDoorEngineState *world, uint8_t *maze,
                              uint16_t width, uint16_t height, unsigned level);
 #endif

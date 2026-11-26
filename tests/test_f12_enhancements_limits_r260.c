@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_pain_sounds(int enabled){(void)enabled;}
@@ -26,11 +26,11 @@ int main(void)
         "/tmp/avp-r260-enhancements-limits-%ld.cfg",(long)getpid());
     v->menu_open=1;
     v->menu_page=MENU_ROOT;
-    assert(menu_count(v)==4);
-    v->menu_cursor=1;
+    assert(menu_count(v)==8);
+    v->menu_cursor=3;
     menu_choose(v);
     assert(v->menu_page==MENU_ENHANCEMENTS);
-    assert(menu_count(v)==7);
+    assert(menu_count(v)>=7);
     for(int i=0;i<7;i++){
         int id=enhancement_items[i];
         assert(count_id(v,MENU_ENHANCEMENTS,id)==1);
@@ -48,11 +48,15 @@ int main(void)
     /* Navigating to options does not silently enable them. */
     assert(!v->cfg.buffer_short_presses && !v->cfg.buffer_short_analog &&
            !v->cfg.enhanced_analog_controls);
-    v->menu_cursor=3;
+    for(v->menu_cursor=0;v->menu_cursor<menu_count(v);v->menu_cursor++)
+        if(menu_id(v,v->menu_cursor)==147)break;
+    assert(v->menu_cursor<menu_count(v));
     menu_choose(v);
     assert(v->cfg.enhanced_analog_controls);
     assert(!v->cfg.buffer_short_analog);
-    v->menu_cursor=4;
+    for(v->menu_cursor=0;v->menu_cursor<menu_count(v);v->menu_cursor++)
+        if(menu_id(v,v->menu_cursor)==148)break;
+    assert(v->menu_cursor<menu_count(v));
     menu_choose(v);
     assert(v->cfg.buffer_short_analog);
     assert(!v->cfg.buffer_short_presses);

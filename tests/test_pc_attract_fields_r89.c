@@ -41,7 +41,9 @@ int main(void)
     assert(avp_pc_mjp_field_paced(AVP_MJP_ESCAPE));
     assert(avp_pc_mjp_field_paced(AVP_MJP_SIM_TERMINATED));
     assert(avp_pc_mjp_field_paced(AVP_MJP_BASE_EXPLODES));
-    assert(!avp_pc_mjp_field_paced(AVP_MJP_SELECT));
+    /* SELECT has the same retail field budget; it must not add an extra
+     * 16.7 ms sleep after expensive host image/OP composition. */
+    assert(avp_pc_mjp_field_paced(AVP_MJP_SELECT));
     assert(!avp_pc_mjp_field_paced(AVP_MJP_FAME));
     assert(avp_pc_mjp_next_deadline(0u,100u,60u)==16666767ull);
     assert(avp_pc_mjp_next_deadline(16666767ull,9000000ull,60u)==33333434ull);

@@ -2,7 +2,7 @@
  * Verify that a failed write is closed and that FullSynth time does not run
  * 2.5x faster through the old fixed 10-ms error retry. No audio device,
  * Jaguar ROM bytes, or runtime instrumentation is used. */
-#include "../src/platform/pc/pc_audio.c"
+#include "../new/pc_host/src/pc_audio.c"
 #include "avp_resources.h"
 #include <assert.h>
 #include <stdint.h>
@@ -53,6 +53,7 @@ int main(void)
     int16_t buf[512u*2u]={0};
     uint64_t t0,elapsed;
     D.pulse=(pa_simple *)(uintptr_t)1u;
+    D.output_channels=2u; /* Stereo sink byte counts. */
     D.pulse_write=fake_pulse_write;
     D.pulse_free=fake_pulse_free;
     D.run=1;
@@ -69,6 +70,7 @@ int main(void)
     /* The next worker block must be able to reconnect the lost output
      * instead of remaining silent for the rest of the session. */
     D.pulse_so=(void *)(uintptr_t)1u; /* already resolved fake library */
+    D.requested_mode=1u;D.requested_subs=0u; /* Stereo reconnect. */
     D.pulse_new=fake_pulse_new;
     fail_write=0;
     stop_after_reconnect=1;

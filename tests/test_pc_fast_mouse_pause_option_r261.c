@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pc/pc_mouse_capture.h"
-#include "../src/platform/pc/pc_video_x11.c"
+#include "../new/pc_host/src/pc_video_x11.c"
 void avp_mazescrn_set_facehug_shake_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_facehug_pain_sounds(int enabled){(void)enabled;}
 void avp_player_set_pain_sounds(int enabled){(void)enabled;}

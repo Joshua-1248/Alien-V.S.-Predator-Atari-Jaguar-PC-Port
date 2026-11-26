@@ -6,11 +6,11 @@ It does NOT claim a retail-ROM visual or interaction test was performed.
 from pathlib import Path
 import sys
 root = Path(__file__).resolve().parents[3]
-video = (root/'src/platform/pc/pc_video_x11.c').read_text()
+video = (root/'new/pc_host/src/pc_video_x11.c').read_text()
 walk = (root/'new/multiplayer/local_mp_walktest.c').read_text()
 command = (root/'new/multiplayer/local_mp_commands.c').read_text()
-renderer = (root/'src/jaguar/avp_gpu/software_renderer.c').read_text()
-prototype = (root/'src/platform/pc/pc_prototype_textures.c').read_text()
+renderer = (root/'new/jaguar/avp_gpu/software_renderer.c').read_text()
+prototype = (root/'new/pc_host/src/pc_prototype_textures.c').read_text()
 
 def between(src, start, stop):
     a=src.index(start)

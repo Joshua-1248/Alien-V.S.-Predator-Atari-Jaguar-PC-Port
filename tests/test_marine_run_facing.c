@@ -1,6 +1,6 @@
 /* R138: Marine facing selection, retaining left/right sprite parity.
  * Exercise the actual host renderer sprite-choice function directly. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

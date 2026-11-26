@@ -8,7 +8,7 @@ This guard checks the actual native actor tick site in addition to the C test.
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
-main = (root / "src/platform/pc/pc_main.c").read_text()
+main = (root / "new/pc_host/src/pc_main.c").read_text()
 walk = (root / "new/multiplayer/local_mp_walktest.c").read_text()
 
 assert main.index("multiplayer_dispatch:") < main.index(

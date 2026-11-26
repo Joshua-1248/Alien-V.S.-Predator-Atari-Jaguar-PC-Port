@@ -9,7 +9,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 orig=(root/'src/game/maze.c').read_text()
 composite=(root/'src/game/mazescrn.c').read_text()
-host=(root/'src/platform/pc/pc_main.c').read_text()
+host=(root/'new/pc_host/src/pc_main.c').read_text()
 a=orig.split('void PostFirst(void)',1)[1].split('void ResetMaze(void)',1)[0]
 assert a.index('InitScrOverlays();')<a.index('ScreenOff();')<a.index('SetMazeList();')<a.index('FadeUp();')
 a=composite.split('void InitScrOverlays(void)',1)[1].split('void hug_init(void)',1)[0]

@@ -6,20 +6,36 @@
 
 /* This is PC-only state. No original Jaguar globals, symbols or objects. */
 #define AVP_LOCAL_MP_MAX_PLAYERS 4u /* human input and viewports */
-#define AVP_LOCAL_MP_MAX_BOTS 12u
+#define AVP_LOCAL_MP_MAX_BOTS 32u
 #define AVP_LOCAL_MP_MAX_ACTORS (AVP_LOCAL_MP_MAX_PLAYERS+AVP_LOCAL_MP_MAX_BOTS)
-#define AVP_LOCAL_MP_ROWS 53u
+/* Preserve all existing F2 setting row IDs; append the shared Marine shotgun
+ * option as an F2 Modifiers-only presentation row. */
+#define AVP_LOCAL_MP_ROWS 104u
+#define AVP_LOCAL_MP_MARINE_SHOTGUN_ROW 103u
+#define AVP_LOCAL_MP_BOT_SPECIES_17_ROW 70u
+#define AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW 86u
+#define AVP_LOCAL_MP_BOT_LAST_ROW (AVP_LOCAL_MP_BOT_BEHAVIOR_17_ROW+16u)
+#define AVP_MP_ACTOR_BIT(slot) (UINT64_C(1) << (slot))
+#define AVP_MP_ACTOR_VALID_MASK (AVP_MP_ACTOR_BIT(AVP_LOCAL_MP_MAX_ACTORS)-UINT64_C(1))
+typedef uint64_t AvpMpActorMask;
 #define AVP_MP_CUSTOM_LEVEL 16u /* PC-only session identity; source art remains mapped explicitly. */
 #define AVP_LOCAL_MP_CUSTOM_NAME_ROW 50u
 #define AVP_LOCAL_MP_CUSTOM_LOAD_ROW 51u
 /* UI-only F2 submenus. Existing 0..49 setting IDs are unchanged. */
-#define AVP_LOCAL_MP_MENU_ROWS (AVP_LOCAL_MP_ROWS+3u)
-#define AVP_LOCAL_MP_MENU_BOTS_ROW AVP_LOCAL_MP_ROWS
-#define AVP_LOCAL_MP_MENU_MODIFIERS_ROW (AVP_LOCAL_MP_ROWS+1u)
-#define AVP_LOCAL_MP_MENU_OPTIONS_ROW (AVP_LOCAL_MP_ROWS+2u)
+#define AVP_LOCAL_MP_MENU_ROWS AVP_LOCAL_MP_ROWS
+#define AVP_LOCAL_MP_MENU_BOTS_ROW 61u
+#define AVP_LOCAL_MP_MENU_MODIFIERS_ROW 62u
+#define AVP_LOCAL_MP_MENU_OPTIONS_ROW 63u
+#define AVP_LOCAL_MP_MENU_SPYCAM_ROW 64u
+#define AVP_LOCAL_MP_SPYCAM_PLAYER_ROW 65u
+#define AVP_LOCAL_MP_SPYCAM_NEXT_ROW 66u
+#define AVP_LOCAL_MP_SPYCAM_PREVIOUS_ROW 67u
+#define AVP_LOCAL_MP_SPAWN_RANDOM_LEVEL_ROW 68u
+#define AVP_LOCAL_MP_RESPAWN_RANDOM_LEVEL_ROW 69u
 enum AvpLocalMpMenuPage {
     AVP_LOCAL_MP_MENU_ROOT=0, AVP_LOCAL_MP_MENU_BOTS,
-    AVP_LOCAL_MP_MENU_MODIFIERS, AVP_LOCAL_MP_MENU_OPTIONS
+    AVP_LOCAL_MP_MENU_MODIFIERS, AVP_LOCAL_MP_MENU_OPTIONS,
+    AVP_LOCAL_MP_MENU_SPYCAM
 };
 #define AVP_LOCAL_MP_SHOW_OTHER_PLAYERS_ROW 49u /* Both co-op and Deathmatch */
 #define AVP_LOCAL_MP_PLAYER_COLLISIONS_ROW 52u /* New stable row; default on */
@@ -30,10 +46,14 @@ enum AvpLocalMpMenuPage {
 #define AVP_LOCAL_MP_WHOLE_MAP_ROW 30u
 #define AVP_LOCAL_MP_TRAVEL_ROW 47u /* DM: allow vents, lifts and airlocks */
 #define AVP_LOCAL_MP_CLOAK_DAMAGE_ROW 48u /* DM: cloaked Predator takes 4x PvP damage */
+#define AVP_LOCAL_MP_PREDATOR_UNCLOAKED_DAMAGE_ROW 102u /* DM: uncloaked Predator deals 4x PvP damage */
 /* R19: preserve the original 31 menu row identifiers; extend the bot
  * selectors after them so existing settings/menu navigation remain stable. */
 #define AVP_LOCAL_MP_BOT_SPECIES_EXTRA_ROW 31u  /* Bot 5 through Bot 12 */
 #define AVP_LOCAL_MP_BOT_BEHAVIOR_EXTRA_ROW 39u /* Bot 5 through Bot 12 */
+/* R119: Append selectors to avoid reusing original rows 47..52. */
+#define AVP_LOCAL_MP_BOT_SPECIES_LAST_ROW 53u /* Bot 13 through Bot 16 */
+#define AVP_LOCAL_MP_BOT_BEHAVIOR_LAST_ROW 57u /* Bot 13 through Bot 16 */
 #define AVP_LOCAL_MP_LEVEL_ROW 17u
 #define AVP_LOCAL_MP_ENEMIES_ROW 18u
 #define AVP_LOCAL_MP_EQUIP_ROW 19u
@@ -67,10 +87,13 @@ typedef struct AvpLocalMpSetup {
     char custom_map_stem[96]; /* safe filename stem, selected by map browser. */
     unsigned dm_level_travel; /* Deathmatch only; default off. */
     unsigned dm_cloak_damage; /* Deathmatch modifier: cloaked Predator takes 4x PvP damage. */
+    unsigned dm_predator_uncloaked_damage; /* DM: uncloaked Predator deals 4x damage to players only. */
     unsigned bot_count; /* Separate headless native players, not P1-P4 AI flags. */
     unsigned bot_species[AVP_LOCAL_MP_MAX_BOTS];
     unsigned bot_behavior[AVP_LOCAL_MP_MAX_BOTS];
     unsigned random_species_on_respawn;
+    unsigned spawn_in_random_level; /* First spawn only; independent of respawn. */
+    unsigned respawn_on_random_level; /* Each death, regardless of initial spawn. */
     unsigned show_whole_map;
     unsigned show_other_players_on_automap; /* Default on; affects map dots only, never radar. */
     unsigned player_collisions; /* Default on; includes bots and co-op/DM. */
@@ -85,7 +108,8 @@ typedef struct AvpLocalMpRect {
 } AvpLocalMpRect;
 
 typedef struct AvpLocalMpWorld {
-    unsigned campaign, level, member_mask;
+    unsigned campaign, level;
+    AvpMpActorMask member_mask;
 } AvpLocalMpWorld;
 
 void avp_local_mp_defaults(AvpLocalMpSetup *s);

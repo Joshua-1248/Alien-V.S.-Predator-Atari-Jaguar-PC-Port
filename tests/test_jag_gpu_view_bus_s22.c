@@ -37,6 +37,9 @@ int main(void)
     inst(24,57,0,0); /* delay-slot NOP */
     mach.ram[0x1020]=0x01;mach.ram[0x1021]=0x23;
     mach.ram[0x1022]=0x45;mach.ram[0x1023]=0x67;
+    /* R236 BIG_INSTR=0 fetches the low lane first. The authored synthetic
+     * instruction stream is high-word first, so request that DORG mode. */
+    mach.gpu.bigend=4u;
     mach.gpu.pc=0xF03000u;mach.gpu.go=1u;
     assert(jagm_run_until_gpu_pc(&mach,0xF03020u,0,1));
     assert(map->gpu_requests==2u);

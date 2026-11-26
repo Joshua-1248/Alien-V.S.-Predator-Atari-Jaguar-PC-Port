@@ -44,9 +44,9 @@ with tempfile.TemporaryDirectory(prefix='re24s21-layout-') as tmp:
          '-I'+str(ROOT/'include'),'-DGEN_C="'+str(gen)+'"',
          '-DOVERLAY_BYTES='+str(addr-START),
          str(ROOT/'tests'/'test_gpu_original_scene_layout_generated_s21.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_scene.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_native.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_layout.c'),
+         str(ROOT/'new/jaguar/avp_gpu/original_view_scene.c'),
+         str(ROOT/'new/jaguar/avp_gpu/original_view_native.c'),
+         str(ROOT/'new/jaguar/avp_gpu/original_view_layout.c'),
          str(ROOT/'src/game/collision.c'),'-o',str(exe)]
     subprocess.run(cmd,check=True)
     subprocess.run([str(exe),str(tmp/'overlay.bin'),str(tmp/'resident.bin')],check=True)

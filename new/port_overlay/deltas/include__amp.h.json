@@ -1,0 +1,42 @@
+{
+  "path": "include/amp.h",
+  "base_sha256": "a4670e98116d24e41b4df6a78a9311933035266a3f56aa0319ac21bca917e8f4",
+  "output_sha256": "4d4991918b8f1b865c2186706566db1441d3fc069421e69275827ca3a320f479",
+  "edits": [
+    {
+      "start": 58,
+      "end": 58,
+      "replacement": "#include \"../new/pc_host/integration/amp_campaign_declarations.inc\"\n"
+    },
+    {
+      "start": 61,
+      "end": 61,
+      "replacement": "\n#include \"../new/pc_host/integration/amp_presentation_declarations.inc\"\n"
+    },
+    {
+      "start": 72,
+      "end": 72,
+      "replacement": "#include \"../new/pc_host/integration/amp_projectile_declarations.inc\"\n\n"
+    },
+    {
+      "start": 76,
+      "end": 76,
+      "replacement": "#include \"../new/pc_host/integration/amp_cheat_declarations.inc\"\n\n"
+    },
+    {
+      "start": 103,
+      "end": 103,
+      "replacement": "#include \"../new/pc_host/integration/amp_honor_declarations.inc\"\n\n"
+    },
+    {
+      "start": 122,
+      "end": 122,
+      "replacement": "void avp_amp_bind_retail_source_templates_and_random(void);\nunsigned avp_amp_bound_template_count(void);\nunsigned avp_amp_bound_level_list_count(void);\n"
+    },
+    {
+      "start": 127,
+      "end": 127,
+      "replacement": "/* $F00004 is read again after the Marine line-of-sight calculation.\n * On Jaguar these two volatile hardware reads are not the same sample. */\nvoid avp_amp_set_beam_weapon_sample(u32 (*sample)(void));\n"
+    }
+  ]
+}

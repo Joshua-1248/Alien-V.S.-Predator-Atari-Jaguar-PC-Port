@@ -106,7 +106,10 @@ int main(void)
         assert(c.actions&ACT(AVP_MP_FIRE));
         v.behavior=0u;
         step(&v,&c);
-        assert(!(c.actions&ACT(AVP_MP_FIRE)));
+        /* R117 corrected this older R84 expectation: from x=0.5 the
+         * Marine has NO legal rearward retreat, so a Balanced bot must
+         * shoot instead of suppressing FIRE for an impossible lure. */
+        assert(c.actions&ACT(AVP_MP_FIRE));
     }
     /* A real, empty Marine inventory still vetoes an impossible shot.
      * This is source-weapon availability, not Guerilla tactical delay. */

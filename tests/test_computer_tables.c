@@ -5,7 +5,7 @@
 /* The retail table is intentionally data-only and private to computer.c.
  * Include it here so the source-derived RDB addresses and authored page counts
  * remain regression locked without exposing test-only runtime APIs. */
-#include "../src/game/computer_retail_tables.inc"
+#include "../new/jaguar/retail_data/computer_retail_tables.inc"
 
 int main(void)
 {

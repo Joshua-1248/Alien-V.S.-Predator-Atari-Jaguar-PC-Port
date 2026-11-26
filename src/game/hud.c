@@ -4,7 +4,6 @@
  * voice cue thresholds and game-over transition.
  */
 #include "hud.h"
-#include "avp_sfx_ids.h"
 #include "hud_message.h"
 #include "player.h"
 #include "hud_score.h"
@@ -25,14 +24,13 @@ u8 show_coords,map_on;
 s16 use_cocoon,num_cocoons;
 u32 ccn_xsave,ccn_ysave;
 AvpCocoonState cocoon_data[AVP_MAX_COCOONS];
-static s16 old_meter,scope_frame,pred_meter_previous;
+static s16 old_meter,scope_frame;
 static u32 tracker_nearest;
 static s32 pred_meter_sample_a,pred_meter_sample_b;
 s16 nrg_x,nrg_y,nrg_barwidth,nrg_width,nrg_height,nrg_nframes,nrg_frame;
 u16 nrg_rescale,nrg_size;
 s8 hud_bright;
-static s16 nrg_ftime,nrg_flash,nrg_draw_frame;
-static u16 nrg_draw_pixels;
+static s16 nrg_ftime,nrg_flash;
 static u32 click_track;
 AvpTrackerAudioState tracker_audio_state;
 s16 pred_meter_left,pred_meter_right;
@@ -111,10 +109,10 @@ void InitCocoons(void)
 {
     num_cocoons=0;
     for(unsigned i=0;i<AVP_MAX_COCOONS;i++){
-        /* HUD.S:860 writes only cocoon_frame; time/level/x/y of an EMPTY
-         * slot keep their previous values and MAZESCRN.S encode_cocoon still
-         * packs them into the EEPROM save. */
         cocoon_data[i].frame=COCOON_EMPTY;
+        cocoon_data[i].time=0;
+        cocoon_data[i].level=0;
+        cocoon_data[i].x=cocoon_data[i].y=0;
     }
 
     if(player_type!=PT_ALIEN)return;
@@ -177,7 +175,7 @@ void UseCocoon(void)
     cocoon_data[0].frame=COCOON_EMPTY;
     if(num_cocoons>0)--num_cocoons;
     RedrawCocoons();
-    {const AvpRuntimeOps *o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_USECN);}
+    {const AvpRuntimeOps *o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,70);}
 }
 void UpdateCocoons(void)
 {
@@ -219,7 +217,6 @@ void InitHUD(void)
     InitScores();
     InitMap();
     old_meter=0;
-    pred_meter_previous=pred_meter_left=pred_meter_right=0;
     show_mt=0; /* START_MT=0 in the shipping build */
     InitCocoons();
     invisflag=0;
@@ -272,11 +269,9 @@ void Countdown(void)
     AvpCountdownCue pending=AVP_COUNT_CUE_NONE;
     if (counttime==0) return;
     {
-        /* HUD.S accesses xtra_c+1 on the big-endian 68000: the low byte
-         * is the flashing-light component, not the high CRY byte. */
-        u8 v=(u8)((u8)xtra_c+(u8)flash_dir);
+        u8 v=(u8)((u8)(xtra_c>>8)+(u8)flash_dir);
         if (v>0xa0u || v<=0x60u) flash_dir=(s8)-flash_dir;
-        xtra_c=(u16)((xtra_c&0xff00u)|v);
+        xtra_c=(u16)((xtra_c&0x00ffu)|((u16)v<<8));
     }
 
     /* HUD.S keeps the selected SFX address in d0 across catch-up ticks and
@@ -293,9 +288,7 @@ void Countdown(void)
             xtra_c=0x8880u;
             if (alarm_fn) alarm_fn(0);
         }
-        /* Keep updating through the countdown's hold/colour records, not
-         * just when its opening record happens to be msg_ptr. */
-        if (msg_status==AVP_HUDMSG_STOP || avp_hudmsg_countdown_active()) {
+        if (msg_status==AVP_HUDMSG_STOP || avp_hudmsg_current()==avp_msg_countdown) {
             update_count_text();
             avp_hudmsg_queue(avp_msg_countdown);
         }
@@ -310,14 +303,7 @@ void Countdown(void)
 enum { HUD_EV_TRACKER=0x200,HUD_EV_SCOPE,HUD_EV_ENERGY,HUD_EV_MAP,HUD_EV_POS,HUD_EV_PALETTE,HUD_EV_COCOON };
 static void hud_event(unsigned e,u32 a,u32 b,u32 c){const AvpRuntimeOps*o=avp_runtime_ops();if(o->object_event)o->object_event(o->user,e,a,b,c);}
 void avp_hud_set_tracker_distance(u32 nearest){tracker_nearest=nearest;}
-unsigned avp_hud_tracker_frame(void){return (unsigned)(u16)scope_frame;}
-u32 avp_hud_tracker_nearest(void){return tracker_nearest;}
 void avp_hud_set_pred_meter_samples(s32 a,s32 b){pred_meter_sample_a=a;pred_meter_sample_b=b;}
-void avp_hud_pred_meter_span(unsigned row,s16 *from,s16 *to)
-{
-    if(from)*from=(row==0u)?pred_meter_previous:pred_meter_left;
-    if(to)*to=(row==0u)?pred_meter_left:pred_meter_right;
-}
 
 void TracTest(void){hud_event(HUD_EV_TRACKER,(u32)player_type,(u32)(u16)scope_frame,0);}
 void TC(void)
@@ -329,17 +315,13 @@ void TC(void)
     target=(u32)MT_MAX-tracker_nearest;
     if(click_track<target) click_track=target;
     else if(click_track>target){
-        /* HUD.S uses a signed BGE after subtracting CTRACK.  The host
-         * unsigned counter must clamp before subtraction can underflow. */
-        click_track=(click_track-target>=(u32)CTRACK) ?
-            click_track-(u32)CTRACK : target;
+        u32 next=click_track-(u32)CTRACK;
+        click_track=(next>=target)?next:target;
     }
     if(click_track){
         u32 d=click_track;
         tracker_audio_state.volume=(u32)((((u64)d<<8)>>16)+0x200u);
         tracker_audio_state.pitch=(d>>2)+0x000a7000u;
-        /* HUD.S::TC sets FX_trac1 word 11 to the integer tracker
-         * click distance plus exactly $2f (not $2f twice). */
         tracker_audio_state.env_rate=(u32)((d>>16)+0x2fu);
         tracker_audio_state.mod_depth=(u32)(((((u32)MT_MAX-d)<<4)>>16)+0x51u);
         trigger|=1u; /* trac1 */
@@ -357,10 +339,6 @@ void HP2(void)
     const s16 lim=(s16)(METER_W/2);
     if(smooth>lim)smooth=lim; else if(smooth<-lim)smooth=-lim;
     if(target>lim)target=lim; else if(target<-lim)target=-lim;
-    /* HP2 draws two spans beginning at the previous meter sample.  The
-     * first ends halfway to the new sample; the second ends at that sample.
-     * Neither is a permanent centre-to-value bar. */
-    pred_meter_previous=old_meter;
     pred_meter_left=smooth;
     pred_meter_right=target;
     old_meter=target;
@@ -389,12 +367,11 @@ void InitNrg(void){
     unsigned i=(unsigned)player_type>>2;if(i>2)i=0;
     nrg_x=cfg[i][0];nrg_y=cfg[i][1];nrg_barwidth=cfg[i][2];nrg_width=cfg[i][3];nrg_height=cfg[i][4];nrg_nframes=cfg[i][5];
     nrg_rescale=max_energy?(u16)((((u32)(u16)nrg_barwidth<<12)/(u16)max_energy)-1u):0;
-    nrg_size=(u16)((u16)nrg_width*(u16)nrg_height);nrg_frame=0;nrg_draw_frame=0;nrg_draw_pixels=0;nrg_ftime=4;nrg_flash=0;
+    nrg_size=(u16)((u16)nrg_width*(u16)nrg_height);nrg_frame=0;nrg_ftime=4;nrg_flash=0;
 }
 void UpdtNrg(void)
 {
     s16 frame=nrg_frame;
-    nrg_draw_frame=frame;
     s16 energy=player_energy, maxe=max_energy;
     u16 pixels=0;
     if(nrg_nframes>0){s16 next=(s16)(frame+1);if(next>=nrg_nframes)next=0;nrg_frame=next;}
@@ -408,11 +385,8 @@ void UpdtNrg(void)
         }
     }
     /* Source frame is the pre-increment frame; destination width is CPU-computed. */
-    nrg_draw_pixels=pixels;
     hud_event(HUD_EV_ENERGY,(u32)(u16)pixels,(u32)(u16)frame,(u32)nrg_rescale);
 }
-unsigned avp_hud_energy_frame(void){return (unsigned)(u16)nrg_draw_frame;}
-unsigned avp_hud_energy_pixels(void){return (unsigned)nrg_draw_pixels;}
 void DrawCocoon(void){RedrawCocoons();}
 void ShowPos(void){hud_event(HUD_EV_POS,(u32)(x_pos>>16),(u32)(y_pos>>16),(u32)(u16)centre_angle);}
 void xDecPrint(void){hud_event(HUD_EV_POS,0,0,0);} void DecPrint(void){xDecPrint();} void DecCommon(void){xDecPrint();} void HexPrint(void){xDecPrint();}
@@ -471,7 +445,3 @@ void UpdtHUD(void)
     ShowMap();
     if(show_coords)ShowPos();
 }
-
-#ifdef AVP_LOCAL_MULTIPLAYER_HUDVIEW_BRIDGE
-#include "../../new/multiplayer/local_mp_hudview_native.inc"
-#endif

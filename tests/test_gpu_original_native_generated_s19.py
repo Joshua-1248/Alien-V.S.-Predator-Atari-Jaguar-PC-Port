@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='s19-generated-') as d:
     cmd=[cc,'-std=c99','-O2','-Wall','-Wextra','-Werror',
          '-Wno-unused-label','-Wno-implicit-fallthrough','-I'+str(ROOT/'include'),
          '-DGEN_C="'+str(file)+'"',str(ROOT/'tests'/'test_gpu_original_native_s19.c'),
-         str(ROOT/'src/jaguar/avp_gpu/original_view_native.c'),'-o',str(Path(d)/'test')]
+         str(ROOT/'new/jaguar/avp_gpu/original_view_native.c'),'-o',str(Path(d)/'test')]
     subprocess.run(cmd,check=True)
     subprocess.run([str(Path(d)/'test')],check=True)
     print(f'RE24 S19 real generated JRISC-to-C stage integration PASS ({cc})')

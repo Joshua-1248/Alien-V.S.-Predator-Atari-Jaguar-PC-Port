@@ -8,8 +8,6 @@
  */
 #include "amp.h"
 #include "avp_runtime.h"
-#include "avp_sfx_ids.h"
-#include "music.h"
 #include "maze.h"
 #include "player.h"
 #include "levels.h"
@@ -28,43 +26,6 @@ u16 levels_visit,discflag;
 u8 inventory_table[16];
 u32 ampcount;
 
-static int host_attacks_disabled;
-/* PC-only optional Marine pulse-rifle damage check at the authored final frame. */
-static int host_marine_pulse_los_hits;
-/* Optional PC-only fatal-hit interruption of the Marine pulse attack. */
-static int host_marine_fire_interrupt;
-/* The native co-op target scope is NOT a Jaguar campaign. Apply the
- * host enhancements to the currently bound actor of any species there. */
-static int host_marine_multiplayer_target;
-static int host_facehug_attach_disabled;
-static int host_dev_death;
-static char host_enemy_bolt_explosion_tag;
-static AvpAmpMpProjectileSpawn mp_projectile_spawn;
-static AvpAmpMpProjectileHit mp_projectile_hit;
-static AvpAmpMpExplosionSpawn mp_explosion_spawn;
-static AvpAmpMpExplosionDamage mp_explosion_damage;
-static void *mp_projectile_user;
-void avp_amp_set_mp_projectile_hooks(AvpAmpMpProjectileSpawn spawn,
-    AvpAmpMpProjectileHit hit,AvpAmpMpExplosionSpawn explosion_spawn,
-    AvpAmpMpExplosionDamage explosion_damage,void *user)
-{
-    mp_projectile_spawn=spawn;
-    mp_projectile_hit=hit;
-    mp_explosion_spawn=explosion_spawn;
-    mp_explosion_damage=explosion_damage;
-    mp_projectile_user=user;
-}
-
-/* AMP.S keeps the enemy Marine pulse/flame loop identifiers globally,
- * not per actor.  Their expiration is advanced once per UpdateAMPs tick. */
-static u32 marine_pulse_id,marine_flame_id;
-static u16 marine_pulse_time,marine_flame_time;
-static u32 slot_generation[AVP_NUM_AMPS];
-/* Independent second TOM beam read used by enemy Marine weapon selection. */
-static u32 beam_weapon_reads;
-static u32 next_slot_generation=1;
-u32 avp_amp_slot_generation(unsigned slot){return slot<AVP_NUM_AMPS?slot_generation[slot]:0;}
-static void mark_amp_slot(unsigned slot){if(slot<AVP_NUM_AMPS){if(++next_slot_generation==0)++next_slot_generation;slot_generation[slot]=next_slot_generation;}}
 static u16 free_list[AVP_NUM_AMPS];
 static unsigned free_count;
 static void (*save_cb)(AvpAmp *,unsigned);
@@ -78,18 +39,9 @@ void avp_amp_set_restore_callback(void (*fn)(AvpAmp *,unsigned)){restore_cb=fn;}
 void initialise(void)
 {
     unsigned i;
-    /* Preserve the original active-mode reset while also clearing host-only
-     * presentation fields that did not exist in the Jaguar AMP records. */
-    for(i=0;i<AVP_NUM_AMPS;++i){
-        level1amps[i].mode=NULL;
-        /* host_static represents the Jaguar's -1 mode in the PC renderer.
-         * A new level must not display a dead/static object left in an
-         * unallocated slot by the previous level.  Authored static objects
-         * are reinstated by build_level/rebuild_level after this reset. */
-        level1amps[i].host_static=0;
-        level1amps[i].aux_ptr=NULL;
-        mark_amp_slot(i);
-    }
+    /* Historical code only clears amp_mode; other fields are left alone until
+     * an active slot is initialized from a template or amp_req. */
+    for(i=0;i<AVP_NUM_AMPS;++i) level1amps[i].mode=NULL;
     amp_data=amps_at=level1amps;
     memset(collmap,0,sizeof(collmap));
     memset(objmap,0,sizeof(objmap));
@@ -133,13 +85,6 @@ AvpAmp *amp_req(void)
     index=free_list[free_count];
     if(index>=AVP_NUM_AMPS) index=AVP_NUM_AMPS-1;
     a=&amp_data[index];
-    mark_amp_slot(index);
-    /* host_static and aux_ptr are host-only fields absent from the original
-     * 48-byte Jaguar AMP. A reused slot must not inherit a static/dead actor
-     * state: UpdateAMPs deliberately skips host_static even when mode is live.
-     * This left newly spawned player projectiles suspended indefinitely. */
-    a->host_static=0;
-    a->aux_ptr=NULL;
     a->flags=0;
     a->yoffset=0;
     a->astype=-1;
@@ -151,11 +96,7 @@ void amp_release(unsigned current_amp_number_1based)
     u16 index;
     if(current_amp_number_1based==0) return;
     index=(u16)(current_amp_number_1based-1u);
-    if(index>=AVP_NUM_AMPS || free_count>=AVP_NUM_AMPS)return;
-    /* An invalid/double release must not push the same slot twice: doing so
-     * lets two live enemies or projectiles share one AMP record on the next
-     * two allocations.  A slot still on the free list is not allocated. */
-    for(unsigned i=0;i<free_count;i++)if(free_list[i]==index)return;
+    if(free_count>=AVP_NUM_AMPS) return;
     free_list[free_count++]=index;
 }
 
@@ -172,11 +113,6 @@ void ram_save(void)
     out=saved_levels[cur_level-1];
     for(unsigned i=0;i<AVP_NUM_AMPS;i++){
         AvpAmp *a=&amp_data[i];
-        /* The original AMP.S save records every allocated AMP with a valid
-         * template, including AMP_DEAD actors: their astype has already been
-         * switched to DEADALIEN/DEADHUMAN/DPRED/DEADHUG.  A stationary corpse
-         * is mode == -1 on Jaguar (host_static here), not an empty slot.
-         * Do not discard dead bodies on a level transition. */
         if((!a->mode&&!a->host_static)||a->astype<0)continue;
         if(n>=AVP_NUM_AMPS)break;
         out[n].x=(s16)((u32)a->xpos>>8);
@@ -190,36 +126,16 @@ void ram_save(void)
 
 void save_level(void)
 {
-    /* AMP.S::save_level releases both Marine sound loops before ram_save. */
-    if(marine_pulse_id)StopLoop(marine_pulse_id);
-    if(marine_flame_id)StopLoop(marine_flame_id);
+    /* The two projectile loop IDs are DSP/backend state in the portable tree;
+     * ram_save is the CPU/game-state part of the historical routine. */
     ram_save();
     if(save_cb)save_cb(amp_data,AVP_NUM_AMPS);
 }
 
-/* The retail Alien Level 15 ending is normally installed by entering the
- * level. In mixed co-op, a Predator's death can put them directly on that
- * level as a RESPAWN, without a campaign exit/entry. Defer the encounter
- * ONLY for that abnormal co-op entrance; normal retail initialization is
- * unchanged. The host arms the original make_end_queen on a real transfer. */
-static int mp_defer_end_queen;
-static s16 mp_campaign_type=-1;
-void avp_amp_mp_defer_end_queen(int enabled){mp_defer_end_queen=enabled!=0;}
-void avp_amp_mp_set_campaign_type(s16 type){mp_campaign_type=type;}
-/* Query only for the Queen's endgame branch: all ordinary combat/score/egg
- * target checks still use that individual actor's original player_type. */
-int avp_amp_mp_queen_predator_ending(s16 acting_player_type)
+static void clear_runtime_grids(void)
 {
-    return (mp_campaign_type>=0?mp_campaign_type:acting_player_type)==PT_PREDATOR;
-}
-
-void avp_amp_dev_freshen_current_level(void)
-{
-    unsigned index;
-    if(cur_level<1 || cur_level>AVP_MAX_LEVEL)return;
-    index=(unsigned)cur_level-1u;
-    levels_visit&=(u16)~(1u<<index);
-    saved_levels[index][0].x=-1;
+    memset(collmap,0,sizeof(collmap));
+    memset(objmap,0,sizeof(objmap));
 }
 
 void restore_level(void)
@@ -227,13 +143,6 @@ void restore_level(void)
     int visited;
     if(cur_level<1||cur_level>AVP_MAX_LEVEL)return;
     ngens=0;discflag=0;amp_data=amps_at=level1amps;
-    /* AMP.S::restore_level clears both handles; the timers no longer run. */
-    marine_pulse_id=marine_flame_id=0;
-    marine_pulse_time=marine_flame_time=0;
-    /* initialise() already clears stale per-level collision and object
-     * owners.  place_grid() then marks excluded cells, and level population
-     * registers its AMP owners.  Do not erase those new registrations after
-     * build_level() or rebuild_level(): projectile hits depend on them. */
     initialise();
     place_grid();
     visited=(levels_visit&(u16)(1u<<((unsigned)cur_level-1u)))!=0;
@@ -243,12 +152,13 @@ void restore_level(void)
         ampcount=0;
         xcocoons();
         rand_set();
+        clear_runtime_grids();
         if(cur_level==14&&player_type!=PT_ALIEN)make_queen();
         if(cur_level==15&&player_type==PT_HUMAN)end_preds();
-        if(cur_level==15&&player_type==PT_ALIEN && !mp_defer_end_queen)
-            make_end_queen();
+        if(cur_level==15&&player_type==PT_ALIEN)make_end_queen();
     }else{
         rebuild_level();
+        clear_runtime_grids();
     }
     if(restore_cb)restore_cb(amp_data,AVP_NUM_AMPS);
 }
@@ -262,17 +172,6 @@ extern void pre_discmove(AvpAmp *);
 extern void pre_flame_on(AvpAmp *);
 
 static u32 beam_counter;
-static u32 (*beam_weapon_sample)(void);
-static u32 amp_weapon_beam(void)
-{
-    /* The second $F00004 read follows LineOfSight. Reusing the exact
-     * initial beam phase forces an even parity whenever the firing gate
-     * (beam & 7)==2 is met, permanently suppressing Marine flamethrowers.
-     * Without a Jaguar raster, alternate the low bit on successive second
-     * reads; preserve an explicitly bound hardware sample in tests/ports. */
-    return beam_weapon_sample ? beam_weapon_sample()
-                              : (beam_counter + (++beam_weapon_reads & 1u));
-}
 static void amp_chase_target(AvpAmp *,s32,s32,int);
 static void make_dead_egg(AvpAmp *);
 static void (*chase_cb)(AvpAmp *,s32,s32);
@@ -290,22 +189,6 @@ static s32 scale_projectile_component(s32 heading,u16 velocity)
     return (s32)w;
 }
 
-/* AMP.S projectile origins use 68000 32-bit ADD.L/SUB.L registers.
- * Decode the wrapped word without implementation-defined u32 -> s32
- * conversion or undefined signed C overflow. */
-static s32 amp_projectile_word(u32 bits)
-{
-    return bits<=INT32_MAX ? (s32)bits : (s32)((s64)bits-INT64_C(4294967296));
-}
-static s32 amp_projectile_add(s32 a,s32 b)
-{
-    return amp_projectile_word((u32)a+(u32)b);
-}
-static s32 amp_projectile_sub(s32 a,s32 b)
-{
-    return amp_projectile_word((u32)a-(u32)b);
-}
-
 AvpAmp *player_weapon(s32 heading_x,s32 heading_y,u16 kind,u16 reset_counter,
                       s32 sin_angle,s32 cos_angle)
 {
@@ -320,7 +203,7 @@ AvpAmp *player_weapon(s32 heading_x,s32 heading_y,u16 kind,u16 reset_counter,
     AvpAmp *a=amp_req();
     s32 px=(s32)x_pos,py=(s32)y_pos;
     s32 vx,vy;
-    if(kind==2){px=amp_projectile_sub(px,sin_angle>>2);py=amp_projectile_sub(py,cos_angle>>2);}
+    if(kind==2){px-=sin_angle>>2;py-=cos_angle>>2;}
     a->xpos=px;a->ypos=py;
     a->animseq=AS_STAND;a->animframe=0;
     a->creature=projectile[k].creature;
@@ -332,9 +215,8 @@ AvpAmp *player_weapon(s32 heading_x,s32 heading_y,u16 kind,u16 reset_counter,
     vx=scale_projectile_component(heading_x,projectile[k].velocity);
     vy=scale_projectile_component(heading_y,projectile[k].velocity);
     a->xvector=vx;a->yvector=vy;
-    a->xpos=amp_projectile_add(a->xpos,vx);a->ypos=amp_projectile_add(a->ypos,vy);
+    a->xpos+=vx;a->ypos+=vy;
     a->timer=1;
-    if(mp_projectile_spawn)mp_projectile_spawn(mp_projectile_user,a);
     return a;
 }
 
@@ -366,12 +248,7 @@ void lostplayer(AvpAmp *a)
     /* Historical .here calls chase_player with chase_x/chase_y temporarily
      * redirected.  The source-shaped chase helper accepts that target while
      * retaining all combat/recoil checks. */
-    /* This is the source's cloaked-player search movement, not a second
-     * combat-acquisition pass. Re-entering the combat gate here calls
-     * lostplayer() recursively while AMP_PHIT is clear, instead of walking
-     * the original chosen search heading. It also resets amp_fseq every
-     * time, making the search-direction countdown ineffective. */
-    amp_chase_target(a,tx,ty,0);
+    amp_chase_target(a,tx,ty,1);
 }
 
 /* -------------------------------------------------------------------------
@@ -379,9 +256,6 @@ void lostplayer(AvpAmp *a)
 u16 ngens;
 u16 avp_reset_counter;
 static u16 cur_amp_no;
-/* Only the UpdateAMPs actor loop owns CURAMPNO. Other host entry points
- * construct templates outside that loop and must register their own slot. */
-static int amp_update_active;
 static u16 entime;
 static s16 explo1;
 extern s16 use_cocoon;
@@ -391,52 +265,20 @@ void avp_amp_set_reset_counter(u16 counter){avp_reset_counter=counter;}
 
 static unsigned amp_number(const AvpAmp *a)
 {
-    /* Callers may also pass a temporary AMP in tests or host-side effect
-     * handling.  Subtracting pointers outside the same array is undefined;
-     * validate integer address/range and alignment before finding a slot. */
-    uintptr_t base=(uintptr_t)(const void*)amp_data;
-    uintptr_t addr=(uintptr_t)(const void*)a;
-    if(addr<base || addr-base>=sizeof(level1amps))return 0;
-    uintptr_t off=addr-base;
-    if(off%sizeof(AvpAmp))return 0;
-    return (unsigned)(off/sizeof(AvpAmp))+1u;
+    ptrdiff_t n=a-amp_data;
+    return (n>=0 && n<AVP_NUM_AMPS)?(unsigned)n+1u:0u;
 }
-static void amp_cleargrid_c(AvpAmp *a);
 static void release_amp(AvpAmp *a)
 {
     unsigned n=amp_number(a);
-    /* A pooled effect or actor must relinquish only its own collision
-     * registration before its slot can be reused.  Other occupants sharing
-     * the square must keep their registrations (R51). */
-    if(n){
-        /* Impacting flame/smart/bolt projectiles may share the same square
-         * as a live enemy or explosive drum. Their pool release must not
-         * erase that other AMP's collmap entry, or subsequent projectiles
-         * will miss it. Preserve the original amp_cleargrid_c() behavior
-         * for explicit actor-grid removal: this guard is only for release. */
-        unsigned gx=(unsigned)((u32)a->xpos>>16);
-        unsigned gy=(unsigned)((u32)a->ypos>>16);
-        if(gx<AVP_AMP_GRID_W && gy<AVP_AMP_GRID_H &&
-           collmap[gy*AVP_AMP_GRID_W+gx]==(u16)n)
-            amp_cleargrid_c(a);
-    }
     a->mode=NULL; a->host_static=0; a->aux_ptr=NULL;
     if(n) amp_release(n);
 }
-/* Host-only optional distance filter. Zero-initialized, so retail square
- * comparisons remain the default even before the F12 settings are loaded. */
-static int host_normalize_diagonal_contact_range;
-/* PC-only pursuit wake distance: 0 original, 1..3 2x..4x, 4 unlimited. */
-static unsigned host_enemy_activation_distance;
 static u32 abs32diff(s32 a,s32 b){s64 d=(s64)a-(s64)b;return (u32)(d<0?-d:d);}
 static int within_player(const AvpAmp *a,u16 pixels)
 {
     u32 lim=(u32)pixels<<9;
-    u32 dx=abs32diff(a->xpos,(s32)x_pos),dy=abs32diff(a->ypos,(s32)y_pos);
-    if(dx>lim||dy>lim)return 0;
-    if(host_normalize_diagonal_contact_range)
-        return (u64)dx*dx+(u64)dy*dy<=(u64)lim*lim;
-    return 1;
+    return abs32diff(a->xpos,(s32)x_pos)<=lim && abs32diff(a->ypos,(s32)y_pos)<=lim;
 }
 static int safe_projectile(const AvpAmp *a,u16 width)
 {
@@ -453,13 +295,7 @@ static AvpAmp *collmap_amp(const AvpAmp *p)
     if(gx>=AVP_AMP_GRID_W || gy>=AVP_AMP_GRID_H) return NULL;
     u16 no=collmap[gy*AVP_AMP_GRID_W+gx];
     if(no==0 || no>AVP_NUM_AMPS || no==(u16)p->xvel) return NULL;
-    /* The grid can retain a former slot number even after that slot is
-     * recycled. Never target a new actor in another cell through a stale
-     * registration left at the projectile's position. */
-    AvpAmp *victim=&amp_data[no-1u];
-    if(((u32)victim->xpos>>16)!=gx || ((u32)victim->ypos>>16)!=gy)
-        return NULL;
-    return (victim->mode || victim->host_static)?victim:NULL;
+    return &amp_data[no-1u];
 }
 static int projectile_pixels_hit(const AvpAmp *p,const AvpAmp *victim)
 {
@@ -482,14 +318,12 @@ AvpAmp *weapon_hit(AvpAmp *p)
     v->energy=e;
     u16 transfer=(u16)(p->flags&((1u<<AMP_PHIT)|(1u<<AMP_INVHIT)));
     if(e<=0) v->flags&=(u16)~(1u<<AMP_PHIT);
-    if((p->flags&(1u<<AMP_PLAYER)) && !(transfer&(1u<<AMP_INVHIT)))
-        v->flags&=(u16)~(1u<<AMP_INVHIT);
     v->flags|=transfer;
     v->flags&=(u16)~(1u<<AMP_CLOSEHIT);
     return v;
 }
 
-static void disc_kill2(AvpAmp *a){release_amp(a);discflag=0;} /* AMP.S:3984-3986 */
+static void disc_kill2(AvpAmp *a){release_amp(a);discflag=0;}
 static void disc_kill1(AvpAmp *a){a->mode=disc_kill2;}
 void pre_discmove(AvpAmp *a)
 {
@@ -500,40 +334,17 @@ void discmove(AvpAmp *a)
 {
     a->creature=AC_SMART;
     if(++a->animframe==3) a->animframe=0;
-    /* A zero-vector projectile can never reach a wall or target. Retire it
-     * through the normal impact lifecycle instead of leaving a suspended
-     * actor and permanently tying up its AMP slot. Moving shots are unchanged. */
-    if((!a->xvector && !a->yvector) || safe_projectile(a,40)){
-        const AvpRuntimeOps*o=avp_runtime_ops();
-        if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DSK1A);
-        disc_kill1(a);return;
+    if(safe_projectile(a,40)){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,20);disc_kill1(a);return;}
+    if(!(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){
+        player_energy=(s16)(player_energy-50);discflag=0;
+        const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,21);
+        release_amp(a);return;
     }
-    if(!host_attacks_disabled && !(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){
-        player_energy=(s16)(player_energy-50);
-        const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_DISK1);
-        release_amp(a);discflag=0;return; /* AMP.S:4016-4020 */
-    }
-    if(weapon_hit(a)){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_QHIT);disc_kill1(a);return;}
-    /* Local Deathmatch avatars are not AMP objects. Treat them as a
-     * second possible projectile contact only AFTER the original wall/AMP
-     * handling. Source hit width and tick-by-tick movement are unchanged. */
-    if(mp_projectile_hit && (a->flags&(1u<<AMP_PLAYER)) &&
-       mp_projectile_hit(mp_projectile_user,a)){
-        /* A Smart Disc hitting a player must sound like the same disc
-         * hitting an AMP: the original QHIT contact, not the DISK1
-         * impact-on-player/enemy-weapon sound. */
-        const AvpRuntimeOps *o=avp_runtime_ops();
-        if(o->play_sfx)o->play_sfx(o->user,AVP_FX_QHIT);
-        disc_kill1(a);return;
-    }
+    if(weapon_hit(a)){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,22);disc_kill1(a);return;}
     a->xpos+=a->xvector;a->ypos+=a->yvector;
 }
 
-static void flame_kill2(AvpAmp *a){release_amp(a);discflag=0;} /* AMP.S:4276-4278 */
-/* A Marine flamethrower burst creates four independently timed flames.  The
- * global ranged-combat gate must remain set until the last live projectile
- * has left play, not merely until the first of the four is released.  Keep
- * impact-delay modes counted until their normal one-tick release. */
+static void flame_kill2(AvpAmp *a){release_amp(a);discflag=0;}
 static void flame_kill1(AvpAmp *a){a->mode=flame_kill2;}
 AvpAmp *explosion_ex(s32 x,s32 y,s16 yoff,s16 damage,u32 range)
 {
@@ -541,20 +352,7 @@ AvpAmp *explosion_ex(s32 x,s32 y,s16 yoff,s16 damage,u32 range)
     e->xpos=x;e->ypos=y;e->yoffset=yoff;e->energy=damage;e->timer=(s32)range;
     e->creature=AC_FIRE;e->animseq=AS_STAND;e->animframe=0;e->mode=exp_handle;
     e->xvel=5;e->yvel=7;e->host_static=0;e->aux_ptr=NULL;
-    if(!explo1){
-        /* AMP.S::explosion changes FX_xp1b15 word 3 (PCM rate), not
-         * its volume.  Distances too great for a rate >= 40 leave the
-         * last value in that retail descriptor untouched. */
-        const AvpRuntimeOps*o=avp_runtime_ops();
-        u32 dx=abs32diff(x,(s32)x_pos),dy=abs32diff(y,(s32)y_pos);
-        u32 big=dx>dy?dx:dy,small=dx>dy?dy:dx;
-        u32 dist=big+(small>>2);
-        s32 rate=(s32)(192u-((dist<<4)>>16));
-        if(o->play_sfx_params)
-            o->play_sfx_params(o->user,AVP_FX_XP1B1,rate>=40?rate:-1,0);
-        else if(o->play_sfx)o->play_sfx(o->user,AVP_FX_XP1B1);
-        explo1=-1;
-    }
+    if(!explo1){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,23);explo1=-1;}
     return e;
 }
 void explosion_at(s32 x,s32 y){(void)explosion_ex(x,y,0,200,0x10000u);}
@@ -565,19 +363,7 @@ void exp_handle(AvpAmp *a)
     if(f==(u16)a->xvel){
         const AvpRuntimeOps*o=avp_runtime_ops();
         u16 k=(u16)(a->flags&((1u<<AMP_PHIT)|(1u<<AMP_INVHIT)));
-        /* An already-flying enemy bolt may explode after the player toggles
-         * No Enemy Attacks. Continue its authored actor-area explosion, but
-         * do not apply that hostile explosion to the player. Normal effects
-         * and all non-cheat gameplay still use the unchanged AreaDamage. */
-        if(mp_explosion_damage &&
-           mp_explosion_damage(mp_projectile_user,a))
-            /* All player hits were routed to their individual snapshots.
-             * Preserve the original explosion effect and enemy damage,
-             * without also damaging whichever actor is scoped here. */
-            AreaAmpDamage(a->xpos,a->ypos,(s32)(u32)a->timer,a->energy,k);
-        else if(host_attacks_disabled && a->aux_ptr==&host_enemy_bolt_explosion_tag)
-            AreaAmpDamage(a->xpos,a->ypos,(s32)(u32)a->timer,a->energy,k);
-        else if(o->area_damage)o->area_damage(o->user,a->xpos,a->ypos,(u32)a->timer,a->energy,k);
+        if(o->area_damage)o->area_damage(o->user,a->xpos,a->ypos,(u32)a->timer,a->energy,k);
         else AreaDamage(a->xpos,a->ypos,(s32)(u32)a->timer,a->energy,k);
     }
     if(f>=(u16)a->yvel) release_amp(a);
@@ -593,26 +379,15 @@ void flame_on(AvpAmp *a)
     if(a->timer>0){--a->timer;if(a->timer!=0){a->animframe=0;a->animseq=AS_HIDDEN;return;}a->animseq=AS_STAND;}
     a->flags^=(1u<<AMP_ALTFRAME);
     if(a->flags&(1u<<AMP_ALTFRAME)){if(a->animframe<6)++a->animframe;}
-    /* Once the authored launch delay has elapsed, a projectile with no
-     * horizontal velocity has no route to any collision. Treat the invalid
-     * motion like the existing world impact (including bolt explosions). */
-    if((!a->xvector && !a->yvector) || safe_projectile(a,40)){
-        if(a->creature==AC_BOLT){AvpAmp *e=explosion_ex(a->xpos,a->ypos,-38,200,0x10000u);
-            e->flags=(u16)(a->flags&((1u<<AMP_PHIT)|(1u<<AMP_INVHIT)));
-            if(!(a->flags&(1u<<AMP_PLAYER)))e->aux_ptr=&host_enemy_bolt_explosion_tag;
-            else if(mp_explosion_spawn)mp_explosion_spawn(mp_projectile_user,a,e);
-            flame_kill2(a);}
+    if(safe_projectile(a,40)){
+        if(a->creature==AC_BOLT){AvpAmp *e=explosion_ex(a->xpos,a->ypos,-38,200,0x10000u);e->flags=(u16)(a->flags&((1u<<AMP_PHIT)|(1u<<AMP_INVHIT)));flame_kill2(a);}
         else flame_kill1(a);
         return;
     }
-    if(!host_attacks_disabled && !(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){
-        player_energy=(s16)(player_energy-(a->creature==AC_BOLT?100:25));release_amp(a);discflag=0;return; /* AMP.S:4313 */
+    if(!(a->flags&(1u<<AMP_PLAYER)) && within_player(a,40)){
+        player_energy=(s16)(player_energy-(a->creature==AC_BOLT?100:25));release_amp(a);discflag=0;return;
     }
     if(weapon_hit(a)){flame_kill1(a);return;}
-    if(mp_projectile_hit && (a->flags&(1u<<AMP_PLAYER)) &&
-       mp_projectile_hit(mp_projectile_user,a)){
-        flame_kill1(a);return;
-    }
     a->xpos+=a->xvector;a->ypos+=a->yvector;
 }
 
@@ -647,19 +422,14 @@ static void amp_cleargrid_c(AvpAmp *a);
 static void amp_shield_start_mode(AvpAmp *a);
 static void dead_gen(AvpAmp *a)
 {
-    /* AMP.S::dead_gen writes #170 to FX_xp1b15 word 3 before SFX. */
-    const AvpRuntimeOps*o=avp_runtime_ops();
-    if(o->play_sfx_params)o->play_sfx_params(o->user,AVP_FX_XP1B1,170,0);
-    else if(o->play_sfx)o->play_sfx(o->user,AVP_FX_XP1B1);
+    const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,23);
     a->mode=dead_gen2;a->animseq=AS_DEATH;a->animframe=0;
 }
 static void dead_gen2(AvpAmp *a)
 {
     if(++a->animframe==6){
-        /* AMP.S dead_gen2 .kill_gen: CLR.L amp_mode + amp_cleargrid only
-         * ("really kill, no restore") -- no amp_release of the slot. */
+        a->mode=NULL; a->host_static=0;
         amp_cleargrid_c(a);
-        a->mode=NULL;a->host_static=0;a->aux_ptr=NULL;
         player_energy=(s16)(player_energy-50);
     }
 }
@@ -671,13 +441,13 @@ AvpAmp *make_shield(AvpAmp *owner,s32 dx,s32 dy)
 void shield2(AvpAmp *a)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();unsigned snd=0;
-    if(!host_attacks_disabled && within_player(a,70)){player_energy=(s16)(player_energy-10);snd=AVP_FX_MEL1;}
-    else if(!host_attacks_disabled && within_player(a,100)){player_energy=(s16)(player_energy-5);snd=AVP_FX_MEL2;}
+    if(within_player(a,70)){player_energy=(s16)(player_energy-10);snd=24;}
+    else if(within_player(a,100)){player_energy=(s16)(player_energy-5);snd=25;}
     if(snd){s16 c=(s16)(a->xvel+1);if(c>=7){c=0;if(o->play_sfx)o->play_sfx(o->user,snd);}a->xvel=c;}
     a->animseq=AS_STAND;
     if(!(a->flags&(1u<<AMP_SSHIELD)) && ngens!=4){u16 r=avp_random();if(ngens==3)r&=7;else if(ngens==2)r&=3;else if(ngens==1)r&=1;if(r==0)a->animseq=AS_DEATH;}
     ++a->animframe;
-    if(!ngens)release_amp(a);
+    if(!ngens){a->mode=NULL;a->host_static=0;amp_cleargrid_c(a);}
 }
 void side_shield(AvpAmp *a,s32 dx,s32 dy)
 {
@@ -698,45 +468,37 @@ static void amp_generate_running(AvpAmp *a)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(!ngens){
-        /* AMP.S::generate .xgen2 ends the FX_force ALARM, not the
-         * level ambient loop.  Ambient continues independently. */
-        KillAlar();
-        /* AMP.S .xgen2 clears amp_mode only.  It does not clear the
-         * generator's collision-grid entry or return the AMP slot. */
-        a->mode=NULL;a->host_static=0;a->aux_ptr=NULL;
+        if(o->kill_ambient)o->kill_ambient(o->user);
+        a->mode=NULL;a->host_static=0;
         return;
     }
     if(o->play_sfx_params){
         u32 dx=abs32diff(a->xpos,(s32)x_pos),dy=abs32diff(a->ypos,(s32)y_pos);
         u32 big=dx>dy?dx:dy,small=dx>dy?dy:dx,d=big+(small>>2);
         s32 missing=(s32)(4-ngens);
-        s32 vol=(s32)0x1a00-(s32)(d>>7)-(missing*256);
-        s32 pitch=(s32)0xe0-(s32)(d>>16)-(missing*8);
+        s32 vol=(s32)0x1a00-(s32)(d>>7)-(missing<<8);
+        s32 pitch=(s32)0xe0-(s32)(d>>16)-(missing<<3);
         if(vol<0)vol=0;
-        /* Retail writes the alarm voice's p[1] (looping volume) and
-         * p[3] (rate) in-place.  The unusual decimal 80 minimum in
-         * AMP.S is retained as written, after comparing to hex $80. */
-        if(pitch<0x80)pitch=80;
-        o->play_sfx_params(o->user,AVP_FX_FORCE,vol,pitch);
+        if(pitch<0x80)pitch=0x80;
+        o->play_sfx_params(o->user,26,vol,pitch);
     }
 }
 void generate(AvpAmp *a)
 {
     /* AMP.S starts the force-field alarm and deliberately returns for one
      * frame before .xgen2 begins attenuation/pitch maintenance. */
-    /* AMP.S::generate explicitly invokes StartAlarm with FX_force's
-     * volume loop flag set.  FX_force already has that flag in the
-     * original RDB descriptor; use voice 2 and preserve its handle. */
-    StartAla(AVP_FX_FORCE);
+    const AvpRuntimeOps *o=avp_runtime_ops();
+    if(o->play_sfx_params)o->play_sfx_params(o->user,26,(s32)0x80000000u,0);
+    else if(o->play_sfx)o->play_sfx(o->user,26);
     a->mode=amp_generate_running;
 }
-static void amp_side_n(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,0,(0x1a800-(0xf0<<8))/2);}
-static void amp_side_s(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,0,-((0x1a800-(0xf0<<8))/2));}
-static void amp_side_e(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,-((0x1a800-(0xf0<<8))/2),0);}
-static void amp_side_w(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */side_shield(a,(0x1a800-(0xf0<<8))/2,0);}
+static void amp_side_n(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;}side_shield(a,0,(0x1a800-(0xf0<<8))/2);}
+static void amp_side_s(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;}side_shield(a,0,-((0x1a800-(0xf0<<8))/2));}
+static void amp_side_e(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;}side_shield(a,-((0x1a800-(0xf0<<8))/2),0);}
+static void amp_side_w(AvpAmp *a){if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;}side_shield(a,(0x1a800-(0xf0<<8))/2,0);}
 void cgenmode(AvpAmp *a)
 {
-    if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;} /* AMP.S ?genmode: mode only, no grid clear or slot release. */
+    if(player_type!=PT_ALIEN){a->mode=NULL;a->host_static=0;return;}
     const s32 D=0x1a800, R=0xf0;
     const s32 dxy[4][2]={{0,-D},{0,D},{D,0},{-D,0}};
     AvpAmpModeFn sides[4]={amp_side_n,amp_side_s,amp_side_e,amp_side_w};
@@ -745,87 +507,28 @@ void cgenmode(AvpAmp *a)
     a->animseq=AS_HIDDEN;a->astype=43;a->mode=generate;
 }
 
-/* Original enemy proximity/contact is a world-aligned square, unchanged
- * by player rotation. An optional PC-only radial contact filter removes its
- * diagonal corner reach for harmful contact, without altering pursuit,
- * ambient range, line-of-sight, world solidity, or player movement. */
-void avp_amp_set_normalize_diagonal_contact_range(int enabled)
-{ host_normalize_diagonal_contact_range=enabled!=0; }
-void avp_amp_set_enemy_activation_distance(unsigned mode)
-{ host_enemy_activation_distance=mode<=4u?mode:0u; }
-unsigned avp_amp_enemy_activation_distance(void)
-{ return host_enemy_activation_distance; }
-int avp_amp_normalize_diagonal_contact_range(void)
-{ return host_normalize_diagonal_contact_range; }
-static int host_enemies_frozen;
-void avp_amp_set_attacks_disabled(int enabled){host_attacks_disabled=enabled!=0;}
-int avp_amp_attacks_disabled(void){return host_attacks_disabled;}
-void avp_amp_set_marine_pulse_los_hits(int enabled){host_marine_pulse_los_hits=enabled!=0;}
-int avp_amp_marine_pulse_los_hits(void){return host_marine_pulse_los_hits;}
-void avp_amp_set_marine_fire_interrupt(int enabled){host_marine_fire_interrupt=enabled!=0;}
-int avp_amp_marine_fire_interrupt(void){return host_marine_fire_interrupt;}
-void avp_amp_set_marine_multiplayer_target(int enabled)
-{ host_marine_multiplayer_target=enabled!=0; }
-void avp_amp_set_facehug_attach_disabled(int enabled){host_facehug_attach_disabled=enabled!=0;}
-int avp_amp_facehug_attach_disabled(void){return host_facehug_attach_disabled;}
-void avp_amp_set_enemies_frozen(int enabled){host_enemies_frozen=enabled!=0;}
-int avp_amp_enemies_frozen(void){return host_enemies_frozen;}
-static int hostile_amp_type(const AvpAmp *a)
-{
-    if(a->flags&(1u<<AMP_PLAYER))return 0;
-    switch(a->creature){
-    case AC_ALIEN:case AC_PREDATOR:case AC_HUMAN:
-    case AC_EGG:case AC_FACEHUG:case AC_ACRAWL:
-    case AC_AQUEEN:case AC_GEN:case AC_AQSHIELD:
-        return 1;
-    default:return 0;
-    }
-}
 void UpdateAMPs(void)
 {
-    /* AMP.S decrements the two original loop countdowns before traversing
-     * actors.  Releasing one loop must not silence any other voice. */
-    if(marine_pulse_id && --marine_pulse_time==0){
-        StopLoop(marine_pulse_id);marine_pulse_id=0;
-    }
-    if(marine_flame_id && --marine_flame_time==0){
-        StopLoop(marine_flame_id);marine_flame_id=0;
-    }
     entime=(u16)((entime+1u)&7u);explo1=0;
-    amp_update_active=1;
     for(unsigned i=0;i<AVP_NUM_AMPS;i++){
         AvpAmp *a=&amp_data[i];cur_amp_no=(u16)(i+1u);
         if(a->host_static || !a->mode) continue;
-        if(host_enemies_frozen && hostile_amp_type(a))continue;
-        /* Retail AMP.S $15524-$15534: BEQ skips the copy at phase zero. */
-        if(entime!=0)a->oldenergy=a->energy;
+        if(entime==0)a->oldenergy=a->energy;
         AvpAmpModeFn fn=a->mode;fn(a);
     }
-    amp_update_active=0;
+    (void)cur_amp_no;
 }
 
 /* -------------------------------------------------------------------------
  * Source-block closure for AMP.S mobile-actor state machine.                 */
 static void amp_cleargrid_c(AvpAmp *a);
 static int amp_in_range(const AvpAmp *a,u16 pixels);
-static int amp_contact_in_range(const AvpAmp *a,u16 pixels);
 static void set_static(AvpAmp *a);
 
 static void amp_sfx(unsigned id)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(o->play_sfx)o->play_sfx(o->user,id);
-}
-
-static void amp_marine_loop_sfx(int flame)
-{
-    u32 *handle=flame?&marine_flame_id:&marine_pulse_id;
-    u16 *time=flame?&marine_flame_time:&marine_pulse_time;
-    if(*handle)return;
-    /* The two timers use independent handles but the same Jaguar random
-     * source: pulse lasts 2..9 ticks and flame lasts 7..14 ticks. */
-    *handle=DoEffect(flame?AVP_FX_FLAMX:AVP_FX_PLSX1);
-    *time=(u16)((avp_random()&7u)+(flame?7u:2u));
 }
 
 static int amp_los_clear(const AvpAmp *a)
@@ -873,16 +576,13 @@ static const s16 appear_frames[]={6,5,4,3,2,0,-1};
 static const s16 laser_frames[]={0,0,1,1,1,2,2,2,-2,1,1,-1};
 static const s16 crouch_frames[]={0,1,2,2,3,2,1,0,-1};
 
-typedef struct AvpFightFrame { s16 frame,damage; u32 sound; } AvpFightFrame;
-/* AMP.S playlists carry the SFX pointer in the same $fe event record as the
- * damage.  Keep the exact retail descriptor with that event; crawl damage is
- * intentionally silent because crawllist has no SFX pointer. */
-static const AvpFightFrame fight_bite[]={ {0,0,0},{1,0,0},{2,0,0},{2,100,AVP_FX_NALN1},{1,0,0},{0,0,0},{-1,0,0} };
-static const AvpFightFrame fight_tail[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,20,AVP_FX_NALN2},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };
-static const AvpFightFrame fight_pred_combi[]={ {0,0,0},{0,0,0},{0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,0,0},{3,0,0},{4,100,AVP_FX_MELEE},{1,0,0},{-1,0,0} };
-static const AvpFightFrame fight_pred_knife[]={ {0,0,0},{1,0,0},{2,0,AVP_FX_WRBLA},{3,0,0},{4,0,0},{5,50,AVP_FX_CLAW2},{-1,0,0} };
-static const AvpFightFrame fight_swipe[]={ {1,0,0},{2,30,AVP_FX_CLAW2},{3,0,0},{3,0,0},{2,0,0},{1,0,0},{-1,0,0} };
-static const AvpFightFrame fight_crawl[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,100,0},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };
+typedef struct AvpFightFrame { s16 frame,damage; u8 event; } AvpFightFrame;
+static const AvpFightFrame fight_bite[]={ {0,0,0},{1,0,0},{2,0,0},{2,100,1},{1,0,0},{0,0,0},{-1,0,0} };
+static const AvpFightFrame fight_tail[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,20,1},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };
+static const AvpFightFrame fight_pred_combi[]={ {0,0,0},{0,0,0},{0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,0,0},{3,0,0},{4,100,1},{1,0,0},{-1,0,0} };
+static const AvpFightFrame fight_pred_knife[]={ {0,0,0},{1,0,0},{2,0,1},{3,0,0},{4,0,0},{5,50,1},{-1,0,0} };
+static const AvpFightFrame fight_swipe[]={ {1,0,0},{2,30,1},{3,0,0},{3,0,0},{2,0,0},{1,0,0},{-1,0,0} };
+static const AvpFightFrame fight_crawl[]={ {0,0,0},{1,0,0},{2,0,0},{3,0,0},{3,100,1},{2,0,0},{1,0,0},{0,0,0},{-1,0,0} };
 static const AvpFightFrame *const fight_playlists[]={fight_bite,fight_tail,fight_pred_combi,fight_pred_knife,fight_swipe};
 static const s16 alien_all[]={0,1,2,0,1,1,2,1,0,2,1,0,0,1,0,2,1,0,2,2,1,0,-1};
 static const s16 alien_bite_only[]={0,-1};
@@ -896,21 +596,17 @@ static void amp_begin_death(AvpAmp *a)
     a->flags|=(u16)(1u<<AMP_DEAD);
     amp_cleargrid_c(a);
     switch(a->creature){
-    case AC_PREDATOR: seq=death_pred; a->astype=54; amp_sfx(AVP_FX_PREDE); break; /* DEF_DPRED */
+    case AC_PREDATOR: seq=death_pred; a->astype=54; amp_sfx(40); break; /* DEF_DPRED */
     case AC_HUMAN: seq=death_human; a->astype=53; HumanPain(); break; /* PLAYER.S::HumanPain */
-    case AC_ACRAWL: a->creature=AC_ALIEN; seq=death_crawl; a->astype=52; amp_sfx(AVP_FX_AHIT); break;
-    case AC_ALIEN: seq=death_alien; a->astype=52; amp_sfx(AVP_FX_AHIT); break;
+    case AC_ACRAWL: a->creature=AC_ALIEN; seq=death_crawl; a->astype=52; amp_sfx(42); break;
+    case AC_ALIEN: seq=death_alien; a->astype=52; amp_sfx(42); break;
     case AC_FACEHUG: seq=death_hug; a->yoffset=0; a->astype=55; break;
     default:
         a->flags&=(u16)~(1u<<AMP_DEAD);
         amp_setgrid(a);
         return;
     }
-    /* Alien players resist both the death-splash and the lingering acid.
-     Leave the original non-Alien range, damage and death cadence intact. */
-    if(!host_dev_death && player_type!=PT_ALIEN &&
-       a->creature==AC_ALIEN && amp_in_range(a,96))
-        player_energy=(s16)(player_energy-50);
+    if(a->creature==AC_ALIEN && amp_in_range(a,96))player_energy=(s16)(player_energy-50);
     a->flags&=(u16)~((1u<<AMP_KILLABLE)|(1u<<AMP_MOTION));
     a->aux_ptr=(void*)seq;
     a->timer=0;
@@ -947,29 +643,10 @@ static void amp_pred_dead(AvpAmp *a)
     if(old)amp_alien_dead(a);
 }
 
-/* The original mode pointer is authoritative: a dying Alien body does
- * not emit damaging floor acid until amp_finish_death() installs amp_acid.
- * Read-only co-op bot hazard discovery must not mistake death frames or
- * decorative sprites for live acid contact. */
-int avp_amp_is_acid_puddle(const AvpAmp *a)
-{
-    return a && !a->host_static && a->mode==amp_acid;
-}
-
-/* The original acid contact/damage operation, extracted without changing
- * its square-range test or 3-energy decrement. Single-player continues to
- * use amp_acid() below. The co-op world tick invokes this once per eligible
- * player, under that player's original PLAYER.S scope. */
-int avp_amp_acid_contact_player(const AvpAmp *a)
-{
-    if(!a || player_type==PT_ALIEN || !amp_contact_in_range(a,30))return 0;
-    player_energy=(s16)(player_energy-3);
-    return 1;
-}
 static void amp_acid(AvpAmp *a)
 {
-    if(player_type!=PT_ALIEN && amp_contact_in_range(a,30)){
-        if(!(a->flags&(1u<<AMP_ALTFRAME)))amp_sfx(AVP_FX_ACIDX);
+    if(amp_in_range(a,30)){
+        if(!(a->flags&(1u<<AMP_ALTFRAME)))amp_sfx(43);
         a->flags|=(u16)(1u<<AMP_ALTFRAME);
         player_energy=(s16)(player_energy-3);
     }else a->flags&=(u16)~(1u<<AMP_ALTFRAME);
@@ -978,8 +655,8 @@ static void amp_acid(AvpAmp *a)
 static void amp_recoil(AvpAmp *a)
 {
     if(a->creature==AC_HUMAN)HumanPain();
-    else if(a->creature==AC_PREDATOR)amp_sfx(AVP_FX_PREDH);
-    else amp_sfx(AVP_FX_NALN1);
+    else if(a->creature==AC_PREDATOR)amp_sfx(45);
+    else amp_sfx(46);
     a->animseq=AS_KNOCKBACK;a->animframe=0;a->timer=2;a->mode=amp_recover;
 }
 static void amp_recover(AvpAmp *a)
@@ -990,32 +667,8 @@ static void amp_recover(AvpAmp *a)
 
 static int amp_grid_nonzero(int x,int y)
 {
-    u16 owner;
-    const AvpAmp *a;
     if(x<0||y<0||x>=(int)AVP_AMP_GRID_W||y>=(int)AVP_AMP_GRID_H)return 1;
-    owner=collmap[(unsigned)y*AVP_AMP_GRID_W+(unsigned)x];
-    if(owner==0)return 0;
-    /* A recycled slot or an entity removed from play must not become an
-     * invisible navigation obstacle.  Combat already validates that grid
-     * ownership refers to an active AMP at this exact square. */
-    /* place_grid uses $ffff for random-placement exclusions, including the
-     * player's initial cell and entire otherwise walkable floor regions.
-     * These are NOT live AMP occupants.  When an excluded cell has an
-     * authored floor, let the original SafePos wall/door test determine
-     * whether the actor can enter it.  Floorless/exterior cells must remain
-     * blocked: SafePos checks wall faces, not floor eligibility. */
-    if(owner==0xffffu){
-        u8 *maze=avp_collision_maze_data();
-        unsigned width=avp_collision_maze_width();
-        unsigned height=avp_collision_maze_height();
-        return !maze || (unsigned)x>=width || (unsigned)y>=height ||
-               !maze[((size_t)(unsigned)y*width+(unsigned)x)*8u+5u];
-    }
-    if(owner>AVP_NUM_AMPS)return 1;
-    a=&amp_data[owner-1u];
-    if(!a->mode && !a->host_static)return 0;
-    return ((u32)a->xpos>>16)==(unsigned)x &&
-           ((u32)a->ypos>>16)==(unsigned)y;
+    return collmap[(unsigned)y*AVP_AMP_GRID_W+(unsigned)x]!=0;
 }
 
 static int amp_neighbor_occupied(const AvpAmp *a,int dx,int dy)
@@ -1060,9 +713,9 @@ static int amp_safe_move(s32 x,s32 y,u8 h,u16 w)
 static s32 target_center(s32 p){return (s32)(((u32)p&0xffff0000u)|0x8000u);}
 
 static void amp_random_move(AvpAmp *a,int tried_ew);
-
 static void amp_move_toward(AvpAmp *a,s32 tx,s32 ty)
 {
+    enum { SFX_CHATC=57, SFX_ANYTIME1=58, SFX_CMON2=59 };
     u8 h;u16 w; s32 ox=a->xpos,oy=a->ypos,nx=ox,ny=oy;
     int dx=0,dy=0,tried_ew=0,moved=0;
     if(chase_cb)chase_cb(a,tx,ty); /* observer sees source chase_x/y */
@@ -1077,7 +730,7 @@ static void amp_move_toward(AvpAmp *a,s32 tx,s32 ty)
             a->flags&=(u16)~(1u<<AMP_CHATFLAG);
         }else if(amp_in_range(a,4u*128u) && !(a->flags&(1u<<AMP_CHATFLAG))){
             u32 r=avp_random()&3u;
-            amp_sfx(r==2u?AVP_FX_ANYTI:(r==3u?AVP_FX_CMON2:AVP_FX_CHATC));
+            amp_sfx(r==2u?SFX_ANYTIME1:(r==3u?SFX_CMON2:SFX_CHATC));
             a->flags|=(u16)(1u<<AMP_CHATFLAG);
         }
     }
@@ -1132,8 +785,6 @@ static void amp_move_toward(AvpAmp *a,s32 tx,s32 ty)
             a->ypos=ny;a->ldir=(s16)(dy>0?6:2);moved=1;
         }
     }
-    /* R272: the R058 PC-only open-door realignment ("not original Jaguar
-     * navigation") is no longer applied; AMP.S has no such fallback. */
     amp_setgrid(a);
     if(!moved){
         if(a->mode!=lostplayer && a->mode!=amp_fallhug && a->creature!=AC_AQUEEN && a->yvector==0)
@@ -1172,9 +823,7 @@ static s32 amp_projectile_component(s32 v,u16 speed)
 }
 static AvpAmp *amp_spawn_npc_projectile(AvpAmp *owner,u16 kind,u16 speed,s16 yoff,s16 delay,int eighth_step)
 {
-    AvpXY from={owner->xpos,owner->ypos},to={(s32)x_pos,(s32)y_pos};s32 vx,vy;AvpAmp *p;
-    if(host_attacks_disabled)return NULL;
-    p=amp_req();
+    AvpXY from={owner->xpos,owner->ypos},to={(s32)x_pos,(s32)y_pos};s32 vx,vy;AvpAmp *p=amp_req();
     Vector(&from,&to,&vx,&vy);vx=amp_projectile_component(vx,speed);vy=amp_projectile_component(vy,speed);
     p->xpos=owner->xpos;p->ypos=owner->ypos;p->creature=kind;p->animseq=AS_STAND;p->animframe=0;p->yoffset=yoff;
     p->xvel=(s16)amp_number(owner);p->yvel=(s16)avp_reset_counter;p->mode=(kind==AC_SMART)?pre_discmove:pre_flame_on;p->timer=delay;
@@ -1187,7 +836,7 @@ static void amp_disc_prepare(AvpAmp *a)
     a->mode=amp_disc_prepare;a->animseq=AS_FIGHT4;
     if(a->animframe==0){a->animframe=1;return;}
     ++a->animframe;
-    if(a->animframe==3){(void)amp_spawn_npc_projectile(a,AC_SMART,30,0,0,1);return;}
+    if(a->animframe==3){amp_sfx(47);(void)amp_spawn_npc_projectile(a,AC_SMART,30,0,0,1);return;}
     if(a->animframe==5){a->mode=chase_player;a->animseq=AS_RUN;a->animframe=0;}
 }
 
@@ -1195,7 +844,7 @@ static void amp_laser(AvpAmp *a)
 {
     const s16 *p=laser_frames;unsigned i=(unsigned)a->timer; s16 f=p[i];
     a->mode=amp_laser;a->animseq=AS_FIGHT3;
-    while(f==-2){amp_sfx(AVP_FX_ROCKE);(void)amp_spawn_npc_projectile(a,AC_BOLT,24,-38,1,1);f=p[++i];}
+    while(f==-2){amp_sfx(48);(void)amp_spawn_npc_projectile(a,AC_BOLT,24,-38,1,1);f=p[++i];}
     if(f<0){a->animframe=0;a->animseq=AS_STAND;a->mode=chase_player;a->timer=0;return;}
     a->animframe=(u16)f;a->timer=(s32)(i+1u);
 }
@@ -1211,7 +860,7 @@ static void amp_launchfire(AvpAmp *a)
     if(a->energy<a->oldenergy){amp_recoil(a);return;}
     a->mode=amp_launchfire;++a->animframe;if(a->animframe!=2)return;
     Vector(&from,&to,&vx,&vy);vx=amp_projectile_component(vx,40);vy=amp_projectile_component(vy,40);
-    amp_marine_loop_sfx(1);
+    amp_sfx(49);
     for(s16 delay=1;delay<=4;delay++){
         AvpAmp *p=amp_req();p->xpos=a->xpos+vx;p->ypos=a->ypos+vy;p->creature=AC_FIRE;p->animseq=AS_STAND;p->animframe=0;p->yoffset=0;
         p->xvel=(s16)amp_number(a);p->yvel=(s16)avp_reset_counter;p->mode=pre_flame_on;p->timer=delay;p->xvector=vx;p->yvector=vy;p->flags=0;p->host_static=0;discflag=1;
@@ -1220,32 +869,8 @@ static void amp_launchfire(AvpAmp *a)
 }
 static void amp_crouch_fire(AvpAmp *a)
 {
-    /* R269 OPTIONAL PC enhancement: a fatal hit interrupts the pending
-     * pulse-rifle burst BEFORE either recoil or its authored damage frame.
-     * Enter the existing human death routine; never synthesize a new death.
-     * Other wounds still use the original recoil path and the switch has no
-     * effect on Jaguar/default behavior or the Marine player campaign. */
-    if(host_marine_fire_interrupt && a->creature==AC_HUMAN &&
-       (host_marine_multiplayer_target ||
-        player_type==PT_ALIEN || player_type==PT_PREDATOR) && a->energy<=0){
-        a->energy=0;amp_begin_death(a);return;
-    }
     if(a->energy<a->oldenergy){amp_recoil(a);return;}
-    if(crouch_frames[(unsigned)a->timer]<0){
-        /* Retail AMP.S applies 100 damage here without a second sight test.
-         * Optional host enhancement: at the authored damage frame, require
-         * clear original LineOfSight for enemy Marine pulse bursts against
-         * Alien/Predator players. The attack animation and sound complete
-         * normally, with no damage when the player has reached cover. */
-        int can_hit=!host_attacks_disabled &&
-            (!host_marine_pulse_los_hits ||
-             (!host_marine_multiplayer_target &&
-              player_type!=PT_ALIEN && player_type!=PT_PREDATOR) ||
-             amp_los_clear(a));
-        a->mode=chase_player;a->animframe=0;a->animseq=AS_STAND;
-        if(can_hit)player_energy=(s16)(player_energy-100);
-        a->timer=0;return;
-    }
+    if(crouch_frames[(unsigned)a->timer]<0){a->mode=chase_player;a->animframe=0;a->animseq=AS_STAND;player_energy=(s16)(player_energy-100);a->timer=0;return;}
     a->animframe=(u16)crouch_frames[(unsigned)a->timer++];
 }
 
@@ -1263,7 +888,7 @@ static void amp_invisible(AvpAmp *a)
 static void amp_invisible_frames(AvpAmp *a)
 {
     s16 f=invis_frames[(unsigned)a->timer++];
-    while(f==-2){amp_sfx(AVP_FX_IN2);f=invis_frames[(unsigned)a->timer++];}
+    while(f==-2){amp_sfx(50);f=invis_frames[(unsigned)a->timer++];}
     if(f<0){a->animseq=AS_HIDDEN;a->yvector=(s32)((avp_random()&63u)+20u);amp_cleargrid_c(a);a->mode=amp_pred_hold;return;}
     a->animframe=(u16)f;
 }
@@ -1274,7 +899,7 @@ static void amp_pred_hold(AvpAmp *a)
 }
 static void amp_appear(AvpAmp *a)
 {
-    amp_sfx(AVP_FX_OUT2);a->timer=0;a->mode=amp_appear_frames;amp_appear_frames(a);
+    amp_sfx(51);a->timer=0;a->mode=amp_appear_frames;amp_appear_frames(a);
 }
 static void amp_appear_frames(AvpAmp *a)
 {
@@ -1286,12 +911,7 @@ static void amp_apply_fight_frame(AvpAmp *a,const AvpFightFrame *seq,u16 range,A
 {
     const AvpFightFrame *f=&seq[(unsigned)a->ldir];
     if(f->frame<0){a->animseq=AS_STAND;a->animframe=0;a->mode=back;a->timer=0;a->ldir=0;return;}
-    a->animframe=(u16)f->frame;
-    if(!host_attacks_disabled && (f->damage || f->sound) && amp_contact_in_range(a,range)){
-        player_energy=(s16)(player_energy-f->damage);
-        if(f->sound)amp_sfx(f->sound);
-    }
-    ++a->ldir;
+    a->animframe=(u16)f->frame;if(f->event && amp_in_range(a,range)){player_energy=(s16)(player_energy-f->damage);amp_sfx(52);}++a->ldir;
 }
 static void amp_handalien(AvpAmp *a)
 {
@@ -1327,7 +947,6 @@ static void amp_pred_clfight(AvpAmp *a)
 }
 static void amp_closehug(AvpAmp *a)
 {
-    if(host_attacks_disabled||host_facehug_attach_disabled){a->mode=chase_player;a->animseq=AS_RUN;a->animframe=0;return;}
     a->mode=amp_closehug;++a->animframe;if(a->animframe<=3)return;hugkill=1;amp_cleargrid_c(a);release_amp(a);
 }
 
@@ -1352,14 +971,14 @@ static int amp_ranged_predator(AvpAmp *a)
     if(a->animseq==AS_HIDDEN||discflag)return 0;
     r=avp_random();
     if((r&31u)==2u && amp_los_clear(a)){
-        a->mode=amp_roar;a->animseq=AS_FIGHT2;a->timer=0;amp_sfx(AVP_FX_EDITR);amp_roar(a);return 1;
+        a->mode=amp_roar;a->animseq=AS_FIGHT2;a->timer=0;amp_sfx(53);amp_roar(a);return 1;
     }
     if(!amp_in_range(a,576))return 0;
     if((avp_random()&7u)!=2u||!amp_los_clear(a))return 0;
     r=(u16)(avp_random()&3u);
-    if(r==0){amp_sfx(AVP_FX_MOTOR);a->timer=0;amp_laser(a);}
+    if(r==0){a->timer=0;amp_laser(a);}
     else if(r==1)amp_invisible(a);
-    else {amp_sfx(AVP_FX_DISK1);a->mode=amp_disc_prepare;a->animseq=AS_FIGHT4;a->animframe=0;}
+    else {amp_sfx(47);a->mode=amp_disc_prepare;a->animseq=AS_FIGHT4;a->animframe=0;}
     return 1;
 }
 
@@ -1371,10 +990,8 @@ static int amp_ranged_human(AvpAmp *a)
     if((beam_counter&7u)!=2u)return 0;
     if(!amp_los_clear(a)){a->flags&=(u16)~(1u<<AMP_PHIT);return 0;}
     a->animframe=0;
-    /* AMP.S reads TOM $F00004 once more after LineOfSight.  Reusing
-       the first sample made this branch impossible (the gate equals 2). */
-    if(amp_weapon_beam()&1u){a->animseq=AS_FIGHT2;amp_launchfire(a);}
-    else{a->animseq=AS_FIGHT1;a->timer=0;a->mode=amp_crouch_fire;amp_marine_loop_sfx(0);amp_crouch_fire(a);}
+    if(beam_counter&1u){a->animseq=AS_FIGHT2;amp_launchfire(a);}
+    else{a->animseq=AS_FIGHT1;a->timer=0;a->mode=amp_crouch_fire;amp_sfx(54);amp_crouch_fire(a);}
     return 1;
 }
 
@@ -1386,21 +1003,16 @@ static void amp_chase_target(AvpAmp *a,s32 tx,s32 ty,int allow_combat)
     if(a->creature==AC_AQUEEN){amp_move_toward(a,tx,ty);return;}
     if(a->creature==AC_HUMAN && (a->flags&(1u<<AMP_STUN))){amp_stunned_start(a);return;}
     if(a->energy<=0){a->energy=0;amp_begin_death(a);return;}
-    /* Retail pursuit waits beyond 1152 units. Extend only that wake gate;
-     * attack proximity, optical contact and creature tactics remain retail.
-     * The square X/Y test is deliberate, matching amp_in_range. */
-    if(host_enemy_activation_distance!=4u &&
-       !amp_in_range(a,(u16)(1152u*(host_enemy_activation_distance+1u))))return;
+    if(!amp_in_range(a,1152))return;
     if(a->creature==AC_HUMAN){a->timer=(s32)(((u16)a->timer+1u)&1u);if((u16)a->timer){if(a->energy<a->oldenergy)amp_recoil(a);return;}}
     if((a->creature==AC_PREDATOR||a->creature==AC_HUMAN||a->creature==AC_ACRAWL||a->creature==AC_ALIEN) && a->energy<a->oldenergy){amp_recoil(a);return;}
-    if(host_attacks_disabled)allow_combat=0;
     if(allow_combat && a->creature==AC_HUMAN && !(a->flags&(1u<<AMP_PHIT)) && invisflag){a->mode=lostplayer;a->xvector=0;lostplayer(a);return;}
     if(a->creature==AC_ACRAWL)close=70;else if(a->creature==AC_PREDATOR)close=57;
-    if(allow_combat && amp_contact_in_range(a,close) && amp_los_clear(a)){
-        if(a->creature==AC_ACRAWL){if((u16)a->timer){--a->timer;if((u16)a->timer)return;}a->ldir=0;a->animseq=AS_FIGHT1;amp_sfx(AVP_FX_ASHRI);amp_crawlfight(a);return;}
-        if(a->creature==AC_ALIEN){a->timer=4;a->angle=0;amp_sfx(AVP_FX_ASHRI);amp_handalien(a);return;}
+    if(allow_combat && amp_in_range(a,close) && amp_los_clear(a)){
+        if(a->creature==AC_ACRAWL){if((u16)a->timer){--a->timer;if((u16)a->timer)return;}a->ldir=0;a->animseq=AS_FIGHT1;amp_sfx(55);amp_crawlfight(a);return;}
+        if(a->creature==AC_ALIEN){a->timer=4;a->angle=0;amp_sfx(55);amp_handalien(a);return;}
         if(a->creature==AC_PREDATOR){if(a->animseq==AS_HIDDEN){a->timer=0;amp_appear(a);return;}a->timer=0;a->angle=0;amp_handpred(a);return;}
-        if(a->creature==AC_FACEHUG && !host_facehug_attach_disabled){a->animseq=AS_FIGHT1;a->animframe=0;amp_sfx(AVP_FX_FACEH);amp_closehug(a);return;}
+        if(a->creature==AC_FACEHUG){a->animseq=AS_FIGHT1;a->animframe=0;amp_sfx(56);amp_closehug(a);return;}
     }
     if(allow_combat){
         if(a->creature==AC_PREDATOR && amp_ranged_predator(a))return;
@@ -1470,11 +1082,8 @@ void amp_setgrid(AvpAmp *a)
     y=(unsigned)((u32)a->ypos>>16);
     if(x>=AVP_AMP_GRID_W || y>=AVP_AMP_GRID_H)return;
 
-    /* Retail AMP.S:5250 writes CURAMPNO, i.e. the currently executing
-     * actor, even when its mode supplies a different AMP record. The
-     * standalone host template/placement path has no active CURAMPNO. */
-    n=amp_update_active?(unsigned)cur_amp_no:amp_number(a);
-    if(n==0 || n>AVP_NUM_AMPS)return;
+    n=amp_number(a);
+    if(n==0 || n>0xffffu)return;
     collmap[y*AVP_AMP_GRID_W+x]=(u16)n;
 }
 
@@ -1487,7 +1096,7 @@ static void amp_collectable_mode(AvpAmp *a){write_obj_grid(a);set_static(a);}
 static void amp_furniture_mode(AvpAmp *a){amp_setgrid(a);set_static(a);}
 static void amp_start_hug_mode(AvpAmp *a)
 {
-    if(player_type==PT_ALIEN){release_amp(a);return;}
+    if(player_type==PT_ALIEN){a->mode=NULL;a->host_static=0;return;}
     a->mode=chase_player;
 }
 static void amp_drum_live_mode(AvpAmp *a)
@@ -1565,167 +1174,13 @@ static int (*lift_test_cb)(const AvpAmp *);
 void avp_amp_bind_level_list(unsigned k,unsigned level,const AvpAmpPlacement *list){if(k<4&&level>=1&&level<=AVP_MAX_LEVEL)level_lists[k][level-1]=list;}
 void avp_amp_bind_random_list(unsigned k,unsigned level,const AvpAmpRandomEntry *list){if(k<3&&level>=1&&level<=AVP_MAX_LEVEL)random_lists[k][level-1]=list;}
 void avp_amp_bind_templates(const AvpAmpTemplate *t,unsigned n){bound_templates=t;bound_template_count=n;}
-
-
-/* Retail-authored AMP template definitions lifted directly from the original
- * Rebellion AMP.S primary/secondary template tables.  These are gameplay
- * constants, not distributed artwork/audio/map assets.  The original `pat1`
- * values in amp_timer were 68000 pointers to movement-pattern data; the native
- * C AI represents that state directly, so those pointer-valued timer presets
- * are normalized to 0. Literal numeric timers (for example the Queen's 5-tick
- * opening delay) are preserved. */
-#define AMP_MOT_KILL ((u16)((1u<<AMP_MOTION)|(1u<<AMP_KILLABLE)))
-#define AMP_KILL     ((u16)(1u<<AMP_KILLABLE))
-#define HV           ((s16)((0x1a00*85)/100))
-#define PV           ((s16)((0x2200*85)/100))
-#define TPL(creature_,or_,seq_,frame_,timer_,xv_,yv_,ld_,vx_,vy_,en_,old_,fl_,ys_,stat_) \
-    {NULL,(creature_),(or_),(seq_),(frame_),0,(timer_),(xv_),(yv_),(ld_),(vx_),(vy_),(en_),(old_),(fl_),(ys_),(stat_)}
-
-static const AvpAmpTemplate retail_source_templates[60]={
-    /*  0 ALIEN */          TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),
-    /*  1 PREDATOR */       TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),
-    /*  2 HUMAN */          TPL(AC_HUMAN,0,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),
-    /*  3 EGG */            TPL(AC_EGG,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),
-    /*  4 FACEHUG */        TPL(AC_FACEHUG,0,AS_RUN,0,0,HV,HV,0,0,0,20,20,AMP_MOT_KILL,0,0),
-    /*  5 ACRAWL */         TPL(AC_ACRAWL,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),
-    /*  6 SMART */          TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),
-    /*  7 BOLT */           TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),
-    /*  8 FIRE */           TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),
-    /*  9 SPARK1 */         TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),
-    /* 10 SPARK2 */         TPL(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0),
-    /* 11 AID */            TPL(AC_AID,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 12 AMMO1 */          TPL(AC_AMMO1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 13 AMMO2 */          TPL(AC_AMMO2,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 14 BAG */            TPL(AC_BAG,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 15 CAN */            TPL(AC_CAN,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 16 CART */           TPL(AC_CART,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 17 CHAIN */          TPL(AC_CHAIN,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,1),
-    /* 18 COCOON */         TPL(AC_COCOON,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 19 DISK */           TPL(AC_DISK,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 20 DRUM */           TPL(AC_DRUM,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),
-    /* 21 FOOD */           TPL(AC_FOOD,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 22 GAS (aliases drum_def in retail source) */
-                             TPL(AC_DRUM,0,AS_STAND,0,0,0,0,20,0,0,20,20,AMP_KILL,0,0),
-    /* 23 GREN (retail creature AC_AMMO1) */
-                             TPL(AC_AMMO1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 24 GROUP (retail creature AC_CART) */
-                             TPL(AC_CART,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 25 SHELLS */         TPL(AC_SHELLS,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 26 TABLE1 */         TPL(AC_TABLE1,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 27 TABLE2 */         TPL(AC_TABLE2,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 28 TABLE3 */         TPL(AC_TABLE3,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 29 HIDE_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),
-    /* 30 HIDE_PREDATOR */  TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),
-    /* 31 HIDE_HUMAN */     TPL(AC_HUMAN,0,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),
-    /* 32 STATIC_ALIEN */   TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,0,0,30,30,AMP_MOT_KILL,0,0),
-    /* 33 STATIC_PRED */    TPL(AC_PREDATOR,0,AS_RUN,0,0,PV,PV,0,0,0,300,300,AMP_MOT_KILL,0,0),
-    /* 34 STATIC_HUMAN */   TPL(AC_HUMAN,2,AS_RUN,0,0,HV,HV,0,0,0,50,50,AMP_MOT_KILL,0,0),
-    /* 35 BITE_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,1,0,30,30,AMP_MOT_KILL,0,0),
-    /* 36 TAIL_ALIEN */     TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,3,0,30,30,AMP_MOT_KILL,0,0),
-    /* 37 SWIPE_ALIEN */    TPL(AC_ALIEN,0,AS_RUN,0,0,HV,HV,0,2,0,30,30,AMP_MOT_KILL,0,0),
-    /* 38 DEAD_OFF */       TPL(AC_DEADOFF,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 39 DEAD_S */         TPL(AC_HUMAN,0,AS_DEATH,2,0,0,0,0,0,0,100,100,0,0,0),
-    /* 40 DEAD_MED */       TPL(AC_DEADMED,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 41 BED */            TPL(AC_BED,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 42 CRYO */           TPL(AC_CRYO,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 43 XGEN */           TPL(AC_GEN,0,AS_HIDDEN,0,0,0,0,0,0,0,0,0,0,0,0),
-    /* 44 NGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),
-    /* 45 SGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),
-    /* 46 EGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),
-    /* 47 WGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),
-    /* 48 CGEN */           TPL(AC_GEN,AMP_KILL,AS_STAND,0,0,0,0,0,0,0,200,200,0,0,0),
-    /* 49 AQSHIELD */       TPL(AC_AQSHIELD,0,AS_STAND,0,0,0,0,0,0,0,100,100,0,0,0),
-    /* 50 QUEEN */          TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0),
-    /* 51 SMARTPRED */      TPL(AC_PREDATOR,0,AS_HIDDEN,0,0,0,0,0,0,0,300,300,AMP_KILL,0,0),
-    /* 52 DEADALIEN */      TPL(AC_ALIEN,0,AS_DEATH,3,0,HV,HV,0,0,0,0,0,0,0,0),
-    /* 53 DEADHUMAN */      TPL(AC_HUMAN,0,AS_DEATH,2,0,HV,HV,0,0,0,0,0,0,0,1),
-    /* 54 DPRED */          TPL(AC_PREDATOR,0,AS_DEATH,4,0,PV,PV,0,0,0,0,0,0,0,1),
-    /* 55 DEADHUG */        TPL(AC_FACEHUG,0,AS_DEATH,3,0,HV,HV,0,0,0,0,0,0,0,1),
-    /* 56 DEADEGG */        TPL(AC_EGG,0,AS_STAND,5,0,0,0,0,0,0,0,0,0,0,1),
-    /* 57 DQUEEN */         TPL(AC_AQUEEN,0,AS_DEATH,2,0,HV,HV,0,0,0,0,0,0,0,1),
-    /* 58 EQUEEN */         TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0),
-    /* 59 RQUEEN */         TPL(AC_AQUEEN,0,AS_STAND,0,5,PV,PV,0,0,0,3000,3000,AMP_MOT_KILL,0,0)
-};
-#undef TPL
-#undef HV
-#undef PV
-#undef AMP_KILL
-#undef AMP_MOT_KILL
-
-#define REND {-1,0}
-static const AvpAmpRandomEntry rr_none[]={{-1,0}};
-static const AvpAmpRandomEntry rr_h1[]={{0,80},REND};
-static const AvpAmpRandomEntry rr_h2[]={{0,60},{15,2},REND};
-static const AvpAmpRandomEntry rr_h3[]={{0,40},{11,6},{25,6},REND};
-static const AvpAmpRandomEntry rr_h4[]={{0,50},{3,20},{11,6},{25,6},REND};
-static const AvpAmpRandomEntry rr_h5[]={{0,50},{3,20},{1,3},REND};
-static const AvpAmpRandomEntry rr_h_pship[]={{1,3},REND};
-static const AvpAmpRandomEntry rr_h_aship[]={{0,50},{11,15},{3,20},{4,5},REND};
-static const AvpAmpRandomEntry rr_h_d[]={{5,10},REND};
-static const AvpAmpRandomEntry rr_h_sd[]={{5,5},{16,2},REND};
-static const AvpAmpRandomEntry rr_p1[]={{2,60},{11,6},REND};
-static const AvpAmpRandomEntry rr_p2[]={{2,60},{11,6},REND};
-static const AvpAmpRandomEntry rr_p3[]={{2,45},{3,15},{11,6},{25,6},REND};
-static const AvpAmpRandomEntry rr_p4[]={{0,17},{2,40},{3,15},{11,6},{25,6},REND};
-static const AvpAmpRandomEntry rr_p5[]={{0,50},{3,30},{4,5},REND};
-static const AvpAmpRandomEntry rr_pship[]={{2,10},REND};
-static const AvpAmpRandomEntry rr_aship[]={{3,30},{0,60},{4,6},REND};
-static const AvpAmpRandomEntry rr_a1[]={{2,45},{1,3},REND};
-static const AvpAmpRandomEntry rr_a2[]={{2,50},{1,3},REND};
-static const AvpAmpRandomEntry rr_a3[]={{2,75},{1,3},REND};
-static const AvpAmpRandomEntry rr_a4[]={{2,75},{1,3},REND};
-static const AvpAmpRandomEntry rr_a5[]={{2,25},REND};
-static const AvpAmpRandomEntry rr_alship[]={{2,40},{1,3},REND};
-static const AvpAmpRandomEntry rr_apship[]={{1,5},REND};
-#undef REND
-
-void avp_amp_bind_retail_source_templates_and_random(void)
-{
-    static const AvpAmpRandomEntry *human[AVP_MAX_LEVEL]={
-        rr_h1,rr_h2,rr_h3,rr_h4,rr_h5,rr_h_d,rr_h_d,rr_h_sd,rr_h_sd,rr_h_d,rr_h_d,rr_h_d,rr_h_d,rr_h_aship,rr_h_pship};
-    static const AvpAmpRandomEntry *alien[AVP_MAX_LEVEL]={
-        rr_a1,rr_a2,rr_a3,rr_a4,rr_a5,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_alship,rr_apship};
-    static const AvpAmpRandomEntry *pred[AVP_MAX_LEVEL]={
-        rr_p1,rr_p2,rr_p3,rr_p4,rr_p5,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_none,rr_aship,rr_pship};
-    unsigned i;
-    avp_amp_bind_templates(retail_source_templates,60);
-    for(i=0;i<AVP_MAX_LEVEL;i++){
-        avp_amp_bind_random_list(0,i+1,human[i]);
-        avp_amp_bind_random_list(1,i+1,alien[i]);
-        avp_amp_bind_random_list(2,i+1,pred[i]);
-    }
-}
-unsigned avp_amp_bound_template_count(void){return bound_template_count;}
-unsigned avp_amp_bound_level_list_count(void){unsigned n=0;for(unsigned k=0;k<4;k++)for(unsigned l=0;l<AVP_MAX_LEVEL;l++)if(level_lists[k][l])++n;return n;}
 void avp_amp_set_beam_counter(u32 v){beam_counter=v;}
-void avp_amp_set_beam_weapon_sample(u32 (*sample)(void)){beam_weapon_sample=sample;}
 void avp_amp_set_fight_callback(void (*fn)(AvpAmp *,int)){fight_cb=fn;}
 void avp_amp_set_death_callback(void (*fn)(AvpAmp *)){death_cb=fn;}
 void avp_amp_set_lift_test_callback(int (*fn)(const AvpAmp *)){lift_test_cb=fn;}
 
-static void amp_cleargrid_c(AvpAmp *a)
-{
-    unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;
-    /* Original AMP.S amp_cleargrid (line 5324 in the R278 source audit)
-     * writes zero to this cell without checking its present owner.
-     * Keep the host bounds guard; do not add a non-retail owner check. */
-    if(x<AVP_AMP_GRID_W && y<AVP_AMP_GRID_H)
-        collmap[y*AVP_AMP_GRID_W+x]=0;
-}
-/* Unmodified Jaguar square range. Used by pursuit, AI and detection. */
+static void amp_cleargrid_c(AvpAmp *a){unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;if(x<64&&y<64)collmap[y*64+x]=0;}
 static int amp_in_range(const AvpAmp *a,u16 pixels){u32 lim=(u32)pixels<<9;return abs32diff(a->xpos,(s32)x_pos)<=lim&&abs32diff(a->ypos,(s32)y_pos)<=lim;}
-/* Only hostile contact and damaging-proximity checks opt into a circle.
- * Signed 64-bit differences avoid wrap, and squared fixed-point distances
- * avoid float, square roots, and heading-dependent approximations. */
-static int amp_contact_in_range(const AvpAmp *a,u16 pixels)
-{
-    u32 lim=(u32)pixels<<9;
-    u32 dx,dy;
-    if(!host_normalize_diagonal_contact_range)return amp_in_range(a,pixels);
-    dx=abs32diff(a->xpos,(s32)x_pos);dy=abs32diff(a->ypos,(s32)y_pos);
-    if(dx>lim||dy>lim)return 0;
-    return (u64)dx*dx+(u64)dy*dy<=(u64)lim*lim;
-}
 static void set_static(AvpAmp *a){a->mode=NULL;a->host_static=1;}
 static void write_obj_grid(AvpAmp *a){unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16,n=amp_number(a);size_t o=y*AVP_AMP_OBJ_ROW_BYTES+x*2u;if(x<64&&y<64&&n&&o+1<sizeof(objmap)){objmap[o]=(u8)(n>>8);objmap[o+1]=(u8)n;}}
 static void make_dead_egg(AvpAmp *a){amp_cleargrid_c(a);a->flags&=(u16)~(1u<<AMP_KILLABLE);a->animframe=5;a->astype=56;set_static(a);do_score(a);}
@@ -1735,14 +1190,7 @@ static void apply_template(AvpAmp *a,const AvpAmpPlacement *p){
     a->xpos=(s32)((u32)(u16)p->x<<8);a->ypos=(s32)((u32)(u16)p->y<<8);a->mode=t->mode?t->mode:avp_amp_builtin_mode_for_def(p->def);a->creature=t->creature;
     a->animseq=t->animseq;a->animframe=t->animframe;a->angle=t->angle;a->timer=t->timer;a->xvel=t->xvel;a->yvel=t->yvel;a->ldir=t->ldir;
     a->xvector=t->xvector;a->yvector=t->yvector;a->energy=t->energy;a->oldenergy=t->oldenergy;a->flags=(u16)(t->flags|t->flags_or);a->yoffset=t->yoffset;a->astype=(s16)p->def;a->host_static=(u8)(t->host_static||avp_amp_builtin_static_for_def(p->def));a->aux_ptr=NULL;
-    /* The retail collectable mode registers itself in objmap, not collmap.
-     * Keep R50's one-based combat ownership for actors and solid props,
-     * but do not turn medkits/ammo into blockers or projectile victims. */
-    /* Dead templates 52..57 are visible/acid-active but not solid: dying
-     * already cleared the original AMP collision owner.  A level revisit
-     * must not recreate that owner or turn a corpse into a projectile hit. */
-    if(a->mode!=amp_collectable_mode && p->def!=18u &&
-       (p->def<52u || p->def>57u))amp_setgrid(a);
+    {unsigned x=(u32)a->xpos>>16,y=(u32)a->ypos>>16;if(x<64&&y<64)collmap[y*64+x]=1;}
     if(a->creature==AC_HUMAN||a->creature==AC_ALIEN){a->xpos=(s32)(((u32)a->xpos&0xffff0000u)|0x8000u);a->ypos=(s32)(((u32)a->ypos&0xffff0000u)|0x8000u);}
 }
 static AvpAmp *make_template_at(u16 def,s32 xpos,s32 ypos,int occupy)
@@ -1751,9 +1199,7 @@ static AvpAmp *make_template_at(u16 def,s32 xpos,s32 ypos,int occupy)
     AvpAmpPlacement p={(s16)((u32)xpos>>8),(s16)((u32)ypos>>8),def};
     apply_template(a,&p);
     a->xpos=xpos;a->ypos=ypos;
-    /* Spawning a collectable reserves its location during rand_set but it
-     * becomes an object-grid entry, never a solid actor-grid occupant. */
-    if(occupy && a->mode!=amp_collectable_mode && def!=18u && def!=56u)amp_setgrid(a);
+    if(occupy){unsigned x=(u32)xpos>>16,y=(u32)ypos>>16;if(x<64u&&y<64u)collmap[y*64u+x]=1;}
     ++ampcount;
     return a;
 }
@@ -1762,9 +1208,6 @@ void next_creature(const AvpAmpPlacement **cursor)
 {
     const AvpAmpPlacement *p;
     if(!cursor||!(p=*cursor))return;
-    /* Placement lists may be recovered before the 48-byte retail template
-     * definitions are bound. Do not instantiate partially initialized actors. */
-    if(!bound_templates||!bound_template_count)return;
     while(p->x!=-1){AvpAmp*a=amp_req();apply_template(a,p);++p;}
     *cursor=p;
 }
@@ -1824,40 +1267,14 @@ void rand_set(void)
 {
     unsigned pk;
     const AvpAmpRandomEntry *p;
-    /* Occupancy while choosing random positions must include collectables,
-     * even though their final home is objmap rather than collmap. */
-    u8 reserved[AVP_AMP_GRID_W*AVP_AMP_GRID_H]={0};
     if(cur_level<1||cur_level>AVP_MAX_LEVEL)return;
     pk=(player_type==PT_ALIEN)?1u:(player_type==PT_PREDATOR)?2u:0u;
     p=random_lists[pk][cur_level-1];
     if(!p)return;
-    /* Authored collectables are in AMP slots before they first update
-     * objmap.  Reserve their squares before choosing random locations;
-     * collmap deliberately does not contain these non-solid objects.  A
-     * collected pickup has neither a live mode nor host_static, so it must
-     * not block a future spawn. */
-    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
-        const AvpAmp *a=&amp_data[i];
-        unsigned x,y;
-        if(a->astype<0 ||
-           avp_amp_builtin_mode_for_def((unsigned)a->astype)!=amp_collectable_mode ||
-           (a->mode!=amp_collectable_mode && !a->host_static) ||
-           (a->flags&(1u<<AMP_COLLECT)))continue;
-        x=(u32)a->xpos>>16;
-        y=(u32)a->ypos>>16;
-        if(x<AVP_AMP_GRID_W && y<AVP_AMP_GRID_H)
-            reserved[y*AVP_AMP_GRID_W+x]=1u;
-    }
     while(p->def>=0){
         for(s16 n=0;n<p->count;n++){
             unsigned x,y,tries=0;
-            do{x=avp_random()&63u;y=avp_random()&63u;if(++tries>65536u)return;}
-            /* Movement may enter a walkable $ffff cell, but the original
-             * placement grid explicitly FORBIDS spawning there.  Keep the
-             * two occupancy meanings separate (no gameplay AI changes). */
-            while(collmap[y*AVP_AMP_GRID_W+x]==0xffffu ||
-                  amp_grid_nonzero((int)x,(int)y) || reserved[y*64u+x]);
-            reserved[y*64u+x]=1u;
+            do{x=avp_random()&63u;y=avp_random()&63u;if(++tries>65536u)return;}while(collmap[y*64u+x]!=0);
             (void)make_template_at((u16)p->def,(s32)((x<<16)|0x8000u),(s32)((y<<16)|0x8000u),1);
         }
         ++p;
@@ -1911,14 +1328,14 @@ void gofight(AvpAmp *a)
         amp_move_toward(a,(s32)x_pos,(s32)y_pos);return;
     }
     a->animframe=0;
-    if(amp_weapon_beam()&1u){
+    if(beam_counter&1u){
         a->animseq=AS_FIGHT2;
         if(fight_cb)fight_cb(a,AVP_AMP_FIGHT_FLAME);
         amp_launchfire(a);
     }else{
         a->animseq=AS_FIGHT1;a->timer=0;a->mode=amp_crouch_fire;
         if(fight_cb)fight_cb(a,AVP_AMP_FIGHT_CROUCH);
-        amp_marine_loop_sfx(0);amp_crouch_fire(a);
+        amp_sfx(54);amp_crouch_fire(a);
     }
 }
 
@@ -1939,11 +1356,6 @@ void stun_mode(AvpAmp *a)
     }
     amp_cleargrid_c(a);
     a->mode=stun_death;a->timer=50;a->animseq=AS_DEATH;a->animframe=0;
-    /* HUD_MSG.S::msg_stun: the Marine has fallen but is not cocooned
-     * until the Alien physically reaches the body. The original message is
-     * already present in the retail message tables and PC host dispatcher. */
-    {const AvpRuntimeOps *o=avp_runtime_ops();
-     if(o->set_message)o->set_message(o->user,7u);}
 }
 
 void stun_death(AvpAmp *a)
@@ -1951,25 +1363,20 @@ void stun_death(AvpAmp *a)
     if(!a)return;
     if(a->animframe!=2){++a->animframe;return;}
     if(--a->timer==0){set_static(a);return;}
-    if(!amp_contact_in_range(a,20))return;
+    if(!amp_in_range(a,20))return;
     if(num_cocoons==AVP_MAX_COCOONS){
-        set_static(a);a->flags=(1u<<AMP_DEAD);
-        {const AvpRuntimeOps *o=avp_runtime_ops();
-         if(o->set_message)o->set_message(o->user,9u);}
-        return;
+        set_static(a);a->flags=(1u<<AMP_DEAD);return;
     }
     set_static(a);a->creature=AC_COCOON;a->animseq=AS_STAND;a->animframe=0;
-    a->astype=18;a->flags=0;MakeCocoon((u32)a->xpos,(u32)a->ypos);amp_sfx(AVP_FX_COCOX);
-    {const AvpRuntimeOps *o=avp_runtime_ops();
-     if(o->set_message)o->set_message(o->user,8u);}
+    a->astype=18;a->flags=0;MakeCocoon((u32)a->xpos,(u32)a->ypos);amp_sfx(27);
 }
 
 void cocoon(AvpAmp *a){if(!a)return;if((u16)(a->xpos>>16)!=(u16)(x_pos>>16)||(u16)(a->ypos>>16)!=(u16)(y_pos>>16)){write_obj_grid(a);set_static(a);return;}a->xpos=(s32)(((u32)a->xpos&0xffff0000u)|0x8000u);a->ypos=(s32)(((u32)a->ypos&0xffff0000u)|0x8000u);a->creature=AC_EGG;make_dead_egg(a);}
 
 static void wait_hug_mode(AvpAmp *a);
 static void egg_open2_mode(AvpAmp *a){if(a->energy<=0){a->energy=0;make_dead_egg(a);return;}if(++a->animframe==4){a->mode=wait_hug_mode;a->timer=0;}}
-static void egg_open_mode(AvpAmp *a){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_EGGX1);a->mode=egg_open2_mode;egg_open2_mode(a);}
-static void fire_hug_mode(AvpAmp *a){AvpAmp*h;if(!bound_templates||4u>=bound_template_count){set_static(a);return;}amp_sfx(AVP_FX_FACEH);h=amp_req();*h=(AvpAmp){0};h->xpos=a->xpos;h->ypos=a->ypos;{AvpAmpPlacement p={(s16)((u32)a->xpos>>8),(s16)((u32)a->ypos>>8),4};apply_template(h,&p);h->xpos=a->xpos;h->ypos=a->ypos;}h->yoffset=-30;h->mode=amp_fallhug;a->mode=amp_used_egg;}
+static void egg_open_mode(AvpAmp *a){const AvpRuntimeOps*o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,28);a->mode=egg_open2_mode;egg_open2_mode(a);}
+static void fire_hug_mode(AvpAmp *a){AvpAmp*h;if(!bound_templates||4u>=bound_template_count){set_static(a);return;}amp_sfx(56);h=amp_req();*h=(AvpAmp){0};h->xpos=a->xpos;h->ypos=a->ypos;{AvpAmpPlacement p={(s16)((u32)a->xpos>>8),(s16)((u32)a->ypos>>8),4};apply_template(h,&p);h->xpos=a->xpos;h->ypos=a->ypos;}h->yoffset=-30;h->mode=amp_fallhug;a->mode=amp_used_egg;}
 static void wait_hug_mode(AvpAmp *a){if(!(a->flags&(1u<<AMP_EGGOPEN))){if(a->energy<=0){a->energy=0;make_dead_egg(a);return;}if((u16)a->timer!=20u){a->timer=(s32)((u16)a->timer+1u);return;}}a->mode=fire_hug_mode;}
 void eggwait(AvpAmp *a){AvpXY from,to;if(!a||player_type==PT_ALIEN)return;a->flags&=(u16)~(1u<<AMP_EGGOPEN);if(a->energy<a->ldir){a->ldir=a->energy;a->flags|=(1u<<AMP_EGGOPEN);}else{amp_setgrid(a);if(a->energy<=0){a->energy=0;make_dead_egg(a);return;}if(!amp_in_range(a,128))return;}from.x=a->xpos;from.y=a->ypos;to.x=(s32)x_pos;to.y=(s32)y_pos;if(LineOfSight(&from,&to))return;a->mode=egg_open_mode;}
 
@@ -2002,7 +1409,7 @@ static void alien_gameover_mode(AvpAmp *a)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
     if(!a)return;
-    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_ASHRI);
+    if(o->play_sfx)o->play_sfx(o->user,0); /* ashriek: backend remaps */
     queen_end_timer=45;
     a->mode=alien_free_queen_mode;
     key_lock=(s16)-1;
@@ -2016,7 +1423,7 @@ static void alien_free_queen_mode(AvpAmp *a)
     if(!amp_in_range(a,60))amp_move_toward(a,(s32)x_pos,(s32)y_pos);
     if(--queen_end_timer!=0)return;
     game_over=1;
-    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_ASHRI);
+    if(o->play_sfx)o->play_sfx(o->user,0); /* ashriek */
     set_static(a);
 }
 static void end_queen_mode(AvpAmp *a)
@@ -2089,10 +1496,7 @@ static void queen_play_death_mode(AvpAmp *a)
     if(++a->animframe!=3)return;
     a->flags&=(u16)~(1u<<AMP_MOTION);
     a->astype=57; /* DEF_DQUEEN */
-    /* Queen death advances the selected CAMPAIGN's authored ending path,
-     * not the species of the last player targeted by its enemy AI. This
-     * extra override is unset in the original single-player game. */
-    if(avp_amp_mp_queen_predator_ending(player_type)){
+    if(player_type==PT_PREDATOR){
         key_lock=1;queen_end_timer=20;a->mode=queen_end_mode;return;
     }
     ++queen_respawns;
@@ -2102,129 +1506,8 @@ static void queen_play_death_mode(AvpAmp *a)
 static void queen_dead_begin(AvpAmp *a)
 {
     const AvpRuntimeOps *o=avp_runtime_ops();
-    if(o->play_sfx)o->play_sfx(o->user,AVP_FX_AHIT);
+    if(o->play_sfx)o->play_sfx(o->user,0); /* ahit: backend may remap */
     a->animseq=AS_DEATH;a->animframe=0;a->mode=queen_play_death_mode;
-}
-/* PC-only cheat: immediately despawn hostile AMP records from the currently
- * bound level. Do not invoke any death state: in particular Queen death would
- * advance the campaign, and generator death would damage the player.
- * Original gameplay never calls this without an explicit cheat action. */
-unsigned avp_amp_dev_clear_enemies(void)
-{
-    u8 removed[AVP_NUM_AMPS]={0};
-    unsigned n=0;
-    int had_generator=0;
-    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
-        AvpAmp *a=&amp_data[i];
-        if((!a->mode&&!a->host_static) || (a->flags&(1u<<AMP_PLAYER)))continue;
-        if(!hostile_amp_type(a))continue;
-        if(a->creature==AC_GEN)had_generator=1;
-        removed[i]=1u;
-        release_amp(a);
-        ++n;
-    }
-    /* Clear any remaining ownership entries belonging to despawned actors,
-     * including a stale old movement cell. Never erase another actor, item,
-     * static geometry or a $ffff map sentinel. */
-    for(unsigned i=0;i<AVP_AMP_GRID_W*AVP_AMP_GRID_H;i++){
-        const u16 owner=collmap[i];
-        if(owner>0u && owner<=AVP_NUM_AMPS && removed[owner-1u])
-            collmap[i]=0u;
-    }
-    for(unsigned i=0;i<sizeof(objmap);i+=2u){
-        const unsigned owner=((unsigned)objmap[i]<<8)|objmap[i+1u];
-        if(owner>0u && owner<=AVP_NUM_AMPS && removed[owner-1u])
-            objmap[i]=objmap[i+1u]=0u;
-    }
-    if(n){
-        /* These IDs are used only by enemy Marine firing loops. Stop the
-         * voices now, rather than letting disembodied fire continue. */
-        if(marine_pulse_id)StopLoop(marine_pulse_id);
-        if(marine_flame_id)StopLoop(marine_flame_id);
-        marine_pulse_id=marine_flame_id=0;
-        marine_pulse_time=marine_flame_time=0;
-    }
-    if(had_generator){ngens=0;KillAlar();}
-    return n;
-}
-
-
-/* PC-only hazard removal: no death state, blast, hit, score or pickup event.
- * Operates only on the active/bound level, just like Clear Enemies. The
- * Predator-ship electric pyramids are AC_AQSHIELD, maintained by AC_GEN.
- * Release their generators too, or the shields can be recreated. Original
- * death/Generator code is deliberately bypassed (it can damage the player).
- * An Alien's completed death may be a live acid puddle: remove only this
- * explicit mode, never a living Alien or one still playing its death sprite. */
-unsigned avp_amp_dev_clear_hazards(void)
-{
-    u8 removed[AVP_NUM_AMPS]={0};
-    unsigned n=0;
-    int had_generator=0;
-    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
-        AvpAmp *a=&amp_data[i];
-        if((!a->mode&&!a->host_static) || (a->flags&(1u<<AMP_PLAYER)))continue;
-        /* Only template 20 is an explosive DRUM. Retail template 22 is
-         * named GAS (ammo), despite its drum_def alias: never erase it. */
-        const int barrel=a->creature==AC_DRUM && a->astype==20;
-        if(!barrel && a->creature!=AC_AQSHIELD && a->creature!=AC_GEN &&
-           !avp_amp_is_acid_puddle(a))continue;
-        if(a->creature==AC_GEN)had_generator=1;
-        removed[i]=1u;
-        release_amp(a);
-        ++n;
-    }
-    /* Scrub only grid entries owned by removed hazards; never clear an
-     * unrelated occupant, item, map sentinel or a surviving enemy. */
-    for(unsigned i=0;i<AVP_AMP_GRID_W*AVP_AMP_GRID_H;i++){
-        const u16 owner=collmap[i];
-        if(owner>0u && owner<=AVP_NUM_AMPS && removed[owner-1u])
-            collmap[i]=0u;
-    }
-    for(unsigned i=0;i<sizeof(objmap);i+=2u){
-        const unsigned owner=((unsigned)objmap[i]<<8)|objmap[i+1u];
-        if(owner>0u && owner<=AVP_NUM_AMPS && removed[owner-1u])
-            objmap[i]=objmap[i+1u]=0u;
-    }
-    if(had_generator){ngens=0;KillAlar();}
-    return n;
-}
-
-/* Cheat kills use the authored death states, not free-slot deletion: corpse,
- * collision-grid, generators and queen progression remain coherent. */
-unsigned avp_amp_dev_kill_enemies(int type)
-{
-    unsigned killed=0;
-    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
-        AvpAmp *a=&amp_data[i];
-        if(!a->mode||a->host_static||(a->flags&(1u<<AMP_DEAD))||a->energy<=0)continue;
-        if(a->flags&(1u<<AMP_PLAYER))continue;
-        if(type>=0 && a->creature!=(u16)type)continue;
-        switch(a->creature){
-        case AC_EGG:
-            /* AMP.S's own destroyed-egg path: retains the visible dead egg,
-             * clears its solid grid cell and prevents future Facehugger spawn.
-             * This is a cheat, not a weapon hit, so award no score. */
-            a->energy=0;
-            a->flags&=(u16)~(1u<<AMP_PHIT);
-            make_dead_egg(a);
-            ++killed;
-            break;
-        case AC_ALIEN:case AC_ACRAWL:case AC_HUMAN:case AC_PREDATOR:case AC_FACEHUG:
-            a->energy=0;host_dev_death=1;amp_begin_death(a);host_dev_death=0;
-            ++killed;break;
-        case AC_GEN:
-            a->energy=0;
-            /* Natural generator death releases its associated shield. */
-            if(a->mode==genmode)genmode(a);
-            ++killed;
-            break;
-        case AC_AQUEEN:
-            a->energy=0;queen_dead_begin(a);++killed;break;
-        default:break; /* Pickups, hazards and projectiles are not enemies. */
-        }
-    }
-    return killed;
 }
 static void queen_end_mode(AvpAmp *a)
 {
@@ -2260,12 +1543,10 @@ static void queen_fight_mode(AvpAmp *a)
         if(t==QEV_END){lockxxx(a);return;}
         if(t==QEV_DAMAGE){
             s16 dmg=*q++;a->aux_ptr=(void *)q;
-            if(amp_contact_in_range(a,90)){
+            if(amp_in_range(a,90)){
                 s16 scaled=(s16)(dmg*2);
-                u32 sound=(a->animseq==AS_FIGHT1)?AVP_FX_NALN1:
-                          (a->animseq==AS_FIGHT3)?AVP_FX_NALN2:AVP_FX_CLAW2;
                 if(player_type==PT_PREDATOR)scaled=(s16)(dmg*3);
-                if(!host_attacks_disabled){player_energy=(s16)(player_energy-scaled);amp_sfx(sound);}
+                player_energy=(s16)(player_energy-scaled);
             }
             if(fight_cb)fight_cb(a,AVP_AMP_FIGHT_CROUCH);
             /* qdam/add8 branches straight back to qf2: the event itself does
@@ -2280,16 +1561,11 @@ static void queen_choose_fight(AvpAmp *a)
 {
     unsigned i;
     if(--a->timer>=0)return;
-    if(host_attacks_disabled){a->timer=5;return;}
     i=(unsigned)(avp_random()&3u);
     a->animframe=(u16)qseqs[i][0];
     a->aux_ptr=(void *)(qseqs[i]+1);
     a->animseq=qseq_anim[i];
     a->mode=queen_fight_mode;
-    /* AMP.S::qfight plays ashriek when the Queen commits to an attack,
-     * not when the melee damage record is consumed.  The end-game
-     * Queen uses a different entry sequence and does not do this. */
-    amp_sfx(AVP_FX_ASHRI);
     if(fight_cb)fight_cb(a,AVP_AMP_FIGHT_CROUCH);
 }
 static void queen_reverse_mode(AvpAmp *a)
@@ -2307,12 +1583,7 @@ static void queen_lock_mode(AvpAmp *a)
         a->animseq=AS_KNOCKBACK;a->animframe=0;a->timer=2;a->mode=queen_delay_mode;return;
     }
     if(queen_trigger(1)){a->mode=queen_reverse_mode;return;}
-    if(amp_contact_in_range(a,90)){queen_choose_fight(a);return;}
+    if(amp_in_range(a,90)){queen_choose_fight(a);return;}
     amp_move_toward(a,(s32)x_pos,(s32)y_pos);
 }
 void lockxxx(AvpAmp *a){if(!a)return;a->mode=queen_lock_mode;a->animframe=0;a->animseq=AS_STAND;a->timer=3;}
-
-#ifdef AVP_LOCAL_MULTIPLAYER_AMP_BRIDGE
-#include "../../new/multiplayer/local_mp_amp_native.inc"
-#include "../../new/multiplayer/local_mp_amp_targets.inc"
-#endif

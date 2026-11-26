@@ -5,10 +5,10 @@
 #define AVP_SCREEN_HEIGHT 228
 #define AVP_SCREEN_WIDTH 320
 #define AVP_WALL_SIZE 128
-#define AVP_NORMAL_SCALE ((128*85)/100)
-#define AVP_NORMAL_WIDTH 1
-#define AVP_DUCT_SCALE 128
-#define AVP_DUCT_WIDTH 0
+#define AVP_NORMAL_SCALE 85
+#define AVP_NORMAL_WIDTH 0
+#define AVP_DUCT_SCALE 70
+#define AVP_DUCT_WIDTH 1
 #define AVP_FIRST_DUCT 6
 #define AVP_LAST_DUCT 13
 #define AVP_EXP_START 22
@@ -36,7 +36,6 @@ void InitGame(void);
 void MazeDebug(void);
 void NextFrame(void);
 void Process_EndGame(void);
-int avp_campaign_advance_end_count(void);
 s32 sin_d0(u16 angle);
 s32 cos_d0(u16 angle);
 void ResetScale(void);

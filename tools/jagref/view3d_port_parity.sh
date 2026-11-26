@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RE24 Session 2: ROM-gated 1:1 parity of the native C 3D-view port
-# (src/jaguar/avp_gpu/view3d.c) against the ROM's own GPU program.
+# (new/jaguar/avp_gpu/view3d.c) against the ROM's own GPU program.
 #   tools/jagref/view3d_port_parity.sh /path/to/AVP.jag [build-dir] [fuzz-seeds-per-pose]
 # Ten scripted poses (Alien, Predator, Marine; standing and moving), each
 # compared exactly, plus optional randomized scenes per pose.  Nothing derived

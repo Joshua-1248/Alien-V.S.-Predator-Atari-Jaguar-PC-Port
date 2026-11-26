@@ -31,6 +31,10 @@ int main(int argc,char **argv)
     fseek(f,0,SEEK_END);n=ftell(f);fseek(f,0,SEEK_SET);rom=(uint8_t*)malloc((size_t)n);
     if(!rom||fread(rom,1,(size_t)n,f)!=(size_t)n){fclose(f);return 1;}fclose(f);
     if(jagm_init(&mach,rom,(size_t)n)){fprintf(stderr,"init failed\n");return 1;}
+    /* Reference-only opt-in experimental staged Blitter. Does not alter the
+     * native game and is not a measured shared-bus timing implementation. */
+    if(getenv("JAGM_BLIT_ASYNC")&&strcmp(getenv("JAGM_BLIT_ASYNC"),"1")==0)
+        jagm_set_blitter_async(&mach,1);
     { const char *path=getenv("JAGM_GPU_CONTROL_CSV");
       if(path){FILE *log=fopen(path,"w");
         if(!log){perror(path);return 1;}
@@ -68,8 +72,22 @@ int main(int argc,char **argv)
           printf(" y=%u h=%u data=%06x x=%d depth=%u pitch=%u dw=%u iw=%u idx=%u refl=%u rmw=%u trans=%u fp=%u",(unsigned)((p0>>3)&0x7FF),(unsigned)((p0>>14)&0x3FF),(unsigned)((p0>>43)<<3),(int)((p1&0xFFF)^0x800)-0x800,(unsigned)((p1>>12)&7),(unsigned)((p1>>15)&7),(unsigned)((p1>>18)&0x3FF),(unsigned)((p1>>28)&0x3FF),(unsigned)((p1>>38)&0x7F),(unsigned)((p1>>45)&1),(unsigned)((p1>>46)&1),(unsigned)((p1>>47)&1),(unsigned)((p1>>49)&0x3F));
           if(t==1){uint32_t l2=jagm_read32(&mach,a+20);printf(" hs=%u vs=%u rem=%u",l2&255,(l2>>8)&255,(l2>>16)&255);}
           printf("\n");a=(a&~0x3FFFF8u)|((uint32_t)((((unsigned long long)hi<<32|lo)>>24)&0x7FFFF)<<3);continue;}
-        if(t==3){unsigned y=(lo>>3)&0x7FF,cc=(lo>>14)&3;uint32_t link=((uint32_t)((((unsigned long long)hi<<32|lo)>>24)&0x7FFFF))<<3;int tk=cc==0?(y==vc||y==0x7FF):cc==1?(y>vc):cc==2?(y<vc):(mach.obf&1);
-          printf(" branch y=%u cc=%u link=%06x taken@%u=%d\n",y,cc,link,vc,tk);a=tk?((a&~0x3FFFF8u)|link):a+8;continue;}
+        if(t==3){
+          unsigned y=(lo>>3)&0x7FFu,cc=(lo>>14)&7u;
+          uint32_t link=((uint32_t)((((uint64_t)hi<<32|lo)>>24)&0x7FFFFu))<<3;
+          unsigned hc10=(mach.hdb1&0x400u)!=0u;
+          int tk=cc==0u?(y==vc||y==0x7FFu):
+                 cc==1u?(y>vc):cc==2u?(y<vc):
+                 cc==3u?((mach.obf&1u)!=0u):cc==4u?hc10:0;
+          if(cc>4u){printf(" branch y=%u cc=%u UNSUPPORTED\n",y,cc);break;}
+          if(cc==4u)
+              printf(" branch y=%u cc=4 link=%06x taken@HDB1(HC10=%u)=%d, HDB2(HC10=%u)=%d\n",
+                     y,link,hc10,tk,(mach.hdb2&0x400u)!=0u,(mach.hdb2&0x400u)!=0u);
+          else printf(" branch y=%u cc=%u link=%06x taken@%u=%d\n",y,cc,link,vc,tk);
+          /* OPLIST follows the HDB1 start. A separate HDB2 OP pass must
+           * be traced with its own HC10 latch, never folded into HDB1. */
+          a=tk?((a&~0x3FFFF8u)|link):a+8;continue;
+        }
         printf("\n");if(t==4)break;a+=8;}}
     if(getenv("WAV")&&mach.audio_n){ /* 16-bit stereo at the measured I2S word rate */
         FILE *w=fopen(getenv("WAV"),"wb");uint32_t rate=(uint32_t)(26590906.0/(2.0*(mach.sclk+1u)*32.0)+0.5),bytes=(uint32_t)(mach.audio_n*2u);

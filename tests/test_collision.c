@@ -107,6 +107,27 @@ int main(void){
     collmap[1*AVP_AMP_GRID_W+2]=1;
     assert(AMPCollisions((2<<16)|0x8000,(1<<16)|0x8000));
 
+    /* R272: in multiplayer, a live Alien already overlapping the player
+     * must not pin escape movement, but moving further into it is blocked.
+     * This is an opt-in host policy: AMPCollisions itself is unchanged. */
+    {
+        const s32 ax=(2<<16)|0x8000,ay=(1<<16)|0x8000;
+        const s32 from=ax+0x1000,to=ax+0x2000;
+        assert(AMPCollisions(from,ay));
+        assert(AMPCollisions(to,ay));
+        assert(avp_collision_mp_amp_escape(from,ay,to,ay));
+        assert(!avp_collision_mp_amp_escape(to,ay,from,ay));
+        assert(!avp_collision_mp_amp_escape(ax,ay,ax,ay));
+        /* A newly touched AMP is not an escape from a prior overlap. */
+        assert(!avp_collision_mp_amp_escape(ax+0x9000,ay,ax+0x1000,ay));
+        level1amps[0].host_static=1;
+        assert(!avp_collision_mp_amp_escape(from,ay,to,ay));
+        level1amps[0].host_static=0;
+        level1amps[0].mode=NULL;
+        assert(!avp_collision_mp_amp_escape(from,ay,to,ay));
+        level1amps[0].mode=alive_actor;
+    }
+
     /* LOS in an open room succeeds; a solid right wall blocks crossing. */
     { AvpXY a={(1<<16)|0x8000,(1<<16)|0x8000},b={(2<<16)|0x8000,(1<<16)|0x8000};
       assert(LineOfSight(&a,&b)==0);

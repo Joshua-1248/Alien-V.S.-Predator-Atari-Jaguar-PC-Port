@@ -223,7 +223,7 @@ static void test_op_branch_conditions_and_prelist(void)
             assert((!left&&right)==(vc>=begin&&vc<end));
         }
     }
-    /* All FOUR documented, bit-field-encodable conditions. */
+    /* CC0..3 and legacy HDB1 path; CC4 has explicit HC10 tests in R212. */
     {
         u32 words[2]={0,0};
         for(unsigned cc=0;cc<4u;cc++){
@@ -260,7 +260,7 @@ static void test_op_branch_conditions_and_prelist(void)
         assert(!avp_jaguar_op_decode_branch_words(NULL,2u,&b));
         assert(!avp_jaguar_op_decode_branch_words(words,2u,NULL));
         assert(!avp_jaguar_op_branch_taken(NULL,0u,0u));
-        b.condition=4u; /* documented CC field is only 2 bits */
+        b.condition=4u; /* legacy helper has no HC10 context (defaults to zero) */
         assert(!avp_jaguar_op_branch_taken(&b,0u,1u));
     }
 }
@@ -361,7 +361,8 @@ static void test_op_trace_guardrails_and_types(void)
     r=avp_jaguar_op_trace_scanline(ram,sizeof(ram),base,base,10u,0u,steps,8u);
     assert(r.status==AVP_JAG_OP_TRACE_STOP && r.count==2u);
     assert(steps[0].type==1u && steps[0].next_address==0x1018u);
-    /* GPU YPOS=0x7ff always interrupts. Other lines skip to next phrase. */
+    /* Rev.8 TYPE=GPU uses bits 3..63 as payload, never as YPOS.  The
+     * traversal triggers at every VC; a BRANCH gates it when needed. */
     op_put32(ram,sizeof(ram),base,0x1030u,0u);
     op_put32(ram,sizeof(ram),base,0x1034u,(0x7ffu<<3)|2u);
     r=avp_jaguar_op_trace_scanline(ram,sizeof(ram),base,0x1030u,0u,0u,steps,8u);
@@ -370,8 +371,8 @@ static void test_op_trace_guardrails_and_types(void)
     op_put32(ram,sizeof(ram),base,0x1034u,(24u<<3)|2u);
     op_put32(ram,sizeof(ram),base,0x103cu,4u);
     r=avp_jaguar_op_trace_scanline(ram,sizeof(ram),base,0x1030u,22u,0u,steps,8u);
-    assert(r.status==AVP_JAG_OP_TRACE_STOP && r.count==2u);
-    assert(steps[0].active==0u);
+    assert(r.status==AVP_JAG_OP_TRACE_GPU && r.count==1u);
+    assert(steps[0].active==1u && steps[0].next_address==0x1038u);
     r=avp_jaguar_op_trace_scanline(ram,sizeof(ram),base,0x1030u,24u,0u,steps,8u);
     assert(r.status==AVP_JAG_OP_TRACE_GPU && steps[0].active==1u);
     /* Self-linking branch causes a diagnosed cycle. */

@@ -5,7 +5,7 @@
 int avp_mp_amp_native_update_scoped(void *ctx,
             int (*enter)(void *, const AvpAmp *, unsigned),
             int (*leave)(void *),
-            int (*acid)(void *, const AvpAmp *))
+            int (*acid)(void *, const AvpAmp *),int local_acid_audio)
 {
     int ok=1;
     if(!ctx || !enter || !leave || !acid || amp_update_active ||
@@ -35,7 +35,12 @@ int avp_mp_amp_native_update_scoped(void *ctx,
             contacts=acid(ctx,a);
             if(contacts<0){ok=0;break;}
             if(contacts){
-                if(!(a->flags&(1u<<AMP_ALTFRAME)))amp_sfx(AVP_FX_ACIDX);
+                /* The original pooled ACIDX sound is shared by ALL local
+                 * viewports. The opted-in multiplayer visitor instead
+                 * emits private, per-actor entry cues. This leaves the
+                 * original single-player amp_acid() completely intact. */
+                if(!local_acid_audio && !(a->flags&(1u<<AMP_ALTFRAME)))
+                    amp_sfx(AVP_FX_ACIDX);
                 a->flags|=(u16)(1u<<AMP_ALTFRAME);
             }else a->flags&=(u16)~(1u<<AMP_ALTFRAME);
             continue;

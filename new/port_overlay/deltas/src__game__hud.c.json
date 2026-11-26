@@ -1,0 +1,147 @@
+{
+  "path": "src/game/hud.c",
+  "base_sha256": "7c8087f093a0dae673d504cff768bc7e6a6545360661af8e377f818457eb1297",
+  "output_sha256": "9c47386ad90b9252fbc43c24b029f8c5b1c97b9bfcf332ab6ccd28c2cc179466",
+  "edits": [
+    {
+      "start": 6,
+      "end": 6,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 26,
+      "end": 27,
+      "replacement": "static s16 old_meter,scope_frame,pred_meter_previous;\n"
+    },
+    {
+      "start": 32,
+      "end": 33,
+      "replacement": "static s16 nrg_ftime,nrg_flash,nrg_draw_frame;\nstatic u16 nrg_draw_pixels;\n#include \"../../new/pc_video/hud_energy_flash_state.inc\"\n\n"
+    },
+    {
+      "start": 48,
+      "end": 48,
+      "replacement": "#include \"../../new/multiplayer/hud_countdown_state.inc\"\n\n"
+    },
+    {
+      "start": 50,
+      "end": 50,
+      "replacement": "\n#include \"../../new/multiplayer/hud_countdown_option.inc\"\n"
+    },
+    {
+      "start": 111,
+      "end": 111,
+      "replacement": "        /* HUD.S:860 writes only cocoon_frame; time/level/x/y of an EMPTY\n         * slot keep their previous values and MAZESCRN.S encode_cocoon still\n         * packs them into the EEPROM save. */\n"
+    },
+    {
+      "start": 112,
+      "end": 115,
+      "replacement": ""
+    },
+    {
+      "start": 177,
+      "end": 178,
+      "replacement": "    {const AvpRuntimeOps *o=avp_runtime_ops();if(o->play_sfx)o->play_sfx(o->user,AVP_FX_USECN);}\n"
+    },
+    {
+      "start": 219,
+      "end": 219,
+      "replacement": "    pred_meter_previous=pred_meter_left=pred_meter_right=0;\n"
+    },
+    {
+      "start": 238,
+      "end": 238,
+      "replacement": "    countdown_flash_color=xtra_c;\n    countdown_last_frame=UINT32_MAX;\n    countdown_last_cue_frame=UINT32_MAX;\n"
+    },
+    {
+      "start": 269,
+      "end": 270,
+      "replacement": "    if (counttime==0){xtra_c=0x8880u;return;}\n#include \"../../new/multiplayer/hud_countdown_once.inc\"\n\n"
+    },
+    {
+      "start": 271,
+      "end": 272,
+      "replacement": "        /* HUD.S accesses xtra_c+1 on the big-endian 68000: the low byte\n         * is the flashing-light component, not the high CRY byte. */\n        const u16 flash_from=countdown_coop_mode?countdown_flash_color:xtra_c;\n        u8 v=(u8)((u8)flash_from+(u8)flash_dir);\n"
+    },
+    {
+      "start": 273,
+      "end": 274,
+      "replacement": "        xtra_c=(u16)((flash_from&0xff00u)|v);\n        if(countdown_coop_mode)countdown_flash_color=xtra_c;\n"
+    },
+    {
+      "start": 288,
+      "end": 288,
+      "replacement": "            if(countdown_coop_mode)countdown_flash_color=xtra_c;\n"
+    },
+    {
+      "start": 290,
+      "end": 291,
+      "replacement": "        /* Keep updating through the countdown's hold/colour records, not\n         * just when its opening record happens to be msg_ptr. */\n        if (msg_status==AVP_HUDMSG_STOP || avp_hudmsg_countdown_active()) {\n"
+    },
+    {
+      "start": 295,
+      "end": 296,
+      "replacement": "    if(pending!=AVP_COUNT_CUE_NONE && cue_fn &&\n       (!countdown_coop_mode || countdown_last_cue_frame!=frames_now)){\n        if(countdown_coop_mode)countdown_last_cue_frame=frames_now;\n        cue_fn(pending);\n    }\n"
+    },
+    {
+      "start": 305,
+      "end": 305,
+      "replacement": "unsigned avp_hud_tracker_frame(void){return (unsigned)(u16)scope_frame;}\nu32 avp_hud_tracker_nearest(void){return tracker_nearest;}\n"
+    },
+    {
+      "start": 306,
+      "end": 306,
+      "replacement": "void avp_hud_pred_meter_span(unsigned row,s16 *from,s16 *to)\n{\n    if(from)*from=(row==0u)?pred_meter_previous:pred_meter_left;\n    if(to)*to=(row==0u)?pred_meter_left:pred_meter_right;\n}\n"
+    },
+    {
+      "start": 317,
+      "end": 319,
+      "replacement": "        /* HUD.S uses a signed BGE after subtracting CTRACK.  The host\n         * unsigned counter must clamp before subtraction can underflow. */\n        click_track=(click_track-target>=(u32)CTRACK) ?\n            click_track-(u32)CTRACK : target;\n"
+    },
+    {
+      "start": 324,
+      "end": 324,
+      "replacement": "        /* HUD.S::TC sets FX_trac1 word 11 to the integer tracker\n         * click distance plus exactly $2f (not $2f twice). */\n"
+    },
+    {
+      "start": 341,
+      "end": 341,
+      "replacement": "    /* HP2 draws two spans beginning at the previous meter sample.  The\n     * first ends halfway to the new sample; the second ends at that sample.\n     * Neither is a permanent centre-to-value bar. */\n    pred_meter_previous=old_meter;\n"
+    },
+    {
+      "start": 369,
+      "end": 370,
+      "replacement": "    nrg_size=(u16)((u16)nrg_width*(u16)nrg_height);nrg_frame=0;nrg_draw_frame=0;nrg_draw_pixels=0;nrg_ftime=4;nrg_flash=0;\n"
+    },
+    {
+      "start": 371,
+      "end": 371,
+      "replacement": "#include \"../../new/pc_video/hud_energy_flash_option.inc\"\n\n"
+    },
+    {
+      "start": 374,
+      "end": 374,
+      "replacement": "    nrg_draw_frame=frame;\n"
+    },
+    {
+      "start": 380,
+      "end": 381,
+      "replacement": "        if(!(nrg_low_health_energy_flash && energy<=threshold && nrg_flash)){\n"
+    },
+    {
+      "start": 387,
+      "end": 387,
+      "replacement": "    nrg_draw_pixels=pixels;\n"
+    },
+    {
+      "start": 389,
+      "end": 389,
+      "replacement": "unsigned avp_hud_energy_frame(void){return (unsigned)(u16)nrg_draw_frame;}\nunsigned avp_hud_energy_pixels(void){return (unsigned)nrg_draw_pixels;}\n"
+    },
+    {
+      "start": 447,
+      "end": 447,
+      "replacement": "\n#ifdef AVP_LOCAL_MULTIPLAYER_HUDVIEW_BRIDGE\n#include \"../../new/multiplayer/local_mp_hudview_native.inc\"\n#endif\n"
+    }
+  ]
+}

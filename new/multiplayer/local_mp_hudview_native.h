@@ -37,6 +37,8 @@ typedef struct AvpMpHudWorldState {
     u32 ticktime;
     s8 flash_dir;
     u32 frames_now, one_sec;
+    u32 countdown_last_frame;
+    u16 countdown_flash_color;
 } AvpMpHudWorldState;
 int avp_mp_hudworld_native_valid(const AvpMpHudWorldState *in);
 int avp_mp_hudworld_native_capture(AvpMpHudWorldState *out);

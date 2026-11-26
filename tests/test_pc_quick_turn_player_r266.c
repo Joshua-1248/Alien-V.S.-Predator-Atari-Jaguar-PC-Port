@@ -46,8 +46,14 @@ int main(void)
         MovePlayer();
         assert(centre_angle==source-UINT32_C(0x80000000));
     }
-    /* A genuine digital command still follows the existing retail snap. */
+    /* Retail parity (R240): Marine C+Right is a sidestep, NOT a turn.
+     * The old R266 test used this chord as a digital turn and falsely failed.
+     * The exact 180-degree endpoint must survive a subsequent sidestep. */
     joy_cur=0xffffffffu&~(1u<<FIRE_C)&~(1u<<JOY_RIGHT);
+    MovePlayer();
+    assert(centre_angle==source-UINT32_C(0x80000000));
+    /* A genuine unmodified D-pad Right is the digital turn fallback. */
+    joy_cur=0xffffffffu&~(1u<<JOY_RIGHT);
     MovePlayer();
     assert(centre_angle!=source-UINT32_C(0x80000000));
     avp_player_host_quick_turn_reset();

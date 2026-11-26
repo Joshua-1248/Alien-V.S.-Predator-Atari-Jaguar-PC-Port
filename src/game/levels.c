@@ -63,15 +63,6 @@ static void invalidate_new_x_high_word(void)
     new_x=(s32)(0xffff0000u|((u32)new_x&0x0000ffffu));
 }
 
-int avp_levels_start_pose(unsigned level,u32 *x,u32 *y,u32 *angle)
-{
-    if (!level_table || level<1u || level>level_count || !x || !y || !angle) return 0;
-    *x=level_table[level-1u].start_x;
-    *y=level_table[level-1u].start_y;
-    *angle=level_table[level-1u].start_angle;
-    return 1;
-}
-
 void FirstPos(void)
 {
     const AvpLevelInfo *li;
@@ -161,20 +152,7 @@ void LoadLevel(void)
 void KillBastards(void)
 {
     u16 gx=(u16)(x_pos>>16),gy=(u16)(y_pos>>16);
-    for(unsigned i=0;i<AVP_NUM_AMPS;i++){
-        AvpAmp *a=&amps_at[i];
-        if(!a->mode)continue;
-        if((u16)(a->xpos>>16)!=gx||(u16)(a->ypos>>16)!=gy)continue;
-        if(a->creature==AC_COCOON||a->creature==AC_AQUEEN||
-           a->creature==AC_AQSHIELD||a->creature==AC_GEN)continue;
-        /* LEVELS.S::KillBastards clears amp_mode only.  Do not release
-         * the AMP slot or change the object/collision grids: either would
-         * alter later AMP numbering or the original collision semantics.
-         * host_static is a PC-only field; clear it so an eliminated live
-         * actor cannot be mistaken for a saved stationary corpse. */
-        a->mode=NULL;
-        a->host_static=0;
-    }
+    for(unsigned i=0;i<AVP_NUM_AMPS;i++){AvpAmp *a=&amps_at[i];if(!a->mode)continue;if((u16)(a->xpos>>16)!=gx||(u16)(a->ypos>>16)!=gy)continue;if(a->creature==AC_COCOON||a->creature==AC_AQUEEN||a->creature==AC_AQSHIELD||a->creature==AC_GEN)continue;a->mode=NULL;}
 }
 
 void place_grid(void)

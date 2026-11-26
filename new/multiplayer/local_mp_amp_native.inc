@@ -15,11 +15,13 @@ void avp_mp_amp_native_set_free_list_validator(int (*fn)(const u16 *,unsigned))
 static int avp_mp_amp_state_valid(const AvpMpAmpNativeState *s)
 {
     if (!s || s->valid!=AVP_MP_AMP_MAGIC ||
-        s->free_count>AVP_NUM_AMPS ||
+        (s->host_amp_capacity!=AVP_ORIGINAL_NUM_AMPS && s->host_amp_capacity!=AVP_NUM_AMPS) ||
+        s->free_count>s->host_amp_capacity ||
         s->cur_amp_no>AVP_NUM_AMPS) return 0;
     /* Optional PC-only validator: exact original duplicate/range decision,
      * linear rather than quadratic for the 300-entry free list. Keep the
      * original loop when Game Micro-Optimization is Off or unsupported. */
+    for(unsigned i=0;i<s->free_count;i++)if(s->free_list[i]>=s->host_amp_capacity)return 0;
     if(avp_mp_amp_free_list_validator)
         return avp_mp_amp_free_list_validator(s->free_list,s->free_count);
     /* Original allocator validity rules, retained as the default path. */
@@ -55,7 +57,7 @@ int avp_mp_amp_native_capture(AvpMpAmpNativeState *out)
     memcpy(s.inventory_table,inventory_table,sizeof(s.inventory_table));
     s.ampcount=ampcount;s.ngens=ngens;s.reset_counter=avp_reset_counter;
     memcpy(s.free_list,free_list,sizeof(s.free_list));
-    s.free_count=free_count;
+    s.free_count=free_count;s.host_amp_capacity=host_amp_capacity;
     memcpy(s.slot_generation,slot_generation,sizeof(s.slot_generation));
     s.next_slot_generation=next_slot_generation;
     memcpy(s.saved_levels,saved_levels,sizeof(s.saved_levels));
@@ -80,7 +82,7 @@ int avp_mp_amp_native_restore(const AvpMpAmpNativeState *s)
     memcpy(inventory_table,s->inventory_table,sizeof(s->inventory_table));
     ampcount=s->ampcount;ngens=s->ngens;avp_reset_counter=s->reset_counter;
     memcpy(free_list,s->free_list,sizeof(s->free_list));
-    free_count=s->free_count;
+    free_count=s->free_count;host_amp_capacity=s->host_amp_capacity;
     memcpy(slot_generation,s->slot_generation,sizeof(s->slot_generation));
     next_slot_generation=s->next_slot_generation;
     memcpy(saved_levels,s->saved_levels,sizeof(s->saved_levels));

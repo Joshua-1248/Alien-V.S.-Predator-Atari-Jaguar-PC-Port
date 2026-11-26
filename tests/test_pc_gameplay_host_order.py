@@ -11,7 +11,7 @@ import sys
 import os
 
 root=Path(__file__).resolve().parents[1]
-pc=Path(os.environ.get('AVP_PC_MAIN_SOURCE',root/'src/platform/pc/pc_main.c')).read_text()
+pc=Path(os.environ.get('AVP_PC_MAIN_SOURCE',root/'new/pc_host/src/pc_main.c')).read_text()
 maze=(root/'src/game/maze.c').read_text()
 
 # Check only the gameplay tick's host path, not the startup/dev helpers.

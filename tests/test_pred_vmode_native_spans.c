@@ -1,6 +1,6 @@
 /* Production TOM multispectrum output vs. the R127 per-destination-pixel
  * nearest-neighbour expansion. Synthetic RGB/QCONV values; no retail assets. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

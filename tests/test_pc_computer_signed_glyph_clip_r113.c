@@ -2,7 +2,7 @@
  * The host callback transports those words in unsigned parameters.  A brush
  * crossing x=0/y=0 must be clipped rather than discarded or wrapped.
  * Synthetic font data only: no cartridge bytes required. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

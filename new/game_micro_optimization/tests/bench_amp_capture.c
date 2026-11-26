@@ -41,6 +41,7 @@ int main(void)
     static AvpMpAmpNativeState w;
     if(!avp_mp_amp_native_capture(&w))return 1;
     w.free_count=AVP_NUM_AMPS;
+        w.host_amp_capacity=AVP_NUM_AMPS;
     for(unsigned i=0;i<AVP_NUM_AMPS;i++)w.free_list[i]=(u16)(AVP_NUM_AMPS-1-i);
     if(!avp_mp_amp_native_restore(&w))return 2;
     avp_mp_amp_native_set_free_list_validator(avp_game_micro_amp_free_list_valid);

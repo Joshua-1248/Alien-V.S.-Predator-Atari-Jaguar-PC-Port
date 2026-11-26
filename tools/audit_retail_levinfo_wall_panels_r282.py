@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R282: port wall-panel lists (src/jaguar/avp_gpu/panels.cpp) == retail LEVINFO.S
+"""R282: port wall-panel lists (new/jaguar/avp_gpu/panels.cpp) == retail LEVINFO.S
 l*_panels wall bytes in the user's AVP.jag RDB data.  Read-only; prints no ROM data.
 """
 import argparse, hashlib, pathlib, re, zlib
@@ -18,7 +18,7 @@ def main(rom_path,source):
     assert len(rom)==4194304 and hashlib.sha256(rom).hexdigest()==ROM_SHA
     text,data=image(rom)
     # data stream begins at $20300 (retail memory map).
-    src=(source/'src/jaguar/avp_gpu/panels.cpp').read_text()
+    src=(source/'new/jaguar/avp_gpu/panels.cpp').read_text()
     for name,addr in ADDR.items():
         m=re.search(r'A\(%s,([^)]*)\)'%name,src); assert m,name
         vals=[NAMES[t.strip()] if t.strip() in NAMES else int(t.strip()) for t in m.group(1).split(',')]

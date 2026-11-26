@@ -111,7 +111,7 @@ def run(romfile:pathlib.Path,source:pathlib.Path):
     assert table[0][3]==(58,)*8 and table[0][4][0]==58 and table[0][4][-1]==18
     assert table[-1][4]==tuple(max(58,18+4*(16-p)) for p in range(1,17))
     c=source/'src/game/mjp.c'
-    h=source/'src/jaguar/avp_gpu/frontend_renderer.c'
+    h=source/'new/jaguar/avp_gpu/frontend_renderer.c'
     mjp=c.read_text();renderer=h.read_text()
     match=re.search(r'static void mjp_transition\(unsigned from,unsigned to\)\s*\{(.*?)\n\}',mjp,re.S)
     assert match

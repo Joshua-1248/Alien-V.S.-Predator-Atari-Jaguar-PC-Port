@@ -1,6 +1,6 @@
 /* R129: compare the production TOM video pass with R128's literal per-row
  * source-column calculations. Synthetic pixels/QCONV; no Jaguar ROM/assets. */
-#include "../src/jaguar/avp_gpu/software_renderer.c"
+#include "../new/jaguar/avp_gpu/software_renderer.c"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

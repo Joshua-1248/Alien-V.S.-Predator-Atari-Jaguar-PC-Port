@@ -89,6 +89,55 @@ int main(void)
         CHECK(!avp_mp_shared_arrival_exempt(&state,0,1));
         CHECK(!avp_mp_shared_arrival_exempt(&state,0,2));
     }
+    /* R299: FOUR actual ship transitions, modeled only as completion
+     * notifications. Every reverse panel must remain inhibited while the
+     * arriving party is still in its chamber, regardless of how many
+     * original game ticks pass or whether FOLLOW replans back to origin. */
+    {
+        static const unsigned from[4]={1u,15u,5u,14u};
+        static const unsigned to[4]={15u,1u,14u,5u};
+        for(unsigned i=0;i<4u;i++){
+            AvpMpAirlockCycle bot[3]={{0}};
+            for(unsigned q=0;q<3u;q++)
+                avp_mp_airlock_cycle_arrived(&bot[q],from[i],to[i],500u);
+            for(unsigned tick=501u;tick<1050u;tick+=7u)
+                for(unsigned q=0;q<3u;q++)
+                    CHECK(avp_mp_airlock_cycle_reverse_block(&bot[q],
+                        to[i],from[i],1,0,1,tick));
+            /* One bot can leave physically, but a human still in the
+             * airlock or stranded back at the origin isn't a new trip. */
+            CHECK(avp_mp_airlock_cycle_reverse_block(&bot[0],
+                 to[i],from[i],0,0,1,1100u));
+            CHECK(bot[0].arrived_level==to[i]);
+            /* Human is outside but bot is still inside: follow the human
+             * first, don't reach for the pressure control. */
+            CHECK(avp_mp_airlock_cycle_reverse_block(&bot[1],
+                 to[i],from[i],1,1,1,1100u));
+            /* Only AFTER both are outside may a genuine second passage
+             * be planned. An unrelated level target was never blocked. */
+            CHECK(!avp_mp_airlock_cycle_reverse_block(&bot[0],
+                 to[i],from[i],0,1,1,1101u));
+            CHECK(!bot[0].arrived_level);
+            CHECK(!avp_mp_airlock_cycle_reverse_block(&bot[1],
+                 to[i],from[i],0,1,1,1101u));
+            CHECK(!avp_mp_airlock_cycle_reverse_block(&bot[2],
+                 to[i],99u,1,0,1,1101u));
+            /* Without any living human, autonomous movement must still
+             * become possible, but never while standing in the chamber. */
+            CHECK(avp_mp_airlock_cycle_reverse_block(&bot[2],
+                 to[i],from[i],1,0,0,2000u));
+            CHECK(!avp_mp_airlock_cycle_reverse_block(&bot[2],
+                 to[i],from[i],0,0,0,2001u));
+            /* A later authentic transfer in the opposite direction sets
+             * a fresh arrival guard rather than resurrecting stale data. */
+            avp_mp_airlock_cycle_arrived(&bot[0],to[i],from[i],2200u);
+            CHECK(avp_mp_airlock_cycle_reverse_block(&bot[0],
+                 from[i],to[i],1,0,1,2300u));
+            CHECK(!avp_mp_airlock_cycle_reverse_block(&bot[0],
+                 from[i],to[i],0,1,1,2301u));
+        }
+        puts("R299: four original ship portal pairs, no automatic reverse cycle: PASS");
+    }
     puts("PASS: authored chamber boundaries, offsets, shared arrivals and collision grace");
     return 0;
 }

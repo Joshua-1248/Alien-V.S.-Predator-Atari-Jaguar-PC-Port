@@ -1,0 +1,42 @@
+{
+  "path": "src/game/font.c",
+  "base_sha256": "e6537dbb109a6a86813dce234e2cab878ea46a4989de1d7df20982ff3b16c25d",
+  "output_sha256": "a425bdeedf55c94c1bf5c0823c0afca640cb8c10fbe106f676be955c698eb59c",
+  "edits": [
+    {
+      "start": 11,
+      "end": 11,
+      "replacement": "#include \"avp_sfx_ids.h\"\n"
+    },
+    {
+      "start": 117,
+      "end": 118,
+      "replacement": "static void pr_string_source(const char *encoded,uintptr_t source_address)\n"
+    },
+    {
+      "start": 120,
+      "end": 120,
+      "replacement": "    const u8 *start=p;\n"
+    },
+    {
+      "start": 134,
+      "end": 135,
+      "replacement": "        if(c==NEW_XY){\n            /* MOVE.L A0,D0 / BTST #0,D0 in the original FONT.S\n             * considers the 68000 pointer. A host malloc address is not\n             * necessarily the same parity as the RDB.DTA record. */\n            if((source_address+(uintptr_t)(p-start))&1u)++p;\n            goto getcoords;\n        }\n"
+    },
+    {
+      "start": 136,
+      "end": 137,
+      "replacement": "        if(!s_delay&&o->play_sfx)o->play_sfx(o->user,AVP_FX_TYP1B);\n"
+    },
+    {
+      "start": 153,
+      "end": 153,
+      "replacement": "void pr_string_retail(const char *encoded,u32 source_address)\n{\n    pr_string_source(encoded,(uintptr_t)source_address);\n}\n\n/* Non-ROM callers retain their existing pointer-based alignment contract. */\nvoid pr_string(const char *encoded)\n{\n    pr_string_source(encoded,(uintptr_t)encoded);\n}\n\n"
+    },
+    {
+      "start": 156,
+      "end": 157,
+      "replacement": "    /* FONT.S packs the two coordinate words into one 68000 longword.\n     * Convert each signed word to its raw 16-bit representation before\n     * shifting; shifting a negative signed C integer is undefined. */\n    if(o->frontend_event)o->frontend_event(o->user,event,\n        (s32)(((u32)(u16)x<<16)|(u32)(u16)y),len);\n"
+    }
+  ]
+}
